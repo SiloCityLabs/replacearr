@@ -1,0 +1,30 @@
+---
+description: Go backend conventions for the Replacearr server
+globs: "**/*.go"
+alwaysApply: false
+---
+
+# Go backend
+
+Use the standard library (`net/http`, `database/sql`, `encoding/json`). Do not add a web framework, ORM, or DI container.
+
+- Domain types and RBAC permission constants live in `internal/domain`. Handlers read and write through `internal/db.Store`.
+- Native routes register on `internal/api/native.Server`. Auth, users, roles, and API keys stay in `internal/auth`.
+- Protect routes with `auth.Service.Middleware(scope, permission, next)`. Permissions are strings such as `tv:write` and `indexers:search` from `domain`.
+- Return errors to callers. `log.Fatalf` is only for startup failure in `cmd/replacearr`.
+- JSON for the native API is camelCase, matching existing struct tags (`roleId`, `mediaType`).
+- Tests sit next to the code (`foo_test.go`) and use the real SQLite store where persistence matters. Run `go test -race ./...`.
+
+```go
+// BAD: swallow the store error and write a 200
+items, _ := s.store.ListSeries()
+writeJSON(w, http.StatusOK, items)
+
+// GOOD: surface store failures
+items, err := s.store.ListSeries()
+if err != nil {
+    writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to list series"})
+    return
+}
+writeJSON(w, http.StatusOK, items)
+```

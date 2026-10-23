@@ -1,0 +1,25 @@
+---
+description: Out-of-process Go plugin SDK and host rules
+globs: pkg/pluginsdk/**/*.go,examples/plugins/**/*.go,internal/pluginhost/**/*.go
+alwaysApply: false
+---
+
+# Plugins
+
+Two tiers, both without CGO: Go subprocess plugins, and Cardigann YAML definitions. Plugins are not `plugin.Open` shared libraries.
+
+- Go plugins speak newline-delimited JSON-RPC 2.0 over stdin/stdout. Implement `pluginsdk.Plugin` (`Manifest`, `Configure`) plus the capability you provide. Current interfaces: `IndexerPlugin`, `DownloadClientPlugin`, `MetadataPlugin`, `NotificationPlugin`. Add a new capability on the SDK (including a future `MediaModulePlugin`) before the host calls it.
+- `ConfigSchema` on the manifest is what the React plugins tab renders. Do not hard-code a settings form per plugin.
+- Call `pluginsdk.Serve` from `main`. Plugin code may import `pkg/pluginsdk` and the standard library only — never `internal/`.
+- Build with `CGO_ENABLED=0`. Dev binaries go to `bin/plugins` (`make build-plugins`). Runtime scans `REPLACEARR_PLUGIN_DIR` (`/config/plugins` in Docker).
+- Cardigann YAML is data, loaded by `internal/indexers/cardigann` from `REPLACEARR_DEFINITIONS_DIR` (dev: `.tmp/ProwlarrIndexers/definitions/`). It is not a Go plugin.
+
+```go
+// BAD: plugin importing the server
+import "github.com/replacearr/replacearr/internal/domain"
+
+// GOOD: SDK-only plugin
+func main() {
+    pluginsdk.Serve(&CustomIndexer{})
+}
+```

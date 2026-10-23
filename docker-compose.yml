@@ -1,0 +1,45 @@
+services:
+  replacearr-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: replacearr-dev
+    ports:
+      - "8989:8989"
+      - "5173:5173"
+    environment:
+      - REPLACEARR_HOST=0.0.0.0
+      - REPLACEARR_PORT=8989
+      - REPLACEARR_CONFIG_DIR=/config
+      - REPLACEARR_PLUGIN_DIR=/workspace/bin/plugins
+      - REPLACEARR_ADMIN_USER=admin
+      - REPLACEARR_ADMIN_PASS=replacearr
+      - REPLACEARR_FLARESOLVERR_URL=http://flaresolverr:8191/
+      - REPLACEARR_ENV=development
+      - TZ=UTC
+    volumes:
+      - ./config:/config
+      - ./data:/data
+    depends_on:
+      - flaresolverr
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8989/api/v1/system/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    container_name: replacearr-flaresolverr-dev
+    ports:
+      - "127.0.0.1:8191:8191"
+    environment:
+      - LOG_LEVEL=info
+      - LOG_HTML=false
+      - CAPTCHA_SOLVER=none
+      - TZ=UTC
+    tmpfs:
+      - /tmp:size=256M,mode=1777
+    restart: unless-stopped

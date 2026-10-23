@@ -1,0 +1,24 @@
+---
+description: Sonarr, Radarr, and Prowlarr wire-compatibility constraints
+globs: internal/api/compat/**/*.go
+alwaysApply: false
+---
+
+# *arr compatibility APIs
+
+External apps (Overseerr, Bazarr, LunaSea) call these routes as if they were upstream. Response shapes, field names, and status codes follow Sonarr v3, Radarr v3, and Prowlarr v1.
+
+- Routers: `internal/api/compat/sonarr`, `radarr`, `prowlarr`. Each is an `http.Handler` switching on a normalized path.
+- Mounts in `cmd/replacearr`: `/sonarr/` scope `sonarr`, `/radarr/` scope `radarr`, `/prowlarr/` scope `prowlarr`.
+- Contract notes: `docs/discovery/01-sonarr-v3-compatibility.md`, `02-radarr-v3-compatibility.md`, `03-prowlarr-v1-compatibility.md`. Confirm payloads against `.tmp/Sonarr` (`src/Sonarr.Api.V3`), `.tmp/Radarr` (`src/Radarr.Api.V3`), and `.tmp/Prowlarr` (`src/Prowlarr.Api.V1`). Do not modify `.tmp/`. Update the matching discovery note when a compat route changes.
+- Prowlarr also serves Torznab/Newznab at `/prowlarr/{indexerId}/api` with `t=caps`, `t=search`, `t=tvsearch`, and `t=movie`.
+- Compat handlers share the unified store. A series created via `/sonarr/api/v3/series` must appear on the native API, and the reverse.
+- Quality ids, protocol strings (`torrent`, `usenet`), and resource field names stay aligned with upstream. Add a case to the existing path switch and a test in `internal/api/compat/compat_test.go`.
+
+```go
+// BAD: native-only field names on a Sonarr route
+writeJSON(w, http.StatusOK, map[string]any{"tvdbId": id, "showName": s.Title})
+
+// GOOD: Sonarr v3 resource names
+writeJSON(w, http.StatusOK, map[string]any{"tvdbId": id, "title": s.Title})
+```

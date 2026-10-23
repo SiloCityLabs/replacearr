@@ -1,0 +1,60 @@
+# ==============================================================================
+# Replacearr — Production Docker Compose Stack
+#
+# Quick Start:
+#   docker compose -f docker/docker-compose.prod.yml up -d --build
+#
+# Web UI & API:
+#   http://localhost:8989
+#
+# Drop-in *arr Compatibility Endpoints:
+#   Sonarr v3:   http://localhost:8989/sonarr/api/v3
+#   Radarr v3:   http://localhost:8989/radarr/api/v3
+#   Prowlarr v1: http://localhost:8989/prowlarr/api/v1
+# ==============================================================================
+
+services:
+  replacearr:
+    image: ghcr.io/replacearr/replacearr:latest
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: replacearr
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=UTC
+      - REPLACEARR_PORT=8989
+      - REPLACEARR_CONFIG_DIR=/config
+      - REPLACEARR_PLUGIN_DIR=/config/plugins
+      # Initial bootstrap admin credentials (used only on first database creation)
+      - REPLACEARR_ADMIN_USER=admin
+      - REPLACEARR_ADMIN_PASS=replacearr
+      - REPLACEARR_FLARESOLVERR_URL=http://flaresolverr:8191/
+      # Optional: set a deterministic system API key for automation
+      # - REPLACEARR_API_KEY=your-32-char-api-key
+    ports:
+      - "8989:8989"
+    volumes:
+      # Persistent SQLite database, JWT secret, Cardigann definitions & Go plugins
+      - ./config:/config
+      # Unified media library & downloads directory (/data/tv, /data/movies, /data/downloads)
+      - ./media:/data
+    depends_on:
+      - flaresolverr
+    restart: unless-stopped
+
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    container_name: flaresolverr
+    environment:
+      - LOG_LEVEL=info
+      - LOG_HTML=false
+      - CAPTCHA_SOLVER=none
+      - TZ=UTC
+    ports:
+      - "127.0.0.1:8191:8191"
+    # Route headless Chromium temporary profiles to RAM to avoid NVMe/SSD wear
+    tmpfs:
+      - /tmp:size=256M,mode=1777
+    restart: unless-stopped

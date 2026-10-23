@@ -1,0 +1,24 @@
+---
+description: React UI conventions for the Replacearr web app
+globs: web/**/*.{ts,tsx,css}
+alwaysApply: false
+---
+
+# Web UI
+
+`web/` is a React 18 + TypeScript + Vite SPA styled with Tailwind and `lucide-react`. No router and no extra state library: `App.tsx` holds tab state and loads data through `web/src/api.ts`.
+
+- Add request functions to `api.ts` and shared types to `types.ts`. Components in `web/src/components/` receive data and callbacks; they do not call `fetch` directly.
+- Talk to the native API at `/api/v1`. The Vite dev server proxies `/api`, `/sonarr`, `/radarr`, and `/prowlarr` to `:8989`.
+- Auth token key is `replacearr_token`. Send `Authorization: Bearer` via the shared `request()` helper.
+- Match existing function components, explicit prop types, and Tailwind utility classes.
+- After UI changes, run `cd web && npm run typecheck`. Production builds land in `web/dist` and are copied to `internal/webui/dist` by `make build-web`.
+- The production app is an installable PWA. Manifest and worker live in `web/public/manifest.webmanifest` and `web/public/sw.js`, and `main.tsx` registers the worker only in production builds. Keep `display: standalone`. The worker must not cache non-GET API calls.
+
+```tsx
+// BAD: fetch inside a tab component
+const res = await fetch('/api/v1/series');
+
+// GOOD: go through the shared client
+const series = await api.listSeries();
+```

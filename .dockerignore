@@ -1,0 +1,22 @@
+# Git & VCS
+.git
+.gitignore
+
+# Upstream reference repositories & local temp state
+.tmp
+
+# Build artifacts
+bin
+coverage.out
+
+# Frontend dependencies & build output
+web/node_modules
+web/dist
+
+# Runtime configuration, media data, and SQLite databases
+config
+data
+media
+*.db
+*.db-*
+*.db*

@@ -1,0 +1,34 @@
+---
+description: Replacearr architecture, layout, and invariants that apply to every change
+alwaysApply: true
+---
+
+# Replacearr
+
+Single static Go binary that replaces Sonarr, Radarr, and Prowlarr. One process, one SQLite database, one React SPA. Module path: `github.com/replacearr/replacearr`.
+
+## Layout
+
+- `cmd/replacearr` — process entrypoint
+- `internal/` — server, auth, db, domain, indexers, plugin host, embedded UI
+- `pkg/pluginsdk` — the only public Go API; plugins must not import `internal/`
+- `web/` — React + TypeScript + Vite source
+- `internal/webui/dist` — build output embedded by `go:embed`; regenerate with `make build-web`, do not hand-edit
+- `docs/discovery/` — living notes for the shared core, Sonarr v3, Radarr v3, Prowlarr v1, and future media modules. Read them before changing those areas, and update the matching note when behavior changes.
+- `.tmp/` — shallow clones of upstream Sonarr, Radarr, Prowlarr, Indexers, and FlareSolverr. Read for wire-compat reference. Never edit or commit.
+
+## Invariants
+
+- Keep `CGO_ENABLED=0` and `modernc.org/sqlite` in WAL mode. Do not add CGO, a second database, or a separate Sonarr, Radarr, or Prowlarr process. TV and movie search calls the indexer engine in-process.
+- Native UI API is `/api/v1/*`. Compat prefixes stay wire-compatible: `/sonarr/api/v3`, `/radarr/api/v3`, `/prowlarr/api/v1` (including Torznab `?t=caps|search|tvsearch|movie`), plus root `/api/v3` and `/api/v1`.
+- New media types (music, books, subtitles) extend the media-module model in `docs/discovery/04-future-arr-roadmap.md`. They do not get their own database or binary.
+- Schema changes are new numbered files in `internal/db/migrations/` (`003_….sql`). Do not rewrite applied migrations.
+- Secrets stay out of JSON and logs. `PasswordHash` and `KeyHash` use `json:"-"`. Never commit `.env`, `*.db`, or `.tmp/dev-config/`.
+
+## Commands
+
+```bash
+make dev        # backend :8989 + Vite :5173
+make test       # go test -race ./... and web typecheck
+make build      # embedded SPA + plugins + bin/replacearr
+```

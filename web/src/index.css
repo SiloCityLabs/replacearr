@@ -1,0 +1,94 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-slate-950 text-slate-100;
+  }
+}
+
+/* Custom sleek dark scrollbars */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #020617;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #1e293b;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #334155;
+}
+
+html[data-theme='light'] body {
+  background-color: #f8fafc !important;
+  color: #0f172a !important;
+}
+
+html[data-theme='light'] .bg-slate-950 {
+  background-color: #f8fafc !important;
+}
+
+html[data-theme='light'] .bg-slate-900,
+html[data-theme='light'] .bg-slate-900\/95,
+html[data-theme='light'] .bg-slate-900\/90,
+html[data-theme='light'] .bg-slate-900\/60 {
+  background-color: #ffffff !important;
+}
+
+html[data-theme='light'] .bg-slate-800,
+html[data-theme='light'] .bg-slate-800\/60 {
+  background-color: #e2e8f0 !important;
+}
+
+html[data-theme='light'] .text-white {
+  color: #0f172a !important;
+}
+
+html[data-theme='light'] .text-slate-100 {
+  color: #0f172a !important;
+}
+
+html[data-theme='light'] .text-slate-200 {
+  color: #1e293b !important;
+}
+
+html[data-theme='light'] .text-slate-300 {
+  color: #334155 !important;
+}
+
+html[data-theme='light'] .text-slate-400 {
+  color: #475569 !important;
+}
+
+html[data-theme='light'] .text-slate-500 {
+  color: #64748b !important;
+}
+
+html[data-theme='light'] .border-slate-800,
+html[data-theme='light'] .border-slate-800\/80 {
+  border-color: #e2e8f0 !important;
+}
+
+html[data-theme='light'] ::-webkit-scrollbar-track {
+  background: #e2e8f0;
+}
+
+html[data-theme='light'] ::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+}
+
+html[data-color-impaired='true'] .border-slate-800 {
+  border-color: #94a3b8 !important;
+}
+
+html[data-theme='light'][data-color-impaired='true'] .border-slate-800 {
+  border-color: #334155 !important;
+}
