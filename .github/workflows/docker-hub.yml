@@ -43,3 +43,13 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Update Docker Hub overview
+        uses: peter-evans/dockerhub-description@v5
+        with:
+          username: ldrrp
+          password: ${{ secrets.DOCKER_HUB_KEY }}
+          repository: ldrrp/replacearr
+          readme-filepath: ./docker/README.md
+          short-description: Single-binary Sonarr, Radarr, and Prowlarr replacement
+          enable-url-completion: true
