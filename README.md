@@ -1,5 +1,7 @@
 # Replacearr
 
+This is a highly experimental AI created repo. I still have to deslop it. feel free to make PRs and issues. All are welcome. just needed it published so that I can deploy it using dockerhub.
+
 **Replacearr** is a fast, single-binary, Go-powered replacement for **Sonarr**, **Radarr**, and **Prowlarr** with a unified React web interface, role-based access control (RBAC) for users and scoped API keys, native Cardigann YAML indexer definitions, and an out-of-process **Go Plugin SDK** (`pkg/pluginsdk`).
 
 ## Screenshots
