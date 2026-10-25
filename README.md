@@ -4,27 +4,11 @@
 
 ## Screenshots
 
-![Sign in](images/00-login.png)
-![Dashboard](images/01-dashboard.png)
-![TV series](images/02-series.png)
-![Movies](images/03-movies.png)
-![Indexers and search](images/04-indexers-search.png)
-![Queue and download clients](images/05-queue.png)
-![Plugins](images/06-plugins.png)
-![Users and roles](images/07-users.png)
-![Settings](images/08-settings.png)
-![General settings](images/09-settings-general.png)
-![UI settings](images/10-settings-ui.png)
-![Media management](images/11-settings-media.png)
-![Profiles](images/12-settings-profiles.png)
-![Quality definitions](images/13-settings-quality.png)
-![Indexer settings](images/14-settings-indexers.png)
-![Download client settings](images/15-settings-download-clients.png)
-![Import lists](images/16-settings-import-lists.png)
-![Connect](images/17-settings-connect.png)
-![Metadata](images/18-settings-metadata.png)
-![Tags](images/19-settings-tags.png)
-![Compatibility hub](images/20-compatibility.png)
+![Dashboard](images/desktop/01-dashboard.png)
+
+- [Desktop gallery](images/desktop/README.md) (1440×900)
+- [Mobile gallery](images/mobile/README.md) (390×844)
+- [All screenshot assets](images/README.md)
 
 ---
 
