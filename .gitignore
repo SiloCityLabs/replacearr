@@ -19,8 +19,8 @@ vendor/
 *.db-wal
 *.sqlite
 *.sqlite3
-config/
-data/
+/config/
+/data/
 .env
 .env.local
 api_key.txt

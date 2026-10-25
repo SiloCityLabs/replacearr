@@ -110,7 +110,7 @@ build: build-web build-plugins build-backend ## Full production build: static Re
 
 test: test-go test-web ## Run all backend and frontend tests
 
-test-go: ## Run Go unit and integration tests
+test-go: build-web ## Run Go unit and integration tests (embeds built SPA)
 	@echo "==> Running Go tests..."
 	go test -v -race ./...
 
