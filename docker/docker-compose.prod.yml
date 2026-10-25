@@ -15,7 +15,7 @@
 
 services:
   replacearr:
-    image: ghcr.io/replacearr/replacearr:latest
+    image: ldrrp/replacearr:latest
     build:
       context: ..
       dockerfile: docker/Dockerfile

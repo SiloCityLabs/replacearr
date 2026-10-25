@@ -19,7 +19,7 @@ Replacearr is a single-binary Go replacement for Sonarr, Radarr, and Prowlarr. O
 | `internal/flaresolverr` | FlareSolverr v1 client, challenge detection, clearance cache |
 | `pkg/pluginsdk` | Public plugin SDK |
 | `web/` | React source and the installable PWA (`public/manifest.webmanifest`, `public/sw.js`) |
-| `.github/workflows` | CI, GHCR image publish, and tagged release binaries |
+| `.github/workflows` | CI, Docker Hub image publish, and tagged release binaries |
 | `.tmp/` | Read-only upstream reference clones |
 
 ## Rules

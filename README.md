@@ -198,9 +198,15 @@ Then click **Reload Plugins** in the **Plugins** tab of the Replacearr UI.
 
 ## Docker Deployment
 
+**Official image:** [`ldrrp/replacearr` on Docker Hub](https://hub.docker.com/r/ldrrp/replacearr)
+
+```bash
+docker pull ldrrp/replacearr:latest
+```
+
 ### Production Deployment (`docker/docker-compose.prod.yml`)
 
-Run Replacearr in production using the multi-stage container in `docker/`:
+Run Replacearr in production using the published image above, or build locally from the multi-stage container in `docker/`:
 
 ```bash
 # Build and start the production container in the background
@@ -214,7 +220,7 @@ Example `docker-compose.yml` for end users:
 ```yaml
 services:
   replacearr:
-    image: ghcr.io/replacearr/replacearr:latest
+    image: ldrrp/replacearr:latest
     container_name: replacearr
     environment:
       - PUID=1000

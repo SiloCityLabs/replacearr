@@ -12,6 +12,8 @@
 
 Source code, issues, and full documentation: **https://github.com/replacearr/replacearr**
 
+**Official image:** [`ldrrp/replacearr` on Docker Hub](https://hub.docker.com/r/ldrrp/replacearr)
+
 ---
 
 ## Quick Start
@@ -21,7 +23,7 @@ Source code, issues, and full documentation: **https://github.com/replacearr/rep
 ```yaml
 services:
   replacearr:
-    image: replacearr/replacearr:latest
+    image: ldrrp/replacearr:latest
     container_name: replacearr
     environment:
       - PUID=1000
@@ -69,7 +71,7 @@ docker run -d \
   -v /path/to/config:/config \
   -v /path/to/media:/data \
   --restart unless-stopped \
-  replacearr/replacearr:latest
+  ldrrp/replacearr:latest
 ```
 
 Then open **http://\<your-host\>:8989** and sign in with the admin credentials you set.
@@ -264,7 +266,7 @@ All state lives in `/config`, so recreating the container is safe. Back up `/con
 From the root of the repository:
 
 ```bash
-docker build -f docker/Dockerfile -t replacearr/replacearr:latest .
+docker build -f docker/Dockerfile -t ldrrp/replacearr:latest .
 ```
 
 Build arguments:

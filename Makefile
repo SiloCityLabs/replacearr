@@ -125,7 +125,7 @@ docker-dev-down: ## Stop and remove development Docker Compose containers
 	docker compose -f docker-compose.yml down -v
 
 docker-prod: ## Build public production Docker image from docker/Dockerfile
-	docker build -f docker/Dockerfile -t replacearr:latest -t replacearr:$(VERSION) .
+	docker build -f docker/Dockerfile -t ldrrp/replacearr:latest -t ldrrp/replacearr:$(VERSION) .
 
 docker-prod-run: ## Start production Docker stack using docker/docker-compose.prod.yml
 	docker compose -f docker/docker-compose.prod.yml up -d --build
