@@ -4,6 +4,7 @@
 # ==============================================================================
 FROM golang:alpine
 
+# Dev image uses Alpine-packaged nodejs/npm (unpinned). Host and CI use Node 24 (.nvmrc); production UI builds use node:24-alpine in docker/Dockerfile.
 RUN apk add --no-cache \
     nodejs \
     npm \

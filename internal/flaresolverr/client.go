@@ -124,13 +124,29 @@ type Client struct {
 	cache      map[string]DomainClearance
 }
 
+// SetHTTPClient replaces the underlying HTTP client (e.g. proxied stack).
+func (c *Client) SetHTTPClient(client *http.Client) {
+	if client == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.httpClient = client
+}
+
 // NewClient creates a new FlareSolverr client with an in-memory clearance cache.
 func NewClient() *Client {
+	return NewClientWithClient(nil)
+}
+
+// NewClientWithClient creates a FlareSolverr client using the provided HTTP client.
+func NewClientWithClient(httpClient *http.Client) *Client {
+	if httpClient == nil {
+		httpClient = &http.Client{Timeout: 190 * time.Second}
+	}
 	return &Client{
-		httpClient: &http.Client{
-			Timeout: 190 * time.Second,
-		},
-		cache: make(map[string]DomainClearance),
+		httpClient: httpClient,
+		cache:      make(map[string]DomainClearance),
 	}
 }
 

@@ -1,15 +1,15 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   LayoutDashboard,
   Tv,
   Film,
   Radio,
+  Search as SearchIcon,
   DownloadCloud,
   Puzzle,
   Users,
   Link2,
   Settings,
-  Layers,
   LogOut,
   RefreshCw,
   Shield,
@@ -41,11 +41,15 @@ import { DashboardTab } from './components/DashboardTab';
 import { SeriesTab } from './components/SeriesTab';
 import { MoviesTab } from './components/MoviesTab';
 import { IndexersSearchTab } from './components/IndexersSearchTab';
+import { SearchTab } from './components/SearchTab';
+import { SetupWizard } from './components/SetupWizard';
 import { QueueClientsTab } from './components/QueueClientsTab';
 import { PluginsTab } from './components/PluginsTab';
 import { UsersRbacTab } from './components/UsersRbacTab';
 import { CompatHubTab } from './components/CompatHubTab';
 import { SettingsTab } from './components/settings/SettingsTab';
+import { useGamepad } from './htpc/useGamepad';
+import { useRovingFocus } from './htpc/useRovingFocus';
 
 export const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(null);
@@ -73,6 +77,9 @@ export const App: React.FC = () => {
   // Cross-tab search state
   const [pendingSearchQuery, setPendingSearchQuery] = useState<string>('');
   const [pendingSearchType, setPendingSearchType] = useState<string>('search');
+  const [searchNonce, setSearchNonce] = useState(0);
+
+  const navRef = useRef<HTMLElement | null>(null);
 
   // Toast Notification
   const [toast, setToast] = useState<{ message: string; isError?: boolean } | null>(null);
@@ -140,8 +147,24 @@ export const App: React.FC = () => {
       setApiKeys(ak);
       setPermissions(perms);
       if (cfg) {
-        setAppConfig(cfg);
-        applyUiPreferences(cfg.ui);
+        const normalized: AppConfig = {
+          ...cfg,
+          setupComplete: Boolean(cfg.setupComplete),
+          compatModules: {
+            sonarr: cfg.compatModules?.sonarr ?? true,
+            radarr: cfg.compatModules?.radarr ?? true,
+            prowlarr: cfg.compatModules?.prowlarr ?? true,
+          },
+          browserNotifications: {
+            enabled: cfg.browserNotifications?.enabled ?? false,
+            onGrab: cfg.browserNotifications?.onGrab ?? true,
+            onDownload: cfg.browserNotifications?.onDownload ?? true,
+            onImport: cfg.browserNotifications?.onImport ?? true,
+            onHealthIssue: cfg.browserNotifications?.onHealthIssue ?? true,
+          },
+        };
+        setAppConfig(normalized);
+        applyUiPreferences(normalized.ui);
       }
     } finally {
       setRefreshing(false);
@@ -187,23 +210,19 @@ export const App: React.FC = () => {
   const handleTriggerSearch = (query: string, type = 'search') => {
     setPendingSearchQuery(query);
     setPendingSearchType(type);
-    setActiveTab('indexers');
+    setSearchNonce((n) => n + 1);
+    setActiveTab('search');
   };
 
-  if (authChecking) {
-    return (
-      <div className="min-h-screen bg-slate-950 text-slate-200 flex items-center justify-center">
-        <div className="flex items-center gap-3 text-sm text-slate-400">
-          <RefreshCw className="w-5 h-5 text-indigo-400 animate-spin" />
-          <span>Loading Replacearr control plane...</span>
-        </div>
-      </div>
-    );
-  }
-
-  if (!user) {
-    return <LoginView onLogin={handleLogin} />;
-  }
+  const saveAppConfig = useCallback(
+    async (next: AppConfig): Promise<AppConfig> => {
+      const saved = await api.saveConfig(next);
+      setAppConfig(saved);
+      applyUiPreferences(saved.ui);
+      return saved;
+    },
+    []
+  );
 
   const navItems: Array<{
     id: NavTab;
@@ -219,22 +238,28 @@ export const App: React.FC = () => {
       icon: LayoutDashboard,
     },
     {
+      id: 'search',
+      label: 'Search',
+      accent: 'text-sky-400',
+      icon: SearchIcon,
+    },
+    {
       id: 'series',
-      label: 'TV Series (Sonarr)',
+      label: 'TV Series',
       badge: series.length,
       accent: 'text-indigo-400',
       icon: Tv,
     },
     {
       id: 'movies',
-      label: 'Movies (Radarr)',
+      label: 'Movies',
       badge: movies.length,
       accent: 'text-emerald-400',
       icon: Film,
     },
     {
       id: 'indexers',
-      label: 'Indexers & Search',
+      label: 'Indexers',
       badge: indexers.length,
       accent: 'text-amber-400',
       icon: Radio,
@@ -275,6 +300,77 @@ export const App: React.FC = () => {
     },
   ];
 
+  const navRoving = useRovingFocus({
+    itemCount: navItems.length,
+    orientation: 'vertical',
+    onActivate: (index) => setActiveTab(navItems[index]?.id ?? 'dashboard'),
+  });
+
+  useGamepad((action) => {
+    const focusNavItem = (delta: number) => {
+      const next = navRoving.move(delta);
+      const items = navRef.current?.querySelectorAll<HTMLElement>('[data-roving-item="true"]');
+      items?.[next]?.focus();
+    };
+
+    switch (action) {
+      case 'up':
+        focusNavItem(-1);
+        break;
+      case 'down':
+        focusNavItem(1);
+        break;
+      case 'confirm': {
+        const el = document.activeElement;
+        if (el instanceof HTMLElement) {
+          if (el.tagName === 'BUTTON' || el.getAttribute('role') === 'button') {
+            el.click();
+          } else {
+            el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+          }
+        }
+        break;
+      }
+      case 'back':
+        if (activeTab !== 'dashboard') {
+          setActiveTab('dashboard');
+        }
+        break;
+      default:
+        break;
+    }
+  }, Boolean(user));
+
+  if (authChecking) {
+    return (
+      <div className="min-h-screen bg-slate-950 text-slate-200 flex items-center justify-center">
+        <div className="flex items-center gap-3 text-sm text-slate-400">
+          <RefreshCw className="w-5 h-5 text-indigo-400 animate-spin" />
+          <span>Loading Replacearr control plane...</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <LoginView onLogin={handleLogin} />;
+  }
+
+  if (appConfig && !appConfig.setupComplete) {
+    return (
+      <SetupWizard
+        config={appConfig}
+        onComplete={(saved) => {
+          setAppConfig(saved);
+          applyUiPreferences(saved.ui);
+          void loadAllData();
+        }}
+        onLogout={() => void handleLogout()}
+        onNotify={notify}
+      />
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col lg:flex-row">
       {/* Sidebar Navigation */}
@@ -284,8 +380,12 @@ export const App: React.FC = () => {
           <div className="p-5 border-b border-slate-800 flex items-center justify-between">
             <div className="flex items-center gap-3">
               <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500 via-emerald-500 to-amber-500 p-[1px]">
-                <div className="w-full h-full bg-slate-950 rounded-[11px] flex items-center justify-center">
-                  <Layers className="w-5 h-5 text-indigo-400" />
+                <div className="w-full h-full bg-slate-950 rounded-[11px] flex items-center justify-center overflow-hidden">
+                  <img
+                    src="/icon-192.png"
+                    alt="Replacearr"
+                    className="w-7 h-7 object-contain"
+                  />
                 </div>
               </div>
               <div>
@@ -297,21 +397,21 @@ export const App: React.FC = () => {
                     Go
                   </span>
                 </div>
-                <p className="text-[11px] text-slate-400">
-                  Sonarr • Radarr • Prowlarr
-                </p>
               </div>
             </div>
           </div>
 
           {/* Navigation Links */}
-          <nav className="p-3 flex lg:flex-col gap-1 overflow-x-auto">
-            {navItems.map((item) => {
+          <nav ref={navRef} className="p-3 flex lg:flex-col gap-1 overflow-x-auto">
+            {navItems.map((item, index) => {
               const Icon = item.icon;
               const isActive = activeTab === item.id;
+              const roving = navRoving.itemProps(index);
               return (
                 <button
                   key={item.id}
+                  type="button"
+                  {...roving}
                   onClick={() => setActiveTab(item.id)}
                   className={`flex items-center justify-between gap-2.5 px-3 py-2.5 rounded-xl text-xs font-medium whitespace-nowrap transition w-auto shrink-0 lg:w-full lg:shrink ${
                     isActive
@@ -388,10 +488,6 @@ export const App: React.FC = () => {
             <span className="text-sm font-semibold text-white capitalize truncate">
               {navItems.find((n) => n.id === activeTab)?.label}
             </span>
-            <span className="hidden lg:inline-flex shrink-0 items-center gap-1.5 text-[11px] font-mono px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-300 border border-emerald-500/20">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-              Sonarr / Radarr / Prowlarr Shims Active
-            </span>
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
@@ -467,15 +563,25 @@ export const App: React.FC = () => {
             />
           )}
 
+          {activeTab === 'search' && (
+            <SearchTab
+              initialQuery={pendingSearchQuery}
+              initialType={pendingSearchType}
+              searchNonce={searchNonce}
+              onRefresh={loadAllData}
+              onNotify={notify}
+              browserNotifications={appConfig?.browserNotifications}
+            />
+          )}
+
           {activeTab === 'indexers' && (
             <IndexersSearchTab
               indexers={indexers}
               definitions={definitions}
               plugins={plugins}
-              initialSearchQuery={pendingSearchQuery}
-              initialSearchType={pendingSearchType}
               onRefresh={loadAllData}
               onNotify={notify}
+              onOpenSearchTab={() => setActiveTab('search')}
             />
           )}
 
@@ -531,8 +637,13 @@ export const App: React.FC = () => {
             />
           )}
 
-          {activeTab === 'compatibility' && (
-            <CompatHubTab masterApiKey={masterApiKey} />
+          {activeTab === 'compatibility' && appConfig && (
+            <CompatHubTab
+              masterApiKey={masterApiKey}
+              config={appConfig}
+              onSave={saveAppConfig}
+              onNotify={notify}
+            />
           )}
         </main>
       </div>

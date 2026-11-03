@@ -116,6 +116,14 @@ type Season struct {
 	Statistics   map[string]any `json:"statistics,omitempty"`
 }
 
+// SeriesAlias is an alternate title used when building TV search queries.
+type SeriesAlias struct {
+	ID           int64  `json:"id"`
+	SeriesID     int64  `json:"seriesId"`
+	Title        string `json:"title"`
+	SeasonNumber *int   `json:"seasonNumber,omitempty"`
+}
+
 type MediaImage struct {
 	CoverType string `json:"coverType"` // poster, fanart, banner
 	URL       string `json:"url"`

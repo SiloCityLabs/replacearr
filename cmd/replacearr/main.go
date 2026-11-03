@@ -18,6 +18,7 @@ import (
 	"github.com/replacearr/replacearr/internal/auth"
 	"github.com/replacearr/replacearr/internal/config"
 	"github.com/replacearr/replacearr/internal/db"
+	"github.com/replacearr/replacearr/internal/domain"
 	"github.com/replacearr/replacearr/internal/pluginhost"
 	"github.com/replacearr/replacearr/internal/webui"
 )
@@ -52,22 +53,41 @@ func main() {
 
 	mux := http.NewServeMux()
 
-	// 1. Register Auth, User, Role, and API Key routes (/api/v1/auth/*, /api/v1/users*, /api/v1/roles*, /api/v1/apikeys*)
+	// 1. Auth routes (/api/v1/auth/*, users, roles, apikeys)
 	authSvc.RegisterRoutes(mux)
 
-	// 2. Register Native Unified Replacearr API routes (/api/v1/*)
+	// 2. Native unified API owns /api/v1/* (do not remount prowlarr over this).
 	nativeSrv.RegisterRoutes(mux)
 
-	// 3. Register *arr Sub-Path Compatibility Routers (/sonarr/*, /radarr/*, /prowlarr/*)
+	// 3. Optional *arr compatibility mounts controlled by AppConfig.compatModules.
+	appCfg, err := store.GetAppConfig()
+	if err != nil {
+		appCfg = domain.DefaultAppConfig()
+	}
+
 	sonarrHandler := sonarr.NewHandler(store, cfg, nativeSrv.SearchReleases)
 	radarrHandler := radarr.NewHandler(store, cfg, nativeSrv.SearchReleases)
 	prowlarrHandler := prowlarr.NewHandler(store, cfg, nativeSrv.SearchReleases)
+	sonarrHandler.SetCoverStore(nativeSrv.CoverStore())
+	radarrHandler.SetCoverStore(nativeSrv.CoverStore())
 
-	mux.Handle("/sonarr/", authSvc.Middleware("sonarr", "", sonarrHandler))
-	mux.Handle("/radarr/", authSvc.Middleware("radarr", "", radarrHandler))
-	mux.Handle("/prowlarr/", authSvc.Middleware("prowlarr", "", prowlarrHandler))
+	if appCfg.CompatModules.Sonarr {
+		mux.Handle("/sonarr/", authSvc.Middleware("sonarr", "", sonarrHandler))
+		// Root /api/v3/ maps to Sonarr for drop-in clients; native keeps /api/v1/*.
+		mux.Handle("/api/v3/", authSvc.Middleware("sonarr", "", sonarrHandler))
+		log.Printf("  compat: Sonarr enabled (/sonarr/, /api/v3/)")
+	}
+	if appCfg.CompatModules.Radarr {
+		mux.Handle("/radarr/", authSvc.Middleware("radarr", "", radarrHandler))
+		log.Printf("  compat: Radarr enabled (/radarr/)")
+	}
+	if appCfg.CompatModules.Prowlarr {
+		// Prowlarr stays under /prowlarr/ so it never shadows native /api/v1/*.
+		mux.Handle("/prowlarr/", authSvc.Middleware("prowlarr", "", prowlarrHandler))
+		log.Printf("  compat: Prowlarr enabled (/prowlarr/)")
+	}
 
-	// 4. Register Embedded React Static Frontend with SPA Fallback
+	// 4. Embedded React SPA
 	mux.Handle("/", webui.NewHandler())
 
 	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
@@ -80,9 +100,15 @@ func main() {
 	go func() {
 		log.Printf("Replacearr v%s (%s) listening on http://%s", Version, Commit, addr)
 		log.Printf("  -> Unified Web UI & Native API : http://localhost:%d", cfg.Port)
-		log.Printf("  -> Sonarr v3 Compatibility     : http://localhost:%d/sonarr/api/v3", cfg.Port)
-		log.Printf("  -> Radarr v3 Compatibility     : http://localhost:%d/radarr/api/v3", cfg.Port)
-		log.Printf("  -> Prowlarr v1 Compatibility   : http://localhost:%d/prowlarr/api/v1", cfg.Port)
+		if appCfg.CompatModules.Sonarr {
+			log.Printf("  -> Sonarr v3 Compatibility     : http://localhost:%d/sonarr/api/v3", cfg.Port)
+		}
+		if appCfg.CompatModules.Radarr {
+			log.Printf("  -> Radarr v3 Compatibility     : http://localhost:%d/radarr/api/v3", cfg.Port)
+		}
+		if appCfg.CompatModules.Prowlarr {
+			log.Printf("  -> Prowlarr v1 Compatibility   : http://localhost:%d/prowlarr/api/v1", cfg.Port)
+		}
 		log.Printf("  -> Master API Key              : %s", authSvc.GetMasterAPIKey())
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatalf("server error: %v", err)

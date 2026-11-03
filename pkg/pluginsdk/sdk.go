@@ -29,6 +29,7 @@ const (
 	PluginTypeMetadata       PluginType = "metadata"
 	PluginTypeNotification   PluginType = "notification"
 	PluginTypeMediaModule    PluginType = "media_module"
+	PluginTypeNetworkProxy   PluginType = "network_proxy"
 )
 
 // ConfigFieldSchema describes a user-configurable setting exposed in the Replacearr UI.
@@ -54,16 +55,18 @@ type Manifest struct {
 
 // SearchRequest represents a Newznab/Torznab-compatible query sent to an IndexerPlugin.
 type SearchRequest struct {
-	Query           string `json:"query"`
-	Type            string `json:"type"` // search, tvsearch, movie
-	Categories      []int  `json:"categories,omitempty"`
-	TvdbID          int    `json:"tvdbId,omitempty"`
-	TmdbID          int    `json:"tmdbId,omitempty"`
-	ImdbID          string `json:"imdbId,omitempty"`
-	Season          int    `json:"season,omitempty"`
-	Episode         int    `json:"episode,omitempty"`
-	Limit           int    `json:"limit,omitempty"`
-	FlareSolverrURL string `json:"flareSolverrUrl,omitempty"`
+	Query           string   `json:"query"`
+	Type            string   `json:"type"` // search, tvsearch, movie
+	Categories      []int    `json:"categories,omitempty"`
+	TvdbID          int      `json:"tvdbId,omitempty"`
+	TmdbID          int      `json:"tmdbId,omitempty"`
+	ImdbID          string   `json:"imdbId,omitempty"`
+	Season          int      `json:"season,omitempty"`
+	Episode         int      `json:"episode,omitempty"`
+	Aliases         []string `json:"aliases,omitempty"`
+	Limit           int      `json:"limit,omitempty"`
+	FlareSolverrURL string   `json:"flareSolverrUrl,omitempty"`
+	ProxyURL        string   `json:"proxyUrl,omitempty"`
 }
 
 // Release represents a single indexer search result returned by an IndexerPlugin.
@@ -109,6 +112,12 @@ type MetadataPlugin interface {
 type NotificationPlugin interface {
 	Plugin
 	Notify(ctx context.Context, eventType string, payload map[string]any) error
+}
+
+// NetworkProxyPlugin is an optional capability for plugins that expose an outbound HTTP/SOCKS proxy URL.
+type NetworkProxyPlugin interface {
+	Plugin
+	ProxyURL() string
 }
 
 // RPCRequest is a newline-delimited JSON-RPC request frame sent over stdin.
@@ -300,6 +309,13 @@ func dispatch(ctx context.Context, p Plugin, req RPCRequest) (any, error) {
 			return nil, err
 		}
 		return map[string]any{"status": "ok"}, nil
+
+	case "proxy_url":
+		np, ok := p.(NetworkProxyPlugin)
+		if !ok {
+			return nil, errors.New("plugin does not implement NetworkProxyPlugin")
+		}
+		return map[string]string{"proxyUrl": np.ProxyURL()}, nil
 
 	case "health":
 		m := p.Manifest()

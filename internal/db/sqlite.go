@@ -182,25 +182,8 @@ func (s *Store) seedDefaults() error {
 		}
 	}
 
-	// 3. Seed Default Root Folders if empty
-	var rfCount int
-	_ = s.db.QueryRow(`SELECT COUNT(*) FROM root_folders`).Scan(&rfCount)
-	if rfCount == 0 {
-		_, _ = s.CreateRootFolder(domain.RootFolder{
-			Path:       "/data/tv",
-			MediaType:  "tv",
-			Accessible: true,
-			FreeSpace:  536870912000,
-			TotalSpace: 1073741824000,
-		})
-		_, _ = s.CreateRootFolder(domain.RootFolder{
-			Path:       "/data/movies",
-			MediaType:  "movie",
-			Accessible: true,
-			FreeSpace:  536870912000,
-			TotalSpace: 1073741824000,
-		})
-	}
+	// Root folders and download clients are configured via the first-run wizard.
+	// Do not auto-seed paths or clients here.
 
 	return nil
 }
@@ -719,9 +702,14 @@ func (s *Store) CreateSeries(sr domain.Series) (*domain.Series, error) {
 		sr.TitleSlug = strings.ToLower(strings.ReplaceAll(sr.Title, " ", "-"))
 	}
 	if sr.RootFolderPath == "" {
-		sr.RootFolderPath = "/data/tv"
+		if folders, err := s.ListRootFolders("tv"); err == nil {
+			for _, f := range folders {
+				sr.RootFolderPath = f.Path
+				break
+			}
+		}
 	}
-	if sr.Path == "" {
+	if sr.Path == "" && sr.RootFolderPath != "" {
 		sr.Path = strings.TrimRight(sr.RootFolderPath, "/") + "/" + sr.Title
 	}
 	if sr.Status == "" {
@@ -762,17 +750,7 @@ func (s *Store) CreateSeries(sr domain.Series) (*domain.Series, error) {
 		return nil, err
 	}
 	id, _ := res.LastInsertId()
-	// Also seed starter episodes for season 1
-	for epNum := 1; epNum <= 3; epNum++ {
-		_, _ = s.db.Exec(`
-			INSERT INTO episodes (series_id, tvdb_id, season_number, episode_number, title, air_date, overview, has_file, monitored, absolute_episode_number)
-			VALUES (?, ?, 1, ?, ?, ?, ?, 0, ?, ?)`,
-			id, sr.TvdbID*100+epNum, epNum, fmt.Sprintf("Episode %d", epNum),
-			time.Now().AddDate(0, 0, epNum*7).Format("2006-01-02"),
-			fmt.Sprintf("Episode %d of %s", epNum, sr.Title),
-			boolToInt(sr.Monitored), epNum,
-		)
-	}
+	// Do not invent placeholder episodes; metadata/import fills episodes later.
 	return s.GetSeriesByID(id)
 }
 
@@ -931,7 +909,12 @@ func (s *Store) CreateMovie(mv domain.Movie) (*domain.Movie, error) {
 		mv.TitleSlug = strings.ToLower(strings.ReplaceAll(mv.Title, " ", "-"))
 	}
 	if mv.RootFolderPath == "" {
-		mv.RootFolderPath = "/data/movies"
+		if folders, err := s.ListRootFolders("movie"); err == nil {
+			for _, f := range folders {
+				mv.RootFolderPath = f.Path
+				break
+			}
+		}
 	}
 	if mv.FolderName == "" {
 		mv.FolderName = fmt.Sprintf("%s (%d)", mv.Title, mv.Year)
@@ -1562,6 +1545,53 @@ func (s *Store) UpdateIndexerProxy(ip domain.IndexerProxy) (*domain.IndexerProxy
 func (s *Store) DeleteIndexerProxy(id int64) error {
 	_, err := s.db.Exec(`DELETE FROM indexer_proxies WHERE id = ?`, id)
 	return err
+}
+
+// ListSeriesAliases returns alternate titles for a series.
+func (s *Store) ListSeriesAliases(seriesID int64) ([]domain.SeriesAlias, error) {
+	rows, err := s.db.Query(`
+		SELECT id, series_id, title, season_number
+		FROM series_aliases
+		WHERE series_id = ?
+		ORDER BY id ASC`, seriesID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []domain.SeriesAlias{}
+	for rows.Next() {
+		var a domain.SeriesAlias
+		var season sql.NullInt64
+		if err := rows.Scan(&a.ID, &a.SeriesID, &a.Title, &season); err != nil {
+			return nil, err
+		}
+		if season.Valid {
+			n := int(season.Int64)
+			a.SeasonNumber = &n
+		}
+		out = append(out, a)
+	}
+	return out, nil
+}
+
+// AddSeriesAlias stores an alternate title for a series.
+func (s *Store) AddSeriesAlias(seriesID int64, title string, seasonNumber *int) (*domain.SeriesAlias, error) {
+	title = strings.TrimSpace(title)
+	if seriesID <= 0 || title == "" {
+		return nil, errors.New("seriesId and title are required")
+	}
+	var season any
+	if seasonNumber != nil {
+		season = *seasonNumber
+	}
+	res, err := s.db.Exec(`INSERT INTO series_aliases (series_id, title, season_number) VALUES (?, ?, ?)`,
+		seriesID, title, season)
+	if err != nil {
+		return nil, err
+	}
+	id, _ := res.LastInsertId()
+	alias := &domain.SeriesAlias{ID: id, SeriesID: seriesID, Title: title, SeasonNumber: seasonNumber}
+	return alias, nil
 }
 
 func boolToInt(v bool) int {

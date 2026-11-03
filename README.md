@@ -263,7 +263,7 @@ services:
 ### Prerequisites
 
 - **Go** `1.23+` (tested with Go `1.26`)
-- **Node.js** `20+` and **npm**
+- **Node.js** `24+` and **npm**
 - **Docker** & **Docker Compose** (optional, for containerized workflows)
 
 ### Quick Start (Local Development)

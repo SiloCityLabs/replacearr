@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import type { AppConfig, NotificationConfig } from '../../types';
+import type { AppConfig, BrowserNotificationsConfig, NotificationConfig } from '../../types';
+import { requestPermission } from '../../notifications';
 import {
   Checkbox,
   dangerButtonClass,
@@ -54,9 +55,18 @@ function blankNotification(): NotificationConfig {
   };
 }
 
-export const ConnectPage: React.FC<ConnectPageProps> = ({ config, onSave }) => {
+const BROWSER_FLAGS: Array<{ key: keyof BrowserNotificationsConfig; label: string }> = [
+  { key: 'enabled', label: 'Enable browser notifications' },
+  { key: 'onGrab', label: 'On grab' },
+  { key: 'onDownload', label: 'On download' },
+  { key: 'onImport', label: 'On import' },
+  { key: 'onHealthIssue', label: 'On health issue' },
+];
+
+export const ConnectPage: React.FC<ConnectPageProps> = ({ config, onSave, onNotify }) => {
   const [form, setForm] = useState<{ index: number | null; value: NotificationConfig } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [browserBusy, setBrowserBusy] = useState(false);
 
   const persist = async (notifications: NotificationConfig[]) => {
     setBusy(true);
@@ -90,9 +100,47 @@ export const ConnectPage: React.FC<ConnectPageProps> = ({ config, onSave }) => {
     setForm({ ...form, value: { ...form.value, [key]: value } });
   };
 
+  const patchBrowser = async (patch: Partial<BrowserNotificationsConfig>) => {
+    setBrowserBusy(true);
+    try {
+      const next = {
+        ...config.browserNotifications,
+        ...patch,
+      };
+      if (patch.enabled && !config.browserNotifications.enabled) {
+        const perm = await requestPermission();
+        if (perm !== 'granted') {
+          onNotify?.('Browser notification permission was not granted', true);
+          return;
+        }
+      }
+      await onSave({ ...config, browserNotifications: next });
+      onNotify?.('Browser notification settings saved');
+    } catch {
+      // Parent already reported the error.
+    } finally {
+      setBrowserBusy(false);
+    }
+  };
+
   return (
     <div>
       <PageIntro title="Connect" caption="Saved connections are not sent." />
+      <Section title="Browser notifications">
+        <p className="text-xs text-slate-400 pb-3">
+          Desktop alerts from this browser when events occur (requires permission). Grab notifications
+          also apply on the Search tab.
+        </p>
+        {BROWSER_FLAGS.map((flag) => (
+          <FieldRow key={flag.key} label={flag.label}>
+            <Checkbox
+              checked={Boolean(config.browserNotifications[flag.key])}
+              disabled={browserBusy}
+              onChange={(value) => void patchBrowser({ [flag.key]: value })}
+            />
+          </FieldRow>
+        ))}
+      </Section>
       <Section title="Connections">
         <div className="flex justify-end py-3">
           <button

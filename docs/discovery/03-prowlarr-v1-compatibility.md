@@ -4,11 +4,10 @@
 
 Upstream **Prowlarr** uses API v1 (`[V1ApiController]` in `.tmp/Prowlarr/src/Prowlarr.Http/V1ApiControllerAttribute.cs`) mounted at `/api/v1/[controller]`, plus top-level Torznab/Newznab feed routes (`/{id:int}/api` and `/api/v1/indexer/{id:int}/newznab`).
 
-Replacearr exposes Prowlarr v1 compatibility at:
+Replacearr exposes Prowlarr v1 compatibility at (when `compatModules.prowlarr` is enabled):
 * `/prowlarr/api/v1/*` (dedicated Prowlarr v1 mount)
-* `/api/v1/*` (shared v1 router where Prowlarr endpoints coexist with Replacearr's native v1 endpoints)
-* `/{id}/api` and `/prowlarr/{id}/api` and `/api/v1/indexer/{id}/newznab` (Torznab/Newznab XML/JSON protocol endpoints)
-* `/{id}/download` and `/api/v1/indexer/{id}/download` (Release proxy/redirect download endpoints)
+* Torznab under `/prowlarr/{id}/api` (`t=caps|search|tvsearch|movie`) — season/ep query params are forwarded into the unified search engine
+* Native Replacearr owns `/api/v1/*` (do not remount Prowlarr over the native router)
 
 Authentication accepts `?apikey=<key>`, `X-Api-Key: <key>`, or `Authorization: Bearer <key>`.
 

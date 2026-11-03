@@ -6,6 +6,20 @@
   body {
     @apply bg-slate-950 text-slate-100;
   }
+
+  :focus-visible {
+    outline: 2px solid rgb(99 102 241);
+    outline-offset: 2px;
+  }
+
+  button:focus-visible,
+  a:focus-visible,
+  [data-roving-item]:focus-visible,
+  [tabindex]:focus-visible {
+    outline: 2px solid rgb(129 140 248);
+    outline-offset: 2px;
+    box-shadow: 0 0 0 4px rgb(99 102 241 / 0.25);
+  }
 }
 
 /* Custom sleek dark scrollbars */

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -14,14 +15,16 @@ import (
 	"github.com/replacearr/replacearr/internal/config"
 	"github.com/replacearr/replacearr/internal/db"
 	"github.com/replacearr/replacearr/internal/domain"
+	"github.com/replacearr/replacearr/internal/mediacover"
 )
 
-type SearchFunc func(query string, mediaType string, tvdbID int, tmdbID int) ([]domain.ReleaseResult, error)
+type SearchFunc func(query string, mediaType string, tvdbID int, tmdbID int, season int, episode int) ([]domain.ReleaseResult, error)
 
 type Handler struct {
 	store    *db.Store
 	cfg      *config.Config
 	searchFn SearchFunc
+	covers   *mediacover.Store
 	start    time.Time
 
 	cmdMu    sync.RWMutex
@@ -29,7 +32,7 @@ type Handler struct {
 	nextCmd  int64
 }
 
-func NewHandler(store *db.Store, cfg *config.Config, searchFn SearchFunc) http.Handler {
+func NewHandler(store *db.Store, cfg *config.Config, searchFn SearchFunc) *Handler {
 	return &Handler{
 		store:    store,
 		cfg:      cfg,
@@ -38,6 +41,11 @@ func NewHandler(store *db.Store, cfg *config.Config, searchFn SearchFunc) http.H
 		commands: []domain.CommandRecord{},
 		nextCmd:  1,
 	}
+}
+
+// SetCoverStore attaches the shared media cover cache used by /MediaCover routes.
+func (h *Handler) SetCoverStore(covers *mediacover.Store) {
+	h.covers = covers
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -49,6 +57,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	case path == "/health" && r.Method == http.MethodGet:
 		writeJSON(w, http.StatusOK, []any{})
+
+	case strings.HasPrefix(path, "/MediaCover/") && r.Method == http.MethodGet:
+		h.handleMediaCover(w, r, path)
 
 	case path == "/series/lookup" && r.Method == http.MethodGet:
 		h.handleSeriesLookup(w, r)
@@ -336,6 +347,7 @@ func (h *Handler) handleCreateSeries(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	h.cacheCoverAsync(created)
 	writeJSON(w, http.StatusCreated, created)
 }
 
@@ -731,6 +743,11 @@ func (h *Handler) handleSearchReleases(w http.ResponseWriter, r *http.Request) {
 	if sStr := q.Get("seriesId"); sStr != "" {
 		seriesID, _ = strconv.ParseInt(sStr, 10, 64)
 	}
+	season, _ := strconv.Atoi(q.Get("season"))
+	episode, _ := strconv.Atoi(q.Get("episode"))
+	if episode == 0 {
+		episode, _ = strconv.Atoi(q.Get("ep"))
+	}
 	var tvdbID int
 	if seriesID > 0 {
 		if sr, err := h.store.GetSeriesByID(seriesID); err == nil && sr != nil {
@@ -738,6 +755,18 @@ func (h *Handler) handleSearchReleases(w http.ResponseWriter, r *http.Request) {
 				term = sr.Title
 			}
 			tvdbID = sr.TvdbID
+			if aliases, aErr := h.store.ListSeriesAliases(sr.ID); aErr == nil && len(aliases) > 0 {
+				parts := []string{term}
+				for _, a := range aliases {
+					if a.Title != "" && !strings.EqualFold(a.Title, term) {
+						parts = append(parts, a.Title)
+					}
+				}
+				term = strings.Join(parts, " ")
+			}
+			if season == 0 && episode == 0 && domain.PreferSeasonPackQuery(*sr) {
+				season = 1
+			}
 		}
 	}
 	if term == "" {
@@ -746,28 +775,29 @@ func (h *Handler) handleSearchReleases(w http.ResponseWriter, r *http.Request) {
 
 	var results []domain.ReleaseResult
 	if h.searchFn != nil {
-		res, err := h.searchFn(term, "tv", tvdbID, 0)
+		res, err := h.searchFn(term, "tv", tvdbID, 0, season, episode)
 		if err == nil {
 			results = res
 		}
 	}
 	if results == nil {
-		results = DefaultSearchReleases(term, "tv", tvdbID, 0)
+		results = DefaultSearchReleases(term, "tv", tvdbID, 0, season, episode)
 	}
 	writeJSON(w, http.StatusOK, results)
 }
 
 func (h *Handler) handleGrabRelease(w http.ResponseWriter, r *http.Request) {
 	var payload struct {
-		Guid       string `json:"guid"`
-		Title      string `json:"title"`
-		IndexerID  int64  `json:"indexerId"`
-		Indexer    string `json:"indexer"`
-		Size       int64  `json:"size"`
-		Protocol   string `json:"protocol"`
-		SeriesID   int64  `json:"seriesId"`
-		EpisodeID  int64  `json:"episodeId"`
-		DownloadID string `json:"downloadId"`
+		Guid        string `json:"guid"`
+		Title       string `json:"title"`
+		IndexerID   int64  `json:"indexerId"`
+		Indexer     string `json:"indexer"`
+		Size        int64  `json:"size"`
+		Protocol    string `json:"protocol"`
+		SeriesID    int64  `json:"seriesId"`
+		EpisodeID   int64  `json:"episodeId"`
+		DownloadID  string `json:"downloadId"`
+		DownloadURL string `json:"downloadUrl"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid release payload")
@@ -823,7 +853,11 @@ func (h *Handler) handleGrabRelease(w http.ResponseWriter, r *http.Request) {
 		SourceTitle: payload.Title,
 		Quality:     map[string]any{"quality": map[string]any{"id": 7, "name": "WEBDL-1080p"}},
 		EventType:   "grabbed",
-		Data:        map[string]any{"indexer": payload.Indexer, "guid": payload.Guid},
+		Data: map[string]any{
+			"indexer":     payload.Indexer,
+			"guid":        payload.Guid,
+			"downloadUrl": payload.DownloadURL,
+		},
 	})
 
 	writeJSON(w, http.StatusCreated, qItem)
@@ -1059,7 +1093,7 @@ func populateIndexerFields(idx *domain.Indexer) {
 	}
 }
 
-func DefaultSearchReleases(query string, mediaType string, tvdbID int, tmdbID int) []domain.ReleaseResult {
+func DefaultSearchReleases(query string, mediaType string, tvdbID int, tmdbID int, season int, episode int) []domain.ReleaseResult {
 	clean := strings.ReplaceAll(strings.TrimSpace(query), " ", ".")
 	if clean == "" {
 		clean = "Replacearr.Release"
@@ -1105,18 +1139,33 @@ func DefaultSearchReleases(query string, mediaType string, tvdbID int, tmdbID in
 			},
 		}
 	}
+	epToken := domain.FormatSeasonEpisodeToken(season, episode)
+	pack := season > 0 && episode == 0
+	title1080 := fmt.Sprintf("%s.1080p.WEB-DL.DDP5.1.H.264-REPLACEARR", clean)
+	title2160 := fmt.Sprintf("%s.2160p.WEB-DL.DV.HDR.H.265-REPLACEARR", clean)
+	guidSuffix := "generic"
+	if epToken != "" {
+		if pack {
+			title1080 = fmt.Sprintf("%s.%s.COMPLETE.1080p.WEB-DL.DDP5.1.H.264-REPLACEARR", clean, epToken)
+			title2160 = fmt.Sprintf("%s.%s.COMPLETE.2160p.WEB-DL.DV.HDR.H.265-REPLACEARR", clean, epToken)
+		} else {
+			title1080 = fmt.Sprintf("%s.%s.1080p.WEB-DL.DDP5.1.H.264-REPLACEARR", clean, epToken)
+			title2160 = fmt.Sprintf("%s.%s.2160p.WEB-DL.DV.HDR.H.265-REPLACEARR", clean, epToken)
+		}
+		guidSuffix = strings.ToLower(epToken)
+	}
 	return []domain.ReleaseResult{
 		{
-			Guid:        fmt.Sprintf("replacearr-tv-1080p-%s", strings.ToLower(clean)),
-			Title:       fmt.Sprintf("%s.S01E01.1080p.WEB-DL.DDP5.1.H.264-REPLACEARR", clean),
+			Guid:        fmt.Sprintf("replacearr-tv-1080p-%s-%s", strings.ToLower(clean), guidSuffix),
+			Title:       title1080,
 			IndexerID:   1,
 			Indexer:     "Replacearr Built-in",
 			Protocol:    "torrent",
 			Size:        2147483648,
 			Age:         1,
 			PublishDate: now.Add(-24 * time.Hour),
-			DownloadURL: fmt.Sprintf("http://localhost:8989/prowlarr/1/download?guid=%s-s01e01-1080p", clean),
-			InfoURL:     fmt.Sprintf("http://localhost:8989/prowlarr/1/details?guid=%s-s01e01-1080p", clean),
+			DownloadURL: fmt.Sprintf("http://localhost:8989/prowlarr/1/download?guid=%s-%s-1080p", clean, guidSuffix),
+			InfoURL:     fmt.Sprintf("http://localhost:8989/prowlarr/1/details?guid=%s-%s-1080p", clean, guidSuffix),
 			Seeders:     215,
 			Leechers:    14,
 			Peers:       229,
@@ -1125,16 +1174,16 @@ func DefaultSearchReleases(query string, mediaType string, tvdbID int, tmdbID in
 			TvdbID:      tvdbID,
 		},
 		{
-			Guid:        fmt.Sprintf("replacearr-tv-2160p-%s", strings.ToLower(clean)),
-			Title:       fmt.Sprintf("%s.S01E01.2160p.WEB-DL.DV.HDR.H.265-REPLACEARR", clean),
+			Guid:        fmt.Sprintf("replacearr-tv-2160p-%s-%s", strings.ToLower(clean), guidSuffix),
+			Title:       title2160,
 			IndexerID:   1,
 			Indexer:     "Replacearr Built-in",
 			Protocol:    "torrent",
 			Size:        5368709120,
 			Age:         1,
 			PublishDate: now.Add(-24 * time.Hour),
-			DownloadURL: fmt.Sprintf("http://localhost:8989/prowlarr/1/download?guid=%s-s01e01-2160p", clean),
-			InfoURL:     fmt.Sprintf("http://localhost:8989/prowlarr/1/details?guid=%s-s01e01-2160p", clean),
+			DownloadURL: fmt.Sprintf("http://localhost:8989/prowlarr/1/download?guid=%s-%s-2160p", clean, guidSuffix),
+			InfoURL:     fmt.Sprintf("http://localhost:8989/prowlarr/1/details?guid=%s-%s-2160p", clean, guidSuffix),
 			Seeders:     112,
 			Leechers:    8,
 			Peers:       120,
@@ -1143,6 +1192,72 @@ func DefaultSearchReleases(query string, mediaType string, tvdbID int, tmdbID in
 			TvdbID:      tvdbID,
 		},
 	}
+}
+
+func (h *Handler) cacheCoverAsync(created *domain.Series) {
+	if h.covers == nil || created == nil {
+		return
+	}
+	remote := ""
+	for _, img := range created.Images {
+		if strings.TrimSpace(img.RemoteURL) != "" {
+			remote = img.RemoteURL
+			break
+		}
+	}
+	if remote == "" {
+		return
+	}
+	go func(id int64, remoteURL string) {
+		local, err := h.covers.Ensure("tv", id, remoteURL)
+		if err != nil || local == "" {
+			return
+		}
+		sr, err := h.store.GetSeriesByID(id)
+		if err != nil || sr == nil {
+			return
+		}
+		updated := false
+		for i := range sr.Images {
+			if sr.Images[i].CoverType == "" || strings.EqualFold(sr.Images[i].CoverType, "poster") {
+				sr.Images[i].CoverType = "poster"
+				sr.Images[i].URL = local
+				if sr.Images[i].RemoteURL == "" {
+					sr.Images[i].RemoteURL = remoteURL
+				}
+				updated = true
+				break
+			}
+		}
+		if !updated {
+			sr.Images = append(sr.Images, domain.MediaImage{CoverType: "poster", URL: local, RemoteURL: remoteURL})
+		}
+		_, _ = h.store.UpdateSeries(*sr)
+	}(created.ID, remote)
+}
+
+func (h *Handler) handleMediaCover(w http.ResponseWriter, _ *http.Request, path string) {
+	// /MediaCover/{id}/poster.jpg (served as webp)
+	rest := strings.TrimPrefix(path, "/MediaCover/")
+	parts := strings.Split(rest, "/")
+	if len(parts) < 1 {
+		writeError(w, http.StatusNotFound, "media cover not found")
+		return
+	}
+	id, err := strconv.ParseInt(parts[0], 10, 64)
+	if err != nil || id <= 0 || h.covers == nil {
+		writeError(w, http.StatusNotFound, "media cover not found")
+		return
+	}
+	f, err := h.covers.Open("tv", id)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "media cover not found")
+		return
+	}
+	defer f.Close()
+	w.Header().Set("Content-Type", "image/webp")
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	_, _ = io.Copy(w, f)
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

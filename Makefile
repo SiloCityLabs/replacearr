@@ -97,6 +97,7 @@ build-plugins: ## Build bundled and sample Go plugins into bin/plugins
 	@echo "==> Building Go plugins..."
 	@mkdir -p $(PLUGINS_DIR)
 	CGO_ENABLED=0 go build -ldflags="$(LDFLAGS)" -o $(PLUGINS_DIR)/sample-indexer ./examples/plugins/sample-indexer
+	CGO_ENABLED=0 go build -ldflags="$(LDFLAGS)" -o $(PLUGINS_DIR)/openvpn-proxy ./examples/plugins/openvpn-proxy
 
 build-backend: ## Build Replacearr Go binary (assumes build-web has been run)
 	@echo "==> Building Replacearr binary..."

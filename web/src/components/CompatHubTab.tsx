@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import type { AppConfig } from '../types';
 import {
   Link2,
   Copy,
@@ -15,10 +16,19 @@ import {
 
 interface CompatHubTabProps {
   masterApiKey: string;
+  config?: AppConfig;
+  onSave?: (next: AppConfig) => Promise<AppConfig>;
+  onNotify?: (msg: string, isError?: boolean) => void;
 }
 
-export const CompatHubTab: React.FC<CompatHubTabProps> = ({ masterApiKey }) => {
+export const CompatHubTab: React.FC<CompatHubTabProps> = ({
+  masterApiKey,
+  config,
+  onSave,
+  onNotify,
+}) => {
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [savingModules, setSavingModules] = useState(false);
 
   const origin =
     typeof window !== 'undefined' && window.location.origin
@@ -113,6 +123,56 @@ export const CompatHubTab: React.FC<CompatHubTabProps> = ({ masterApiKey }) => {
           </div>
         </div>
       </div>
+
+      {config && onSave ? (
+        <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-5 space-y-4">
+          <div>
+            <h3 className="text-sm font-bold text-white">Compat API modules</h3>
+            <p className="text-xs text-slate-400 mt-1">
+              Disable emulation layers you do not need. Disabled routes return HTTP 404 to upstream
+              clients.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-4">
+            {(
+              [
+                { key: 'sonarr' as const, label: 'Sonarr v3 (/sonarr)' },
+                { key: 'radarr' as const, label: 'Radarr v3 (/radarr)' },
+                { key: 'prowlarr' as const, label: 'Prowlarr v1 (/prowlarr)' },
+              ] as const
+            ).map(({ key, label }) => (
+              <label
+                key={key}
+                className="inline-flex items-center gap-2 text-xs text-slate-300 cursor-pointer"
+              >
+                <input
+                  type="checkbox"
+                  checked={config.compatModules[key]}
+                  disabled={savingModules}
+                  onChange={(e) => {
+                    const enabled = e.target.checked;
+                    setSavingModules(true);
+                    void onSave({
+                      ...config,
+                      compatModules: { ...config.compatModules, [key]: enabled },
+                    })
+                      .then(() => onNotify?.(`${label} ${enabled ? 'enabled' : 'disabled'}`))
+                      .catch((err) =>
+                        onNotify?.(
+                          err instanceof Error ? err.message : 'Failed to update compat modules',
+                          true
+                        )
+                      )
+                      .finally(() => setSavingModules(false));
+                  }}
+                  className="rounded border-slate-700 bg-slate-950 text-indigo-500"
+                />
+                {label}
+              </label>
+            ))}
+          </div>
+        </div>
+      ) : null}
 
       {/* Ready-to-Copy Base URLs */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
