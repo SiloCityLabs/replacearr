@@ -1,5 +1,5 @@
-const CACHE = 'replacearr-shell-v1';
-const SHELL = ['/', '/manifest.webmanifest', '/icon-192.png', '/icon-512.png'];
+const CACHE = 'replacearr-shell-v2';
+const SHELL = ['/', '/manifest.webmanifest', '/favicon.ico', '/icon-192.png', '/icon-512.png'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(SHELL)));

@@ -1,11 +1,10 @@
-import React, { useState } from 'react';
+import React from 'react';
 import {
   Tv,
   Film,
   Radio,
   DownloadCloud,
   Puzzle,
-  Search,
   Activity,
   ArrowUpRight,
   Clock,
@@ -22,7 +21,8 @@ interface DashboardTabProps {
   profiles: QualityProfile[];
   rootFolders: RootFolder[];
   onNavigate: (tab: NavTab) => void;
-  onQuickSearch: (query: string, type?: string) => void;
+  onAddSeries: () => void;
+  onAddMovie: () => void;
   appUi?: AppConfig['ui'] | null;
 }
 
@@ -31,11 +31,10 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
   profiles,
   rootFolders,
   onNavigate,
-  onQuickSearch,
+  onAddSeries,
+  onAddMovie,
   appUi,
 }) => {
-  const [searchInput, setSearchInput] = useState('');
-  const [searchType, setSearchType] = useState('search');
 
   const counts = overview?.counts ?? {
     series: 0,
@@ -50,14 +49,9 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
   const recentQueue = overview?.recentQueue ?? [];
   const recentHistory = overview?.recentHistory ?? [];
 
-  const handleSearchSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    onQuickSearch(searchInput.trim() || '1080p', searchType);
-  };
-
   return (
     <div className="space-y-6">
-      {/* Hero Banner + Unified Quick Search */}
+      {/* Hero: Add New first; Releases secondary */}
       <div className="relative rounded-2xl bg-gradient-to-r from-slate-900 via-indigo-950/40 to-slate-900 border border-slate-800 p-4 sm:p-6 overflow-hidden">
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
           <div className="space-y-1.5">
@@ -68,45 +62,33 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
             <h2 className="text-2xl font-bold text-white tracking-tight">
               Welcome to Replacearr
             </h2>
-            <p className="text-sm text-slate-400 max-w-2xl hidden md:block">
-              Unified TV, movies, and indexer search. Query Torznab, Newznab, Cardigann YAML
-              definitions, and Go JSON-RPC plugins in real time.
+            <p className="text-sm text-slate-400 max-w-2xl">
+              Add series and movies from TVDB / TMDB / IMDb. Use Interactive Search on a library item to find releases.
             </p>
-            <p className="text-sm text-slate-400 md:hidden">
-              Search releases across your library and indexers.
-            </p>
-          </div>
-
-          <form
-            onSubmit={handleSearchSubmit}
-            className="w-full lg:w-[460px] bg-slate-950/90 p-2 rounded-xl border border-slate-800 flex flex-col min-[420px]:flex-row min-[420px]:items-center gap-2 shadow-inner"
-          >
-            <div className="flex items-center gap-2 min-w-0 flex-1">
-              <Search className="w-4 h-4 text-slate-400 ml-1 shrink-0" />
-              <input
-                type="text"
-                value={searchInput}
-                onChange={(e) => setSearchInput(e.target.value)}
-                placeholder="Quick search releases (e.g. Severance, Dune, Ubuntu)..."
-                className="w-full min-w-0 flex-1 bg-transparent text-sm text-white placeholder-slate-500 focus:outline-none py-1.5"
-              />
+            <div className="flex flex-wrap gap-2 pt-2">
+              <button
+                type="button"
+                onClick={onAddSeries}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-lg transition"
+              >
+                Add Series
+              </button>
+              <button
+                type="button"
+                onClick={onAddMovie}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-lg transition"
+              >
+                Add Movie
+              </button>
+              <button
+                type="button"
+                onClick={() => onNavigate('series')}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold rounded-lg transition"
+              >
+                Browse TV
+              </button>
             </div>
-            <select
-              value={searchType}
-              onChange={(e) => setSearchType(e.target.value)}
-              className="bg-slate-900 text-xs text-slate-300 border border-slate-800 rounded-lg px-2.5 py-2 focus:outline-none focus:border-indigo-500 shrink-0"
-            >
-              <option value="search">All</option>
-              <option value="tvsearch">TV</option>
-              <option value="movie">Movies</option>
-            </select>
-            <button
-              type="submit"
-              className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-lg transition shrink-0"
-            >
-              Search
-            </button>
-          </form>
+          </div>
         </div>
       </div>
 
@@ -221,7 +203,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
                 <DownloadCloud className="w-8 h-8 text-slate-600 mx-auto mb-2" />
                 <p className="text-sm text-slate-400">Download queue is currently idle.</p>
                 <p className="text-xs text-slate-500 mt-1">
-                  Grab a release from Unified Search to enqueue downloads.
+                  Grab a release from Interactive Search on a library item to enqueue downloads.
                 </p>
               </div>
             ) : (
@@ -360,10 +342,10 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
           <div className="mt-5 pt-4 border-t border-slate-800/80 flex items-center justify-between text-xs text-slate-400">
             <span>Version {overview?.system?.version || '1.0.0-go'}</span>
             <button
-              onClick={() => onNavigate('compatibility')}
+              onClick={() => onNavigate('plugins')}
               className="text-indigo-400 hover:text-indigo-300 font-medium"
             >
-              View Compatibility Hub →
+              View Plugins →
             </button>
           </div>
         </div>

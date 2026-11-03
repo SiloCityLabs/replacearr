@@ -9,6 +9,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
+	"net"
+	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
@@ -23,6 +26,7 @@ import (
 	"github.com/replacearr/replacearr/internal/db"
 	"github.com/replacearr/replacearr/internal/domain"
 	"github.com/replacearr/replacearr/internal/indexers/cardigann"
+	"github.com/replacearr/replacearr/internal/metadata"
 	"github.com/replacearr/replacearr/pkg/pluginsdk"
 )
 
@@ -44,38 +48,103 @@ type managedEntry struct {
 
 // Manager coordinates built-in Go plugins, external subprocess plugins, and Cardigann definitions.
 type Manager struct {
-	mu             sync.RWMutex
-	store          *db.Store
-	pluginDir      string
-	definitionsDir string
-	entries        map[string]*managedEntry
-	order          []string
-	definitions    []cardigann.Definition
+	mu              sync.RWMutex
+	store           *db.Store
+	pluginDir       string
+	definitionsDir  string
+	entries         map[string]*managedEntry
+	order           []string
+	definitions     []cardigann.Definition
+	browserHub      *notificationHub
+	stalledNotified map[int64]struct{}
+	meta            *metadata.Service
 }
 
 // NewManager creates a new Plugin Host Manager with built-in plugins registered out of the box.
 func NewManager(store *db.Store, pluginDir string, definitionsDir string) *Manager {
-	defs, _ := cardigann.LoadDefinitions(definitionsDir, 60)
+	defs, _ := cardigann.LoadDefinitions(definitionsDir, 0)
+	metaSvc := metadata.New()
 	m := &Manager{
-		store:          store,
-		pluginDir:      pluginDir,
-		definitionsDir: definitionsDir,
-		entries:        make(map[string]*managedEntry),
-		definitions:    defs,
+		store:           store,
+		pluginDir:       pluginDir,
+		definitionsDir:  definitionsDir,
+		entries:         make(map[string]*managedEntry),
+		definitions:     defs,
+		browserHub:      newNotificationHub(),
+		stalledNotified: make(map[int64]struct{}),
+		meta:            metaSvc,
 	}
+
+	// Seed compat plugin_configs from legacy AppConfig.compatModules before register.
+	m.migrateCompatModulesFromAppConfig()
 
 	// Register default built-in Go plugins so Replacearr works immediately out of the box.
 	m.registerBuiltin(&builtinTorznabIndexerPlugin{})
 	m.registerBuiltin(&builtinFlareSolverrPlugin{})
-	m.registerBuiltin(&builtinMetadataPlugin{})
+	m.registerBuiltin(&builtinMetadataPlugin{svc: metaSvc})
 	m.registerBuiltin(&builtinDownloadClientPlugin{})
 	m.registerBuiltin(&builtinHTTPProxyPlugin{})
 	m.registerBuiltin(&builtinOpenVPNProxyPlugin{})
+	m.registerBuiltin(newBuiltinBrowserNotifications(m.browserHub))
+	m.registerBuiltin(&builtinCompatSonarrPlugin{})
+	m.registerBuiltin(&builtinCompatRadarrPlugin{})
+	m.registerBuiltin(&builtinCompatProwlarrPlugin{})
 
 	return m
 }
 
+// Metadata returns the shared SkyHook / Radarr-video lookup service used by Add New.
+func (m *Manager) Metadata() *metadata.Service {
+	if m == nil {
+		return metadata.New()
+	}
+	return m.meta
+}
+
+// IsEnabled reports whether a discovered/built-in plugin is currently enabled.
+func (m *Manager) IsEnabled(pluginID string) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	entry, ok := m.entries[pluginID]
+	return ok && entry.info.Enabled
+}
+
+// Gate returns a handler that serves next only while pluginID is enabled; otherwise 404.
+func (m *Manager) Gate(pluginID string, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !m.IsEnabled(pluginID) {
+			http.NotFound(w, r)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// migrateCompatModulesFromAppConfig one-time seeds builtin-compat-* rows from the
+// deprecated AppConfig.compatModules JSON key when no plugin_configs row exists.
+func (m *Manager) migrateCompatModulesFromAppConfig() {
+	if m.store == nil {
+		return
+	}
+	legacy, found, err := m.store.PeekLegacyCompatModules()
+	sonarr, radarr, prowlarr := true, true, true
+	if err == nil && found {
+		sonarr, radarr, prowlarr = legacy.Sonarr, legacy.Radarr, legacy.Prowlarr
+	}
+	seed := func(id string, enabled bool) {
+		if m.store.HasPluginConfig(id) {
+			return
+		}
+		_ = m.store.SavePluginConfig(id, enabled, map[string]any{})
+	}
+	seed(pluginsdk.CompatPluginSonarr, sonarr)
+	seed(pluginsdk.CompatPluginRadarr, radarr)
+	seed(pluginsdk.CompatPluginProwlarr, prowlarr)
+}
+
 // ActiveProxyURL returns the first enabled network proxy plugin URL, if any.
+// Unreachable proxy endpoints are skipped so a dead SOCKS listener cannot
+// black-hole indexer HTTP.
 func (m *Manager) ActiveProxyURL() string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -87,11 +156,10 @@ func (m *Manager) ActiveProxyURL() string {
 		if !hasPluginType(entry.info.Manifest.Types, pluginsdk.PluginTypeNetworkProxy) {
 			continue
 		}
+		var u string
 		if entry.builtin != nil {
 			if np, ok := entry.builtin.(pluginsdk.NetworkProxyPlugin); ok {
-				if u := strings.TrimSpace(np.ProxyURL()); u != "" {
-					return u
-				}
+				u = strings.TrimSpace(np.ProxyURL())
 			}
 		} else if entry.proc != nil {
 			var out map[string]string
@@ -99,16 +167,269 @@ func (m *Manager) ActiveProxyURL() string {
 			err := entry.proc.call(ctx, "proxy_url", nil, &out)
 			cancel()
 			if err == nil {
-				if u := strings.TrimSpace(out["proxyUrl"]); u != "" {
-					return u
-				}
+				u = strings.TrimSpace(out["proxyUrl"])
 			}
+		}
+		if u != "" && proxyEndpointReachable(u) {
+			return u
 		}
 	}
 	return ""
 }
 
-// EnqueueDownload sends a download to the first enabled download client plugin.
+// NotifyAll fans out a lifecycle event to every enabled NotificationPlugin.
+// Per-plugin failures are logged and do not fail the caller.
+func (m *Manager) NotifyAll(ctx context.Context, eventType string, payload map[string]any) {
+	if payload == nil {
+		payload = map[string]any{}
+	}
+	m.mu.RLock()
+	targets := make([]*managedEntry, 0)
+	for _, id := range m.order {
+		entry, ok := m.entries[id]
+		if !ok || !entry.info.Enabled {
+			continue
+		}
+		if hasPluginType(entry.info.Manifest.Types, pluginsdk.PluginTypeNotification) {
+			targets = append(targets, entry)
+		}
+	}
+	m.mu.RUnlock()
+
+	for _, entry := range targets {
+		if entry.builtin != nil {
+			notifier, ok := entry.builtin.(pluginsdk.NotificationPlugin)
+			if !ok {
+				continue
+			}
+			if err := notifier.Notify(ctx, eventType, payload); err != nil {
+				log.Printf("notification plugin %s: %v", entry.info.Manifest.ID, err)
+			}
+			continue
+		}
+		if entry.proc != nil {
+			var out map[string]any
+			params := map[string]any{
+				"eventType": eventType,
+				"payload":   payload,
+			}
+			if err := entry.proc.call(ctx, "notify", params, &out); err != nil {
+				log.Printf("notification plugin %s: %v", entry.info.Manifest.ID, err)
+			}
+		}
+	}
+}
+
+// TestNotification sends EventNotificationTest to a single notification plugin.
+// Optional settings are applied temporarily (without persisting) so the UI can
+// test form values before Save. Built-ins can be tested while disabled; external
+// subprocess plugins must be enabled (process running).
+func (m *Manager) TestNotification(ctx context.Context, pluginID string, settings map[string]any) error {
+	m.mu.Lock()
+	entry, ok := m.entries[pluginID]
+	if !ok {
+		m.mu.Unlock()
+		return fmt.Errorf("plugin not found: %s", pluginID)
+	}
+	if !hasPluginType(entry.info.Manifest.Types, pluginsdk.PluginTypeNotification) {
+		m.mu.Unlock()
+		return fmt.Errorf("plugin %s is not a notification channel", pluginID)
+	}
+
+	prevSettings := cloneSettings(entry.info.Settings)
+	merged := defaultSettingsFromSchema(entry.info.Manifest.ConfigSchema)
+	for k, v := range prevSettings {
+		merged[k] = v
+	}
+	for k, v := range settings {
+		merged[k] = v
+	}
+
+	restore := func() {
+		if entry.builtin != nil {
+			_ = entry.builtin.Configure(prevSettings)
+			return
+		}
+		if entry.proc != nil && entry.info.Enabled {
+			entry.proc.setSettings(prevSettings)
+			callCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			var ack map[string]any
+			_ = entry.proc.call(callCtx, "configure", prevSettings, &ack)
+		}
+	}
+
+	if entry.builtin != nil {
+		if err := entry.builtin.Configure(merged); err != nil {
+			m.mu.Unlock()
+			return err
+		}
+		notifier, ok := entry.builtin.(pluginsdk.NotificationPlugin)
+		m.mu.Unlock()
+		if !ok {
+			restore()
+			return fmt.Errorf("plugin %s does not implement NotificationPlugin", pluginID)
+		}
+		err := notifier.Notify(ctx, pluginsdk.EventNotificationTest, testNotificationPayload())
+		m.mu.Lock()
+		restore()
+		m.mu.Unlock()
+		return err
+	}
+
+	if entry.proc == nil || !entry.info.Enabled {
+		m.mu.Unlock()
+		return fmt.Errorf("enable plugin %s before testing", pluginID)
+	}
+
+	entry.proc.setSettings(merged)
+	cfgCtx, cfgCancel := context.WithTimeout(ctx, 10*time.Second)
+	var ack map[string]any
+	cfgErr := entry.proc.call(cfgCtx, "configure", merged, &ack)
+	cfgCancel()
+	if cfgErr != nil {
+		restore()
+		m.mu.Unlock()
+		return cfgErr
+	}
+
+	proc := entry.proc
+	m.mu.Unlock()
+
+	notifyCtx, notifyCancel := context.WithTimeout(ctx, 15*time.Second)
+	defer notifyCancel()
+	params := map[string]any{
+		"eventType": pluginsdk.EventNotificationTest,
+		"payload":   testNotificationPayload(),
+	}
+	var out map[string]any
+	err := proc.call(notifyCtx, "notify", params, &out)
+
+	m.mu.Lock()
+	restore()
+	m.mu.Unlock()
+	return err
+}
+
+func testNotificationPayload() map[string]any {
+	return map[string]any{
+		"title": "Replacearr test notification",
+		"test":  true,
+	}
+}
+
+func cloneSettings(in map[string]any) map[string]any {
+	out := make(map[string]any, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
+
+// SubscribeBrowserNotifications returns a channel of browser-bound notification events.
+// The returned cancel function must be called to unsubscribe.
+func (m *Manager) SubscribeBrowserNotifications() (<-chan BrowserNotificationEvent, func()) {
+	if m.browserHub == nil {
+		ch := make(chan BrowserNotificationEvent)
+		close(ch)
+		return ch, func() {}
+	}
+	return m.browserHub.Subscribe()
+}
+
+// StalledDownloadDays returns the stalled threshold from the browser notification
+// plugin settings when that plugin is enabled, otherwise a default of 3 days.
+func (m *Manager) StalledDownloadDays() int {
+	const fallback = 3
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	entry, ok := m.entries[pluginsdk.BuiltinBrowserNotifications]
+	if !ok || !entry.info.Enabled {
+		return fallback
+	}
+	switch v := entry.info.Settings["stalledDays"].(type) {
+	case float64:
+		if int(v) > 0 {
+			return int(v)
+		}
+	case int:
+		if v > 0 {
+			return v
+		}
+	case int64:
+		if int(v) > 0 {
+			return int(v)
+		}
+	case json.Number:
+		if n, err := v.Int64(); err == nil && n > 0 {
+			return int(n)
+		}
+	}
+	return fallback
+}
+
+// CheckStalledDownloads emits download.stalled once per queue item older than the threshold.
+func (m *Manager) CheckStalledDownloads(ctx context.Context, items []domain.QueueItem) {
+	days := m.StalledDownloadDays()
+	if days <= 0 {
+		return
+	}
+	cutoff := time.Now().UTC().Add(-time.Duration(days) * 24 * time.Hour)
+	for _, item := range items {
+		if item.Status == "completed" || item.TrackedDownloadState == "imported" {
+			m.mu.Lock()
+			delete(m.stalledNotified, item.ID)
+			m.mu.Unlock()
+			continue
+		}
+		added := item.Added
+		if added.IsZero() || !added.Before(cutoff) {
+			continue
+		}
+		m.mu.Lock()
+		_, already := m.stalledNotified[item.ID]
+		if !already {
+			m.stalledNotified[item.ID] = struct{}{}
+		}
+		m.mu.Unlock()
+		if already {
+			continue
+		}
+		m.NotifyAll(ctx, pluginsdk.EventDownloadStalled, map[string]any{
+			"title":      item.Title,
+			"queueId":    item.ID,
+			"downloadId": item.DownloadID,
+			"mediaType":  item.MediaType,
+			"days":       days,
+			"added":      added.Format(time.RFC3339),
+		})
+	}
+}
+
+// ListPluginDownloads aggregates ListDownloads from enabled download client plugins that support it.
+func (m *Manager) ListPluginDownloads(ctx context.Context) ([]pluginsdk.DownloadItem, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := []pluginsdk.DownloadItem{}
+	for _, id := range m.order {
+		entry, ok := m.entries[id]
+		if !ok || !entry.info.Enabled || entry.builtin == nil {
+			continue
+		}
+		lister, ok := entry.builtin.(pluginsdk.DownloadLister)
+		if !ok {
+			continue
+		}
+		items, err := lister.ListDownloads(ctx)
+		if err != nil {
+			continue
+		}
+		out = append(out, items...)
+	}
+	return out, nil
+}
+
+// EnqueueDownload sends a download to the first enabled download client plugin that accepts it.
 func (m *Manager) EnqueueDownload(ctx context.Context, title, downloadURL, protocol string) (string, error) {
 	m.mu.RLock()
 	targets := make([]*managedEntry, 0)
@@ -126,31 +447,51 @@ func (m *Manager) EnqueueDownload(ctx context.Context, title, downloadURL, proto
 	if len(targets) == 0 {
 		return "", errors.New("no enabled download client plugin")
 	}
-	entry := targets[0]
-	if entry.builtin != nil {
-		if dl, ok := entry.builtin.(pluginsdk.DownloadClientPlugin); ok {
-			return dl.EnqueueDownload(ctx, title, downloadURL, protocol)
+	var lastErr error
+	for _, entry := range targets {
+		if entry.builtin != nil {
+			if dl, ok := entry.builtin.(pluginsdk.DownloadClientPlugin); ok {
+				id, err := dl.EnqueueDownload(ctx, title, downloadURL, protocol)
+				if err != nil {
+					lastErr = err
+					continue
+				}
+				if id != "" {
+					return id, nil
+				}
+			}
+			continue
+		}
+		if entry.proc != nil {
+			var out map[string]string
+			params := map[string]string{
+				"title":       title,
+				"downloadUrl": downloadURL,
+				"protocol":    protocol,
+			}
+			if err := entry.proc.call(ctx, "enqueue_download", params, &out); err != nil {
+				lastErr = err
+				continue
+			}
+			if id := out["downloadId"]; id != "" {
+				return id, nil
+			}
 		}
 	}
-	if entry.proc != nil {
-		var out map[string]string
-		params := map[string]string{
-			"title":       title,
-			"downloadUrl": downloadURL,
-			"protocol":    protocol,
-		}
-		if err := entry.proc.call(ctx, "enqueue_download", params, &out); err != nil {
-			return "", err
-		}
-		return out["downloadId"], nil
+	if lastErr != nil {
+		return "", lastErr
 	}
-	return "", errors.New("download client plugin unavailable")
+	return "", errors.New("no download client accepted this release")
+}
+
+func defaultPluginEnabled(manifest pluginsdk.Manifest) bool {
+	return !manifest.DisabledByDefault
 }
 
 func (m *Manager) registerBuiltin(p pluginsdk.Plugin) {
 	manifest := p.Manifest()
 	settings := defaultSettingsFromSchema(manifest.ConfigSchema)
-	enabled := true
+	enabled := defaultPluginEnabled(manifest)
 
 	if m.store != nil {
 		if dbEnabled, dbSettings, err := m.store.GetPluginConfig(manifest.ID); err == nil {
@@ -192,7 +533,7 @@ func (m *Manager) DiscoverAndStart() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if defs, err := cardigann.LoadDefinitions(m.definitionsDir, 60); err == nil && len(defs) > 0 {
+	if defs, err := cardigann.LoadDefinitions(m.definitionsDir, 0); err == nil && len(defs) > 0 {
 		m.definitions = defs
 	}
 
@@ -203,7 +544,7 @@ func (m *Manager) DiscoverAndStart() error {
 			continue
 		}
 		settings := defaultSettingsFromSchema(entry.info.Manifest.ConfigSchema)
-		enabled := entry.info.Enabled
+		enabled := defaultPluginEnabled(entry.info.Manifest)
 		if m.store != nil {
 			if dbEnabled, dbSettings, err := m.store.GetPluginConfig(id); err == nil {
 				enabled = dbEnabled
@@ -288,7 +629,7 @@ func (m *Manager) DiscoverAndStart() error {
 		}
 
 		settings := defaultSettingsFromSchema(manifest.ConfigSchema)
-		enabled := true
+		enabled := defaultPluginEnabled(manifest)
 		if m.store != nil {
 			if dbEnabled, dbSettings, dbErr := m.store.GetPluginConfig(manifest.ID); dbErr == nil {
 				enabled = dbEnabled
@@ -775,64 +1116,15 @@ func (b *builtinTorznabIndexerPlugin) Configure(settings map[string]any) error {
 	return nil
 }
 
-func (b *builtinTorznabIndexerPlugin) Search(_ context.Context, req pluginsdk.SearchRequest) ([]pluginsdk.Release, error) {
-	query := strings.TrimSpace(req.Query)
-	if query == "" && len(req.Aliases) > 0 {
-		query = req.Aliases[0]
-	}
-	if query == "" {
-		query = "Replacearr.Featured"
-	}
-	clean := strings.Join(strings.Fields(query), ".")
-	if req.Season > 0 && req.Episode > 0 {
-		clean = fmt.Sprintf("%s.S%02dE%02d", clean, req.Season, req.Episode)
-	} else if req.Season > 0 {
-		clean = fmt.Sprintf("%s.S%02d", clean, req.Season)
-	}
-	slug := strings.ToLower(strings.ReplaceAll(clean, ".", "-"))
-	now := time.Now().UTC()
-
-	cats := req.Categories
-	if len(cats) == 0 {
-		cats = []int{2000, 5000}
-	}
-
-	releases := []pluginsdk.Release{
-		{
-			Guid:        fmt.Sprintf("builtin-cardigann-%s-1080p", slug),
-			Title:       fmt.Sprintf("%s.1080p.WEB-DL.DDP5.1.H.264-CORE", clean),
-			Protocol:    "torrent",
-			Size:        3221225472,
-			Seeders:     184,
-			Peers:       205,
-			PublishDate: now.Add(-1 * time.Hour).Format(time.RFC3339),
-			DownloadURL: fmt.Sprintf("magnet:?xt=urn:btih:%s1080p&dn=%s", slug, clean),
-			InfoURL:     fmt.Sprintf("https://indexer.replacearr.local/release/%s-1080p", slug),
-			Categories:  cats,
-			Quality:     "WEBDL-1080p",
-		},
-		{
-			Guid:        fmt.Sprintf("builtin-cardigann-%s-2160p", slug),
-			Title:       fmt.Sprintf("%s.2160p.UHD.BluRay.REMUX.HEVC.Atmos-CORE", clean),
-			Protocol:    "torrent",
-			Size:        15032385536,
-			Seeders:     92,
-			Peers:       104,
-			PublishDate: now.Add(-4 * time.Hour).Format(time.RFC3339),
-			DownloadURL: fmt.Sprintf("magnet:?xt=urn:btih:%s2160p&dn=%s", slug, clean),
-			InfoURL:     fmt.Sprintf("https://indexer.replacearr.local/release/%s-2160p", slug),
-			Categories:  cats,
-			Quality:     "Bluray-2160p",
-		},
-	}
-
-	if req.Limit > 0 && len(releases) > req.Limit {
-		releases = releases[:req.Limit]
-	}
-	return releases, nil
+func (b *builtinTorznabIndexerPlugin) Search(_ context.Context, _ pluginsdk.SearchRequest) ([]pluginsdk.Release, error) {
+	// Cardigann/Torznab execution is not implemented yet — do not invent releases.
+	return []pluginsdk.Release{}, nil
 }
 
-type builtinMetadataPlugin struct{}
+type builtinMetadataPlugin struct {
+	svc      *metadata.Service
+	language string
+}
 
 func (b *builtinMetadataPlugin) Manifest() pluginsdk.Manifest {
 	return pluginsdk.Manifest{
@@ -840,7 +1132,7 @@ func (b *builtinMetadataPlugin) Manifest() pluginsdk.Manifest {
 		Name:        "Replacearr Unified Metadata Agent (TVDB & TMDB)",
 		Version:     "1.0.0",
 		Author:      "Replacearr Core",
-		Description: "Provides TV series and movie lookup metadata for Sonarr and Radarr workflows.",
+		Description: "Looks up TV series via SkyHook (TVDB) and movies via api.radarr.video (TMDB/IMDb).",
 		Types:       []pluginsdk.PluginType{pluginsdk.PluginTypeMetadata},
 		ConfigSchema: []pluginsdk.ConfigFieldSchema{
 			{
@@ -854,25 +1146,69 @@ func (b *builtinMetadataPlugin) Manifest() pluginsdk.Manifest {
 	}
 }
 
-func (b *builtinMetadataPlugin) Configure(_ map[string]any) error {
+func (b *builtinMetadataPlugin) Configure(settings map[string]any) error {
+	if settings == nil {
+		return nil
+	}
+	if lang, ok := settings["language"].(string); ok && strings.TrimSpace(lang) != "" {
+		b.language = lang
+	}
 	return nil
 }
 
-func (b *builtinMetadataPlugin) LookupMedia(_ context.Context, mediaType, query string) ([]map[string]any, error) {
-	if query == "" {
+func (b *builtinMetadataPlugin) LookupMedia(ctx context.Context, mediaType, query string) ([]map[string]any, error) {
+	query = strings.TrimSpace(query)
+	if query == "" || b.svc == nil {
 		return []map[string]any{}, nil
 	}
-	return []map[string]any{
-		{
-			"title":     query,
-			"mediaType": mediaType,
-			"year":      2025,
-			"tvdbId":    81189,
-			"tmdbId":    95396,
-			"imdbId":    "tt11280740",
-			"overview":  fmt.Sprintf("Unified metadata lookup result for %s (%s).", query, mediaType),
-		},
-	}, nil
+	lang := b.language
+	if lang == "" {
+		lang = "en-US"
+	}
+	switch strings.ToLower(strings.TrimSpace(mediaType)) {
+	case "series", "tv", "tvsearch":
+		items, err := b.svc.SearchSeries(ctx, query, lang)
+		if err != nil {
+			return nil, err
+		}
+		return structsToMaps(items), nil
+	case "movie", "movies":
+		items, err := b.svc.SearchMovies(ctx, query)
+		if err != nil {
+			return nil, err
+		}
+		return structsToMaps(items), nil
+	default:
+		// Try series first, then movies, for untyped plugin calls.
+		series, err := b.svc.SearchSeries(ctx, query, lang)
+		if err != nil {
+			return nil, err
+		}
+		if len(series) > 0 {
+			return structsToMaps(series), nil
+		}
+		movies, err := b.svc.SearchMovies(ctx, query)
+		if err != nil {
+			return nil, err
+		}
+		return structsToMaps(movies), nil
+	}
+}
+
+func structsToMaps[T any](items []T) []map[string]any {
+	out := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		raw, err := json.Marshal(item)
+		if err != nil {
+			continue
+		}
+		var m map[string]any
+		if err := json.Unmarshal(raw, &m); err != nil {
+			continue
+		}
+		out = append(out, m)
+	}
+	return out
 }
 
 type builtinDownloadClientPlugin struct{}
@@ -883,7 +1219,7 @@ func (b *builtinDownloadClientPlugin) Manifest() pluginsdk.Manifest {
 		Name:        "Replacearr Download Client Bridge (qBittorrent / SABnzbd)",
 		Version:     "1.0.0",
 		Author:      "Replacearr Core",
-		Description: "Built-in download queue adapter supporting torrent and usenet clients.",
+		Description: "Placeholder until real qBittorrent/SABnzbd clients are implemented. Does not accept downloads.",
 		Types:       []pluginsdk.PluginType{pluginsdk.PluginTypeDownloadClient},
 		ConfigSchema: []pluginsdk.ConfigFieldSchema{
 			{
@@ -901,9 +1237,8 @@ func (b *builtinDownloadClientPlugin) Configure(_ map[string]any) error {
 	return nil
 }
 
-func (b *builtinDownloadClientPlugin) EnqueueDownload(_ context.Context, title, _, _ string) (string, error) {
-	slug := strings.ToLower(strings.ReplaceAll(title, " ", "-"))
-	return fmt.Sprintf("replacearr-dl-%s-%d", slug, time.Now().UnixNano()), nil
+func (b *builtinDownloadClientPlugin) EnqueueDownload(_ context.Context, _, _, _ string) (string, error) {
+	return "", errors.New("builtin download bridge cannot send torrents; configure an enabled download client with a working integration")
 }
 
 type builtinFlareSolverrPlugin struct {
@@ -1081,6 +1416,83 @@ func (b *builtinOpenVPNProxyPlugin) ProxyURL() string {
 	return strings.TrimSpace(u)
 }
 
+// --- Built-in *arr compatibility shims (in-process HTTP mounts) ---
+
+type builtinCompatSonarrPlugin struct{}
+
+func (b *builtinCompatSonarrPlugin) Manifest() pluginsdk.Manifest {
+	return pluginsdk.Manifest{
+		ID:          pluginsdk.CompatPluginSonarr,
+		Name:        "Sonarr v3 Compatibility",
+		Version:     "1.0.0",
+		Author:      "Replacearr Core",
+		Description: "Drop-in Sonarr v3 API at /sonarr and /api/v3 for Overseerr, Bazarr, and nzb360.",
+		Types:       []pluginsdk.PluginType{pluginsdk.PluginTypeCompat},
+		ConfigSchema: []pluginsdk.ConfigFieldSchema{
+			{
+				Name:     "basePath",
+				Label:    "Base path",
+				Type:     "text",
+				Default:  "/sonarr",
+				Required: false,
+				HelpText: "Also mounts root /api/v3 when enabled. Disable to return HTTP 404 on these routes.",
+			},
+		},
+	}
+}
+
+func (b *builtinCompatSonarrPlugin) Configure(_ map[string]any) error { return nil }
+
+type builtinCompatRadarrPlugin struct{}
+
+func (b *builtinCompatRadarrPlugin) Manifest() pluginsdk.Manifest {
+	return pluginsdk.Manifest{
+		ID:          pluginsdk.CompatPluginRadarr,
+		Name:        "Radarr v3 Compatibility",
+		Version:     "1.0.0",
+		Author:      "Replacearr Core",
+		Description: "Drop-in Radarr v3 API at /radarr for Overseerr, Bazarr, and nzb360.",
+		Types:       []pluginsdk.PluginType{pluginsdk.PluginTypeCompat},
+		ConfigSchema: []pluginsdk.ConfigFieldSchema{
+			{
+				Name:     "basePath",
+				Label:    "Base path",
+				Type:     "text",
+				Default:  "/radarr",
+				Required: false,
+				HelpText: "Disable to return HTTP 404 on /radarr routes.",
+			},
+		},
+	}
+}
+
+func (b *builtinCompatRadarrPlugin) Configure(_ map[string]any) error { return nil }
+
+type builtinCompatProwlarrPlugin struct{}
+
+func (b *builtinCompatProwlarrPlugin) Manifest() pluginsdk.Manifest {
+	return pluginsdk.Manifest{
+		ID:          pluginsdk.CompatPluginProwlarr,
+		Name:        "Prowlarr v1 Compatibility",
+		Version:     "1.0.0",
+		Author:      "Replacearr Core",
+		Description: "Drop-in Prowlarr v1 API and Torznab feeds at /prowlarr.",
+		Types:       []pluginsdk.PluginType{pluginsdk.PluginTypeCompat},
+		ConfigSchema: []pluginsdk.ConfigFieldSchema{
+			{
+				Name:     "basePath",
+				Label:    "Base path",
+				Type:     "text",
+				Default:  "/prowlarr",
+				Required: false,
+				HelpText: "Disable to return HTTP 404 on /prowlarr routes. Native /api/v1 stays available.",
+			},
+		},
+	}
+}
+
+func (b *builtinCompatProwlarrPlugin) Configure(_ map[string]any) error { return nil }
+
 // --- Helpers ---
 
 func defaultSettingsFromSchema(schema []pluginsdk.ConfigFieldSchema) map[string]any {
@@ -1100,6 +1512,30 @@ func hasPluginType(types []pluginsdk.PluginType, target pluginsdk.PluginType) bo
 		}
 	}
 	return false
+}
+
+func proxyEndpointReachable(proxyURL string) bool {
+	u, err := url.Parse(proxyURL)
+	if err != nil || u.Host == "" {
+		return false
+	}
+	host := u.Host
+	if !strings.Contains(host, ":") {
+		switch strings.ToLower(u.Scheme) {
+		case "https":
+			host += ":443"
+		case "socks5", "socks5h", "socks4":
+			host += ":1080"
+		default:
+			host += ":80"
+		}
+	}
+	conn, err := net.DialTimeout("tcp", host, 400*time.Millisecond)
+	if err != nil {
+		return false
+	}
+	_ = conn.Close()
+	return true
 }
 
 func cloneDiscoveredPlugin(in DiscoveredPlugin) DiscoveredPlugin {

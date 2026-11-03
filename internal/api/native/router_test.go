@@ -111,8 +111,9 @@ func TestSeriesAndIndexerProxyFlow(t *testing.T) {
 	if err := json.Unmarshal(rr.Body.Bytes(), &overview); err != nil {
 		t.Fatal(err)
 	}
-	if overview.Counts["indexerProxies"] < 1 || overview.System.FlareSolverrURL == "" {
-		t.Fatalf("overview missing flaresolverr seed: %+v", overview)
+	// FlareSolverr URL comes from config; proxies are no longer auto-seeded.
+	if overview.System.FlareSolverrURL == "" {
+		t.Fatalf("overview missing flaresolverr url from config: %+v", overview)
 	}
 
 	rr = httptest.NewRecorder()

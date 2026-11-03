@@ -30,7 +30,7 @@ This is a highly experimental AI created repo. I still have to deslop it. feel f
   - Extend Replacearr with custom indexers, download clients, or notification hooks written in standard Go.
   - Out-of-process JSON-RPC 2.0 over stdio isolation — plugins run as independent binaries in `/config/plugins` without requiring CGO or dynamic library version lock-in.
 - **Cardigann YAML Definition Loader**:
-  - Loads Prowlarr/Jackett-compatible Cardigann YAML indexer definitions directly from `/config/definitions` (or `.tmp/ProwlarrIndexers/definitions/v11` in development).
+  - Ships ~580 Cardigann YAML indexer definitions in repo `definitions/` (seeded into `REPLACEARR_DEFINITIONS_DIR`, default `/config/definitions`; built-in fallbacks when empty). Refresh with `make sync-definitions`.
 - **Single Static Binary & LinuxServer-Style Docker Image**:
   - Pure-Go SQLite (`modernc.org/sqlite`), embedded React SPA (`internal/webui`), `CGO_ENABLED=0` static compilation, and a production multi-stage container supporting `PUID`/`PGID` and `TZ`.
 
@@ -42,7 +42,9 @@ This is a highly experimental AI created repo. I still have to deslop it. feel f
 replacearr/
 ├── cmd/replacearr/                # Main server entrypoint
 ├── examples/plugins/
-│   └── sample-indexer/            # Sample out-of-process Go indexer plugin
+│   ├── sample-indexer/            # Torznab demo indexer (examples-only; not shipped)
+│   ├── openvpn-proxy/             # Sample network proxy plugin
+│   └── webhook-notifier/          # Sample notification plugin (POST JSON webhooks)
 ├── internal/
 │   ├── api/                       # Unified REST API + Sonarr/Radarr/Prowlarr compat routers
 │   ├── auth/                      # Password hashing, JWT tokens, RBAC & API key middleware
@@ -58,9 +60,10 @@ replacearr/
 │   ├── Dockerfile                 # Multi-stage production container image
 │   ├── docker-compose.prod.yml    # End-user production Docker Compose stack
 │   └── entrypoint.sh              # PUID/PGID setup & bundled plugin seeding
-├── Dockerfile                     # Root development & CI container
-├── docker-compose.yml             # Development & integration testing Compose file
-└── Makefile                       # Build, dev, test, and Docker automation
+├── Dockerfile                     # Root Go+Node image for local containerized development
+├── docker-compose.yml             # Local containerized development (bind-mount, /data paths)
+├── entrypoint.sh                  # Local dev container entrypoint (API + Vite)
+└── Makefile                       # Build, test, and Docker automation
 ```
 
 ---
@@ -212,8 +215,6 @@ Run Replacearr in production using the published image above, or build locally f
 
 ```bash
 # Build and start the production container in the background
-make docker-prod-run
-# Or directly with Docker Compose:
 docker compose -f docker/docker-compose.prod.yml up -d --build
 ```
 
@@ -250,7 +251,7 @@ services:
 | `REPLACEARR_CONFIG_DIR` | `/config` | Directory for SQLite database, JWT secret, and plugins |
 | `REPLACEARR_DB_PATH` | `/config/replacearr.db` | Custom path to SQLite database file |
 | `REPLACEARR_PLUGIN_DIR` | `/config/plugins` | Directory scanned for executable Go plugins |
-| `REPLACEARR_DEFINITIONS_DIR` | `/config/definitions` | Directory scanned for Cardigann YAML definitions |
+| `REPLACEARR_DEFINITIONS_DIR` | `/config/definitions` | Directory scanned for Cardigann YAML definitions (seeded from bundled `definitions/`) |
 | `REPLACEARR_ADMIN_USER` | `admin` | Initial admin username seeded on first startup |
 | `REPLACEARR_ADMIN_PASS` | `replacearr` | Initial admin password seeded on first startup |
 | `REPLACEARR_API_KEY` | *(auto-generated)* | Optional fixed default system API key |
@@ -262,18 +263,17 @@ services:
 
 ### Prerequisites
 
-- **Go** `1.23+` (tested with Go `1.26`)
-- **Node.js** `24+` and **npm**
-- **Docker** & **Docker Compose** (optional, for containerized workflows)
+- **Docker** & **Docker Compose** (required for local development via `make start`)
+- **Go** `1.23+` and **Node.js** `24+` only if you run `make test` / `make build` on the host
 
 ### Quick Start (Local Development)
 
-```bash
-# 1. Install Go + Web dependencies and shallow-clone upstream reference repos into .tmp/
-make setup
+Local development is containerized so media paths match production (`/data/TV`, `/data/Movies`, `/data/downloads`):
 
-# 2. Run Go backend (:8989) + Vite React dev server (:5173) concurrently
-make dev
+```bash
+make start               # API :8989 + Vite :5173 (root docker-compose.yml)
+# UI http://localhost:5173  ·  API http://localhost:8989
+make stop                # stop the stack (keeps ./config and ./data)
 
 # Or build a single self-contained binary with embedded UI + plugins:
 make build
@@ -285,24 +285,18 @@ make build
 | Command | Description |
 | :--- | :--- |
 | `make help` | Show all available `make` targets |
-| `make setup` | Install Go/npm dependencies and clone Sonarr, Radarr, Prowlarr & Indexers into `.tmp/` |
-| `make setup-refs` | Shallow-clone upstream Sonarr, Radarr, Prowlarr, and Indexers into `.tmp/` |
-| `make dev` | Run Go backend (`:8989`) and Vite React frontend (`:5173`) concurrently |
-| `make dev-backend` | Build plugins and run only the Go backend server |
-| `make dev-web` | Run only the React Vite development server |
 | `make build-web` | Build static React SPA and copy into `internal/webui/dist` |
-| `make build-plugins` | Compile bundled Go plugins into `bin/plugins/` |
+| `make build-plugins` | Compile local example Go plugins into `bin/plugins/` (excludes Torznab demo) |
 | `make build-backend` | Compile the static `bin/replacearr` binary |
 | `make build` | Full production build (React UI + plugins + static Go binary) |
 | `make test` | Run all Go backend unit/integration tests and frontend typechecks |
 | `make test-go` | Run `go test -v -race ./...` |
 | `make test-web` | Run TypeScript verification (`npm run typecheck`) in `web/` |
-| `make docker-dev` | Build and start the root development Docker Compose environment |
-| `make docker-dev-down` | Stop and remove the development Docker Compose containers |
-| `make docker-prod` | Build the public production multi-stage Docker image (`docker/Dockerfile`) |
-| `make docker-prod-run` | Start the production stack using `docker/docker-compose.prod.yml` |
+| `make start` | Start containerized local dev (`docker-compose.yml`: bind-mount, `/data/TV` paths, Vite+API) |
+| `make stop` | Stop the local containerized stack (keeps `./config` and `./data`) |
+| `make build-docker` | Build the public production multi-stage Docker image (`docker/Dockerfile`) |
 | `make clean` | Clean build artifacts, embedded dist files, and temporary dev config |
-| `make clean-all` | Deep clean including `.tmp/` reference repos and `web/node_modules` |
+| `make clean-all` | Deep clean including `web/node_modules` |
 
 ---
 

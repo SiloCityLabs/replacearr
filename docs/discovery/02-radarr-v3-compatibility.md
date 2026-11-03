@@ -4,11 +4,11 @@
 
 External ecosystem tools (**Overseerr**, **Jellyseerr**, **Bazarr**, **nzb360**, **Homepage**, **Prowlarr**, **Recyclarr**, **Maintainerr**) communicate with Radarr using its v3 REST API.
 
-In upstream Radarr (`.tmp/Radarr/src/Radarr.Http/V3ApiControllerAttribute.cs`), every v3 controller is decorated with `[V3ApiController]`, mounting routes at `/api/v3/[controller]`. Replacearr exposes the full Radarr v3 compatibility surface at:
+In upstream Radarr (`Radarr/src/Radarr.Http/V3ApiControllerAttribute.cs`), every v3 controller is decorated with `[V3ApiController]`, mounting routes at `/api/v3/[controller]`. Replacearr exposes the full Radarr v3 compatibility surface at (when the built-in `builtin-compat-radarr` plugin is enabled):
 * `/radarr/api/v3/*` (dedicated URL-base mount for Radarr clients)
-* `/api/v3/movie*` (also mounted on the root `/api/v3` router since `/movie`, `/movie/lookup`, and `/moviefile` do not collide with Sonarr's `/series`, `/episode`, and `/episodefile` paths!)
+* `/api/v3/movie*` is not remounted on the Sonarr root `/api/v3` gate; use `/radarr/api/v3/movie*` for Radarr clients
 
-Authentication is identical to Sonarr v3 (`.tmp/Radarr/src/Radarr.Http/Authentication/ApiKeyAuthenticationHandler.cs`):
+Authentication is identical to Sonarr v3 (`Radarr/src/Radarr.Http/Authentication/ApiKeyAuthenticationHandler.cs`):
 1. Query parameter `?apikey=<key>`
 2. Header `X-Api-Key: <key>`
 3. Header `Authorization: Bearer <key>`
@@ -19,7 +19,7 @@ Authentication is identical to Sonarr v3 (`.tmp/Radarr/src/Radarr.Http/Authentic
 
 While Sonarr v3 and Radarr v3 share `NzbDrone.Core` and `ProviderControllerBase`, their media domain models, lookup routes,file endpoints, and command payloads differ in critical ways that Replacearr's compatibility layer handles explicitly:
 
-| Feature / Dimension | Sonarr v3 (`.tmp/Sonarr/src/Sonarr.Api.V3`) | Radarr v3 (`.tmp/Radarr/src/Radarr.Api.V3`) |
+| Feature / Dimension | Sonarr v3 (`Sonarr/src/Sonarr.Api.V3`) | Radarr v3 (`Radarr/src/Radarr.Api.V3`) |
 | :--- | :--- | :--- |
 | **Primary Media Entity** | `SeriesResource` (`/api/v3/series`), hierarchical (`Series` -> `Season` -> `Episode` -> `EpisodeFile`) | `MovieResource` (`/api/v3/movie`), flat 1-to-1 (`Movie` -> `MovieFile`) |
 | **Primary External ID** | `tvdbId` (integer, required on `POST /series` and `GET /series?tvdbId=`) | `tmdbId` (integer, required on `POST /movie` and `GET /movie?tmdbId=`) |
@@ -37,7 +37,7 @@ While Sonarr v3 and Radarr v3 share `NzbDrone.Core` and `ProviderControllerBase`
 
 ## 3. Required Endpoints & Upstream Controller Mapping
 
-| Endpoint Path | Methods | Upstream Controller (`.tmp/Radarr/src/Radarr.Api.V3/`) | Primary Ecosystem Consumers |
+| Endpoint Path | Methods | Upstream Controller (`Radarr/src/Radarr.Api.V3/`) | Primary Ecosystem Consumers |
 | :--- | :--- | :--- | :--- |
 | `/api/v3/system/status` | `GET` | `System/SystemController.cs` (`SystemResource.cs`) | Overseerr, Jellyseerr, Bazarr, nzb360, Homepage, Prowlarr |
 | `/api/v3/movie` | `GET`, `POST` | `Movies/MovieController.cs` (`MovieResource.cs`) | Overseerr, Jellyseerr, Bazarr, nzb360, Homepage |
@@ -69,14 +69,14 @@ While Sonarr v3 and Radarr v3 share `NzbDrone.Core` and `ProviderControllerBase`
 ## 4. Detailed Endpoint Contracts & JSON Payloads
 
 ### 4.1 `GET /radarr/api/v3/system/status`
-* **Upstream Source**: `.tmp/Radarr/src/Radarr.Api.V3/System/SystemController.cs`
+* **Upstream Source**: `Radarr/src/Radarr.Api.V3/System/SystemController.cs`
 * **Response**: Same structure as Sonarr's `SystemResource`, with `"appName": "Radarr"`, `"instanceName": "Replacearr (Radarr Compat)"`, and `"version": "5.14.0.9383"`.
 
 ### 4.2 `/api/v3/movie` and `/api/v3/movie/lookup`
 * **Upstream Source**: `Movies/MovieController.cs`, `Movies/MovieLookupController.cs`, `Movies/MovieResource.cs`
 * **Query Parameters**:
   * `GET /api/v3/movie?tmdbId={tmdbId}&excludeLocalCovers={bool}&languageId={int}`
-  * `GET /api/v3/movie/lookup?term={term}` (supports `tmdb:12345`, `imdb:tt1234567`, or free-text search)
+  * `GET /api/v3/movie/lookup?term={term}` (supports `tmdb:12345`, `imdb:tt1234567`, or free-text search). Replacearr backs this with Radarr’s metadata API (`https://api.radarr.video/v1/…`) via `internal/metadata` — not a curated stub catalog.
   * `GET /api/v3/movie/lookup/tmdb?tmdbId={tmdbId}` (returns a single `MovieResource` object, **not** an array! Overseerr calls this directly before adding a movie)
   * `GET /api/v3/movie/lookup/imdb?imdbId={imdbId}` (returns a single `MovieResource` object)
   * `DELETE /api/v3/movie/{id}?deleteFiles={bool}&addImportExclusion={bool}` (note: parameter name is `addImportExclusion` in Radarr vs. `addImportListExclusion` in Sonarr)
@@ -107,7 +107,7 @@ While Sonarr v3 and Radarr v3 share `NzbDrone.Core` and `ProviderControllerBase`
   "year": 2024,
   "youTubeTrailerId": "Way9Dexny3w",
   "studio": "Legendary Pictures",
-  "path": "/data/movies/Dune Part Two (2024)",
+  "path": "/data/Movies/Dune Part Two (2024)",
   "qualityProfileId": 1,
   "hasFile": true,
   "movieFileId": 10,
@@ -120,7 +120,7 @@ While Sonarr v3 and Radarr v3 share `NzbDrone.Core` and `ProviderControllerBase`
   "imdbId": "tt15239678",
   "tmdbId": 693134,
   "titleSlug": "693134",
-  "rootFolderPath": "/data/movies",
+  "rootFolderPath": "/data/Movies",
   "certification": "PG-13",
   "genres": ["Science Fiction", "Adventure"],
   "tags": [1],
@@ -148,7 +148,7 @@ While Sonarr v3 and Radarr v3 share `NzbDrone.Core` and `ProviderControllerBase`
   "id": 10,
   "movieId": 1,
   "relativePath": "Dune.Part.Two.2024.2160p.WEB-DL.DDP5.1.Atmos.DV.HDR.H.265-FLUX.mkv",
-  "path": "/data/movies/Dune Part Two (2024)/Dune.Part.Two.2024.2160p.WEB-DL.DDP5.1.Atmos.DV.HDR.H.265-FLUX.mkv",
+  "path": "/data/Movies/Dune Part Two (2024)/Dune.Part.Two.2024.2160p.WEB-DL.DDP5.1.Atmos.DV.HDR.H.265-FLUX.mkv",
   "size": 15461882265,
   "dateAdded": "2026-10-23T13:00:00Z",
   "sceneName": "Dune.Part.Two.2024.2160p.WEB-DL.DDP5.1.Atmos.DV.HDR.H.265-FLUX",

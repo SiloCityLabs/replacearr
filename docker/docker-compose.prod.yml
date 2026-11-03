@@ -38,7 +38,7 @@ services:
     volumes:
       # Persistent SQLite database, JWT secret, Cardigann definitions & Go plugins
       - ./config:/config
-      # Unified media library & downloads directory (/data/tv, /data/movies, /data/downloads)
+      # Unified media library & downloads directory (/data/TV, /data/Movies, /data/downloads)
       - ./media:/data
     depends_on:
       - flaresolverr

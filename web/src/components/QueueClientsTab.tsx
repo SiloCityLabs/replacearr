@@ -6,12 +6,17 @@ import {
   Trash2,
   FolderPlus,
   HardDrive,
-  X,
   CheckCircle2,
   Sparkles,
 } from 'lucide-react';
 import type { DownloadClient, QualityProfile, QueueItem, RootFolder } from '../types';
 import { api, formatBytes } from '../api';
+import {
+  blankDownloadClientForm,
+  DownloadClientForm,
+  DownloadClientModal,
+  downloadClientToForm,
+} from './modals/DownloadClientModal';
 
 interface QueueClientsTabProps {
   queue: QueueItem[];
@@ -30,14 +35,7 @@ export const QueueClientsTab: React.FC<QueueClientsTabProps> = ({
   onRefresh,
   onNotify,
 }) => {
-  const [showAddClientModal, setShowAddClientModal] = useState(false);
-  const [clientName, setClientName] = useState('');
-  const [clientImpl, setClientImpl] = useState('qBittorrent');
-  const [clientProtocol, setClientProtocol] = useState<'torrent' | 'usenet'>('torrent');
-  const [clientHost, setClientHost] = useState('localhost');
-  const [clientPort, setClientPort] = useState(8080);
-  const [clientUsername, setClientUsername] = useState('admin');
-  const [clientCategory, setClientCategory] = useState('replacearr');
+  const [clientForm, setClientForm] = useState<DownloadClientForm | null>(null);
 
   // Root folder form
   const [newFolderPath, setNewFolderPath] = useState('');
@@ -53,35 +51,8 @@ export const QueueClientsTab: React.FC<QueueClientsTabProps> = ({
     }
   };
 
-  const handleAddClient = async (e: React.FormEvent) => {
-    e.preventDefault();
-    try {
-      const created = await api.addDownloadClient({
-        name: clientName || clientImpl,
-        implementation: clientImpl,
-        implementationName: clientImpl,
-        configContract: `${clientImpl}Settings`,
-        protocol: clientProtocol,
-        enable: true,
-        priority: 1,
-        host: clientHost,
-        port: clientPort,
-        useSsl: false,
-        username: clientUsername,
-        category: clientCategory,
-        removeCompletedDownloads: true,
-        removeFailedDownloads: true,
-      });
-      onNotify(`Added download client "${created.name}"`);
-      setShowAddClientModal(false);
-      setClientName('');
-      await onRefresh();
-    } catch (err) {
-      onNotify(err instanceof Error ? err.message : 'Failed to add download client', true);
-    }
-  };
-
   const handleDeleteClient = async (dc: DownloadClient) => {
+    if (!window.confirm(`Delete download client "${dc.name}"?`)) return;
     try {
       await api.deleteDownloadClient(dc.id);
       onNotify(`Removed download client "${dc.name}"`);
@@ -104,6 +75,17 @@ export const QueueClientsTab: React.FC<QueueClientsTabProps> = ({
       await onRefresh();
     } catch (err) {
       onNotify(err instanceof Error ? err.message : 'Failed to add root folder', true);
+    }
+  };
+
+  const handleDeleteRootFolder = async (folder: RootFolder) => {
+    if (!window.confirm(`Remove root folder "${folder.path}"?`)) return;
+    try {
+      await api.deleteRootFolder(folder.id);
+      onNotify(`Removed root folder "${folder.path}"`);
+      await onRefresh();
+    } catch (err) {
+      onNotify(err instanceof Error ? err.message : 'Failed to remove root folder', true);
     }
   };
 
@@ -141,9 +123,9 @@ export const QueueClientsTab: React.FC<QueueClientsTabProps> = ({
                 item.size > 0
                   ? Math.min(
                       100,
-                      Math.max(5, Math.round(((item.size - item.sizeleft) / item.size) * 100))
+                      Math.max(0, Math.round(((item.size - item.sizeleft) / item.size) * 100))
                     )
-                  : 70;
+                  : 0;
               return (
                 <div
                   key={item.id}
@@ -175,18 +157,22 @@ export const QueueClientsTab: React.FC<QueueClientsTabProps> = ({
 
                     <div className="flex flex-wrap items-center gap-4 text-xs text-slate-400">
                       <span>
-                        Client: <strong className="text-slate-200">{item.downloadClient}</strong>
+                        Client: <strong className="text-slate-200">{item.downloadClient || '—'}</strong>
                       </span>
                       <span>
-                        Indexer: <strong className="text-slate-200">{item.indexer || 'Replacearr'}</strong>
+                        Indexer: <strong className="text-slate-200">{item.indexer || '—'}</strong>
                       </span>
                       <span>
                         Status: <strong className="text-emerald-400">{item.status}</strong>
                       </span>
                       <span className="font-mono">
-                        {formatBytes(item.size - item.sizeleft)} / {formatBytes(item.size)} ({pct}%)
+                        {item.size > 0
+                          ? `${formatBytes(item.size - item.sizeleft)} / ${formatBytes(item.size)} (${pct}%)`
+                          : 'size unknown'}
                       </span>
-                      <span className="font-mono text-sky-300">ETA: {item.timeleft || '00:08:30'}</span>
+                      <span className="font-mono text-sky-300">
+                        {item.timeleft ? `ETA: ${item.timeleft}` : 'ETA: not tracked'}
+                      </span>
                     </div>
                   </div>
 
@@ -222,7 +208,8 @@ export const QueueClientsTab: React.FC<QueueClientsTabProps> = ({
           </div>
 
           <button
-            onClick={() => setShowAddClientModal(true)}
+            type="button"
+            onClick={() => setClientForm(blankDownloadClientForm())}
             className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-lg transition"
           >
             <Plus className="w-4 h-4" />
@@ -241,7 +228,7 @@ export const QueueClientsTab: React.FC<QueueClientsTabProps> = ({
                   <div className="min-w-0">
                     <h4 className="text-sm font-bold text-white break-words">{dc.name}</h4>
                     <p className="text-xs font-mono text-slate-400 mt-0.5 break-all">
-                      {dc.useSsl ? 'https' : 'http'}://{dc.host}:{dc.port}
+                      {dc.baseUrl}
                     </p>
                   </div>
                   <span
@@ -267,14 +254,24 @@ export const QueueClientsTab: React.FC<QueueClientsTabProps> = ({
 
               <div className="pt-3 border-t border-slate-800/80 flex items-center justify-between">
                 <span className="inline-flex items-center gap-1 text-xs text-emerald-400">
-                  <CheckCircle2 className="w-3.5 h-3.5" /> Enabled
+                  <CheckCircle2 className="w-3.5 h-3.5" /> {dc.enable ? 'Enabled' : 'Disabled'}
                 </span>
-                <button
-                  onClick={() => handleDeleteClient(dc)}
-                  className="p-1.5 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setClientForm(downloadClientToForm(dc))}
+                    className="px-2 py-1 rounded-lg text-xs text-slate-300 hover:text-white hover:bg-slate-800 transition"
+                  >
+                    Edit
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleDeleteClient(dc)}
+                    className="p-1.5 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
             </div>
           ))}
@@ -290,22 +287,37 @@ export const QueueClientsTab: React.FC<QueueClientsTabProps> = ({
           </div>
 
           <div className="space-y-2">
-            {rootFolders.map((rf) => (
-              <div
-                key={rf.id}
-                className="p-3 rounded-lg bg-slate-950 border border-slate-800 flex items-center justify-between gap-2 text-xs min-w-0"
-              >
-                <div className="flex items-center gap-2 min-w-0">
-                  <code className="font-mono text-slate-200 truncate">{rf.path}</code>
-                  <span className="text-[10px] font-mono uppercase px-2 py-0.5 rounded bg-indigo-500/15 text-indigo-300 shrink-0">
-                    {rf.mediaType}
-                  </span>
+            {rootFolders.length === 0 ? (
+              <p className="text-xs text-slate-500">No root folders yet. Add one below or use the setup wizard.</p>
+            ) : (
+              rootFolders.map((rf) => (
+                <div
+                  key={rf.id}
+                  className="p-3 rounded-lg bg-slate-950 border border-slate-800 flex items-center justify-between gap-2 text-xs min-w-0"
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    <code className="font-mono text-slate-200 truncate">{rf.path}</code>
+                    <span className="text-[10px] font-mono uppercase px-2 py-0.5 rounded bg-indigo-500/15 text-indigo-300 shrink-0">
+                      {rf.mediaType}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className="font-mono text-emerald-400 whitespace-nowrap">
+                      {formatBytes(rf.freeSpace)} free
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => void handleDeleteRootFolder(rf)}
+                      className="p-1.5 rounded-lg text-slate-400 hover:text-rose-300 hover:bg-rose-500/10 transition"
+                      title={`Remove ${rf.path}`}
+                      aria-label={`Remove root folder ${rf.path}`}
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                 </div>
-                <span className="font-mono text-emerald-400 shrink-0 whitespace-nowrap">
-                  {formatBytes(rf.freeSpace)} free
-                </span>
-              </div>
-            ))}
+              ))
+            )}
           </div>
 
           <form onSubmit={handleAddRootFolder} className="flex flex-wrap gap-2 pt-2">
@@ -368,130 +380,14 @@ export const QueueClientsTab: React.FC<QueueClientsTabProps> = ({
         </div>
       </div>
 
-      {/* Add Download Client Modal */}
-      {showAddClientModal && (
-        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm overflow-y-auto flex items-start justify-center p-4">
-          <div className="w-full max-w-lg bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl max-h-[calc(100dvh-2rem)] overflow-y-auto my-auto">
-            <div className="p-5 border-b border-slate-800 flex items-center justify-between">
-              <h3 className="text-base font-bold text-white">Add Download Client</h3>
-              <button
-                onClick={() => setShowAddClientModal(false)}
-                className="p-1.5 rounded-lg bg-slate-800 text-slate-400 hover:text-white"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <form onSubmit={handleAddClient} className="p-5 space-y-4">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-medium text-slate-300 mb-1">
-                    Client Name
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={clientName}
-                    onChange={(e) => setClientName(e.target.value)}
-                    placeholder="e.g. Primary qBittorrent"
-                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-300 mb-1">
-                    Implementation
-                  </label>
-                  <select
-                    value={clientImpl}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setClientImpl(val);
-                      if (val === 'SABnzbd' || val === 'NZBGet') {
-                        setClientProtocol('usenet');
-                      } else {
-                        setClientProtocol('torrent');
-                      }
-                    }}
-                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white"
-                  >
-                    <option value="qBittorrent">qBittorrent</option>
-                    <option value="Transmission">Transmission</option>
-                    <option value="SABnzbd">SABnzbd</option>
-                    <option value="NZBGet">NZBGet</option>
-                    <option value="Deluge">Deluge</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div className="sm:col-span-2">
-                  <label className="block text-xs font-medium text-slate-300 mb-1">
-                    Host
-                  </label>
-                  <input
-                    type="text"
-                    value={clientHost}
-                    onChange={(e) => setClientHost(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white font-mono"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-300 mb-1">
-                    Port
-                  </label>
-                  <input
-                    type="number"
-                    value={clientPort}
-                    onChange={(e) => setClientPort(Number(e.target.value))}
-                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white font-mono"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-medium text-slate-300 mb-1">
-                    Username
-                  </label>
-                  <input
-                    type="text"
-                    value={clientUsername}
-                    onChange={(e) => setClientUsername(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-300 mb-1">
-                    Category
-                  </label>
-                  <input
-                    type="text"
-                    value={clientCategory}
-                    onChange={(e) => setClientCategory(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white font-mono"
-                  />
-                </div>
-              </div>
-
-              <div className="pt-3 border-t border-slate-800 flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setShowAddClientModal(false)}
-                  className="px-4 py-2 rounded-lg bg-slate-800 text-slate-300 text-xs font-medium"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold transition"
-                >
-                  Save Client
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      {clientForm ? (
+        <DownloadClientModal
+          initial={clientForm}
+          onClose={() => setClientForm(null)}
+          onSaved={onRefresh}
+          onNotify={onNotify}
+        />
+      ) : null}
     </div>
   );
 };

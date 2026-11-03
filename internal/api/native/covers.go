@@ -21,25 +21,18 @@ func (s *Server) handleMediaCover(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	f, err := s.covers.Open(mediaType, id)
+
+	mt, cacheKey, remote, legacyID := s.resolveCover(mediaType, id)
+	if cacheKey == "" {
+		http.NotFound(w, r)
+		return
+	}
+
+	f, ct, err := s.covers.Open(mt, cacheKey)
 	if err != nil {
-		remote := ""
-		mt := mediaType
-		switch mediaType {
-		case "tv", "series":
-			mt = "tv"
-			if sr, gerr := s.store.GetSeriesByID(id); gerr == nil && sr != nil {
-				remote = firstRemoteCover(sr.Images)
-			}
-		case "movie", "movies":
-			mt = "movie"
-			if mv, gerr := s.store.GetMovieByID(id); gerr == nil && mv != nil {
-				remote = firstRemoteCover(mv.Images)
-			}
-		}
 		if remote != "" {
-			if _, eerr := s.covers.Ensure(mt, id, remote); eerr == nil {
-				f, err = s.covers.Open(mt, id)
+			if _, eerr := s.covers.Ensure(mt, cacheKey, id, remote, legacyID); eerr == nil {
+				f, ct, err = s.covers.Open(mt, cacheKey)
 			}
 		}
 		if err != nil {
@@ -48,37 +41,66 @@ func (s *Server) handleMediaCover(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	defer f.Close()
-	w.Header().Set("Content-Type", "image/webp")
+	if ct == "" {
+		ct = "application/octet-stream"
+	}
+	w.Header().Set("Content-Type", ct)
 	w.Header().Set("Cache-Control", "public, max-age=86400")
 	_, _ = io.Copy(w, f)
 }
 
-func firstRemoteCover(images []domain.MediaImage) string {
-	for _, img := range images {
-		if strings.TrimSpace(img.RemoteURL) != "" {
-			return img.RemoteURL
+func (s *Server) resolveCover(mediaType string, id int64) (mt, cacheKey, remote string, legacyID int64) {
+	legacyID = id
+	switch mediaType {
+	case "tv", "series":
+		mt = "tv"
+		if sr, err := s.store.GetSeriesByID(id); err == nil && sr != nil {
+			cacheKey = mediacover.CacheKeyTV(sr.ImdbID, sr.TvdbID, sr.ID)
+			remote = mediacover.PosterRemoteURL(sr.Images)
+			return mt, cacheKey, remote, legacyID
 		}
+	case "movie", "movies":
+		mt = "movie"
+		if mv, err := s.store.GetMovieByID(id); err == nil && mv != nil {
+			cacheKey = mediacover.CacheKeyMovie(mv.ImdbID, mv.TmdbID, mv.ID)
+			remote = mediacover.PosterRemoteURL(mv.Images)
+			return mt, cacheKey, remote, legacyID
+		}
+	default:
+		mt = mediacoverNormalize(mediaType)
 	}
-	return ""
+	return mt, "", "", legacyID
+}
+
+func mediacoverNormalize(mediaType string) string {
+	switch strings.ToLower(strings.TrimSpace(mediaType)) {
+	case "movie", "movies", "film":
+		return "movie"
+	default:
+		return "tv"
+	}
 }
 
 func (s *Server) cacheCoverAsync(mediaType string, id int64, images []domain.MediaImage) {
 	if s.covers == nil || id <= 0 {
 		return
 	}
-	remote := firstRemoteCover(images)
+	remote := mediacover.PosterRemoteURL(images)
 	if remote == "" {
 		return
 	}
 	go func() {
-		local, err := s.covers.Ensure(mediaType, id, remote)
-		if err != nil || local == "" {
-			return
-		}
-		switch mediaType {
+		mt := mediacoverNormalize(mediaType)
+		var cacheKey string
+		switch mt {
 		case "movie":
 			mv, err := s.store.GetMovieByID(id)
 			if err != nil || mv == nil {
+				return
+			}
+			cacheKey = mediacover.CacheKeyMovie(mv.ImdbID, mv.TmdbID, mv.ID)
+			local, err := s.covers.Ensure(mt, cacheKey, id, remote, id)
+			if err != nil || local == "" {
 				return
 			}
 			mv.Images = setLocalPoster(mv.Images, local, remote)
@@ -86,6 +108,11 @@ func (s *Server) cacheCoverAsync(mediaType string, id int64, images []domain.Med
 		default:
 			sr, err := s.store.GetSeriesByID(id)
 			if err != nil || sr == nil {
+				return
+			}
+			cacheKey = mediacover.CacheKeyTV(sr.ImdbID, sr.TvdbID, sr.ID)
+			local, err := s.covers.Ensure(mt, cacheKey, id, remote, id)
+			if err != nil || local == "" {
 				return
 			}
 			sr.Images = setLocalPoster(sr.Images, local, remote)
@@ -100,7 +127,7 @@ func setLocalPoster(images []domain.MediaImage, localURL, remoteURL string) []do
 	}
 	found := false
 	for i := range images {
-		if images[i].CoverType == "" || strings.EqualFold(images[i].CoverType, "poster") {
+		if strings.EqualFold(images[i].CoverType, "poster") {
 			images[i].CoverType = "poster"
 			images[i].URL = localURL
 			if images[i].RemoteURL == "" {
@@ -121,18 +148,21 @@ func setLocalPoster(images []domain.MediaImage, localURL, remoteURL string) []do
 }
 
 // ServeCoverFile writes a cached poster for compat MediaCover routes.
-func ServeCoverFile(covers *mediacover.Store, w http.ResponseWriter, mediaType string, id int64) {
-	if covers == nil {
+func ServeCoverFile(covers *mediacover.Store, w http.ResponseWriter, mediaType string, cacheKey string) {
+	if covers == nil || cacheKey == "" {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
-	f, err := covers.Open(mediaType, id)
+	f, ct, err := covers.Open(mediaType, cacheKey)
 	if err != nil {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
 	defer f.Close()
-	w.Header().Set("Content-Type", "image/webp")
+	if ct == "" {
+		ct = "application/octet-stream"
+	}
+	w.Header().Set("Content-Type", ct)
 	w.Header().Set("Cache-Control", "public, max-age=86400")
 	_, _ = io.Copy(w, f)
 }

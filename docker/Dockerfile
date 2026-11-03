@@ -36,17 +36,14 @@ COPY . .
 RUN rm -rf internal/webui/dist && mkdir -p internal/webui/dist
 COPY --from=web-builder /app/web/dist/ ./internal/webui/dist/
 
-# Compile main Replacearr static binary
+# Compile main Replacearr static binary.
+# Example plugins (including the Torznab demo indexer) stay under examples/
+# and are not bundled into the production image.
 RUN mkdir -p /out/plugins && \
     BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ") && \
     CGO_ENABLED=0 go build \
       -ldflags="-s -w -X main.Version=${VERSION} -X main.Commit=${COMMIT} -X main.BuildTime=${BUILD_TIME}" \
       -o /out/replacearr ./cmd/replacearr
-
-# Compile bundled out-of-process Go plugins
-RUN CGO_ENABLED=0 go build \
-      -ldflags="-s -w" \
-      -o /out/plugins/sample-indexer ./examples/plugins/sample-indexer
 
 # ------------------------------------------------------------------------------
 # Stage 3: Production Runtime
@@ -67,16 +64,18 @@ RUN apk add --no-cache \
       /config \
       /config/plugins \
       /config/definitions \
-      /data/tv \
-      /data/movies \
+      /data/TV \
+      /data/Movies \
       /data/downloads \
-      /usr/local/share/replacearr/plugins
+      /usr/local/share/replacearr/plugins \
+      /usr/local/share/replacearr/definitions
 
 COPY --from=go-builder /out/replacearr /usr/local/bin/replacearr
-COPY --from=go-builder /out/plugins/* /usr/local/share/replacearr/plugins/
+COPY --from=go-builder /out/plugins/ /usr/local/share/replacearr/plugins/
+COPY definitions/ /usr/local/share/replacearr/definitions/
 COPY docker/entrypoint.sh /entrypoint.sh
 
-RUN chmod +x /usr/local/bin/replacearr /usr/local/share/replacearr/plugins/* /entrypoint.sh
+RUN chmod +x /usr/local/bin/replacearr /entrypoint.sh
 
 ENV PUID=1000 \
     PGID=1000 \

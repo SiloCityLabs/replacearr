@@ -35,28 +35,30 @@ REDACT = r"""
 })()
 """
 
+# (filename, nav_label|None, wait_needle, kind)
+# kind: "main" opens mobile hamburger first; "settings" prefers settings sidebar buttons
 PAGES = [
-    ("00-login.png", None, "Sign In"),
-    ("01-dashboard.png", "Dashboard", "Welcome to Replacearr"),
-    ("02-series.png", "TV Series (Sonarr)", "TV Series Library"),
-    ("03-movies.png", "Movies (Radarr)", "Movies Library"),
-    ("04-indexers-search.png", "Indexers & Search", "Indexers & Unified Search"),
-    ("05-queue.png", "Queue & Clients", "Live Download Queue"),
-    ("06-plugins.png", "Go Plugins", "Go Plugin System"),
-    ("07-users.png", "Users & RBAC", "Users & Access Control"),
-    ("08-settings.png", "Settings", "Episode and movie naming"),
-    ("09-settings-general.png", "General", "Bind Address"),
-    ("10-settings-ui.png", "UI", "First Day of Week"),
-    ("11-settings-media.png", "Media Management", "Episode Naming"),
-    ("12-settings-profiles.png", "Profiles", "Quality Profiles"),
-    ("13-settings-quality.png", "Quality", "MB per minute"),
-    ("14-settings-indexers.png", "Indexers", "Add Indexer"),
-    ("15-settings-download-clients.png", "Download Clients", "Client records are live"),
-    ("16-settings-import-lists.png", "Import Lists", "List sync options"),
-    ("17-settings-connect.png", "Connect", "Saved connections are not sent"),
-    ("18-settings-metadata.png", "Metadata", "Preferred language"),
-    ("19-settings-tags.png", "Tags", "Add Tag"),
-    ("20-compatibility.png", "Compatibility Hub", "Overseerr"),
+    ("00-login.png", None, "Sign In", "main"),
+    ("01-dashboard.png", "Dashboard", "Welcome to Replacearr", "main"),
+    ("02-series.png", "TV Series", "TV Library", "main"),
+    ("03-movies.png", "Movies", "Movies Library", "main"),
+    ("04-indexers-search.png", "Indexers", "YAML Definitions", "main"),
+    ("05-queue.png", "Queue & Clients", "Live Download Queue", "main"),
+    ("06-plugins.png", "Go Plugins", "Go Plugin System", "main"),
+    ("07-users.png", "Users & RBAC", "Users & Access Control", "main"),
+    ("08-settings.png", "Settings", "Episode and movie naming", "main"),
+    ("09-settings-general.png", "General", "Bind Address", "settings"),
+    ("10-settings-ui.png", "UI", "First Day of Week", "settings"),
+    ("11-settings-media.png", "Media Management", "Episode Naming", "settings"),
+    ("12-settings-profiles.png", "Profiles", "Quality Profiles", "settings"),
+    ("13-settings-quality.png", "Quality", "MB per minute", "settings"),
+    ("14-settings-indexers.png", "Indexers", "Indexer rows save", "settings"),
+    ("15-settings-download-clients.png", "Download Clients", "Client records are live", "settings"),
+    ("16-settings-import-lists.png", "Import Lists", "List sync options", "settings"),
+    ("17-settings-system.png", "System", "Compat endpoints", "settings"),
+    ("18-settings-metadata.png", "Metadata", "Preferred language", "settings"),
+    ("19-settings-tags.png", "Tags", "Add Tag", "settings"),
+    ("20-compatibility.png", "Go Plugins", "Overseerr", "main"),
 ]
 
 
@@ -124,31 +126,48 @@ def open_tab(port: int) -> str:
     raise SystemExit("no debuggable tab")
 
 
-def wait_text(cdp: CDP, needle: str, timeout=12):
+def wait_text(cdp: CDP, needle: str, timeout=15):
     deadline = time.time() + timeout
     while time.time() < deadline:
-        text = cdp.eval("document.body ? document.body.innerText.slice(0, 5000) : ''") or ""
+        text = cdp.eval("document.body ? document.body.innerText.slice(0, 8000) : ''") or ""
         if needle in text:
             return
         time.sleep(0.15)
     raise SystemExit(f"timed out waiting for {needle!r}")
 
 
-def click_label(cdp: CDP, label: str):
+def open_mobile_nav(cdp: CDP):
+    cdp.eval(
+        """
+        (() => {
+          const open = document.querySelector('button[aria-label="Open navigation"]');
+          if (open) { open.click(); return 'opened'; }
+          return 'visible';
+        })()
+        """
+    )
+    time.sleep(0.25)
+
+
+def click_label(cdp: CDP, label: str, kind: str):
+    prefer_last = kind == "settings"
     expr = """
     (() => {
       const label = %s;
+      const preferLast = %s;
       const buttons = [...document.querySelectorAll('button')];
-      let btn = buttons.find((b) => b.textContent.trim() === label);
-      if (!btn) btn = buttons.find((b) => b.textContent.trim().startsWith(label));
-      if (!btn) return 'missing';
+      const exact = buttons.filter((b) => b.textContent.replace(/\\s+/g, ' ').trim() === label);
+      const starts = buttons.filter((b) => b.textContent.replace(/\\s+/g, ' ').trim().startsWith(label));
+      const pool = exact.length ? exact : starts;
+      if (!pool.length) return 'missing';
+      const btn = preferLast ? pool[pool.length - 1] : pool[0];
       btn.scrollIntoView({block: 'center', inline: 'center'});
       btn.click();
       return 'ok';
     })()
-    """ % json.dumps(label)
+    """ % (json.dumps(label), "true" if prefer_last else "false")
     if cdp.eval(expr) != "ok":
-        raise SystemExit(f"could not click {label!r}")
+        raise SystemExit(f"could not click {label!r} (kind={kind})")
 
 
 def shoot(cdp: CDP, out_dir: Path, name: str):
@@ -176,6 +195,13 @@ def main():
     out_dir.mkdir(parents=True, exist_ok=True)
     token = login_token()
 
+    # Drop stale Connect captures replaced by System.
+    for stale in ("17-settings-connect.png",):
+        old = out_dir / stale
+        if old.exists():
+            old.unlink()
+            print(f"removed {old.relative_to(REPO)}")
+
     chrome = subprocess.Popen(
         [
             "google-chrome",
@@ -187,7 +213,7 @@ def main():
             "--remote-allow-origins=*",
             f"--window-size={width},{height}",
             "--force-device-scale-factor=1",
-            f"--user-data-dir=/tmp/chrome-shot-{args.profile}",
+            f"--user-data-dir=/tmp/chrome-shot-{args.profile}-{args.port}",
             "about:blank",
         ],
         stdout=subprocess.DEVNULL,
@@ -216,13 +242,32 @@ def main():
         wait_text(cdp, "Welcome to Replacearr")
         time.sleep(0.5)
 
-        for filename, nav_label, needle in PAGES:
+        for filename, nav_label, needle, kind in PAGES:
             if filename == "00-login.png":
                 continue
             if nav_label:
-                click_label(cdp, nav_label)
+                if kind == "main" and args.profile == "mobile":
+                    open_mobile_nav(cdp)
+                click_label(cdp, nav_label, kind)
             wait_text(cdp, needle)
-            time.sleep(0.4)
+            # Compatibility gallery shot: scroll to *arr shim cards with client base URLs
+            # so it differs from the top-of-page plugins overview.
+            if filename == "20-compatibility.png":
+                cdp.eval(
+                    """
+                    (() => {
+                      const hit = [...document.querySelectorAll('h3')].find((el) =>
+                        /Sonarr|Radarr|Prowlarr/i.test(el.textContent || '')
+                      );
+                      (hit || [...document.querySelectorAll('div')].find((el) =>
+                        (el.textContent || '').includes('Client base URL')
+                      ))?.scrollIntoView({ block: 'start' });
+                      return 'scrolled';
+                    })()
+                    """
+                )
+                time.sleep(0.35)
+            time.sleep(0.45)
             shoot(cdp, out_dir, filename)
     finally:
         chrome.terminate()

@@ -1,6 +1,8 @@
-# Reference repositories and temporary artifacts
-.tmp/
+# Temporary artifacts
 tmp/
+core
+core.*
+*.core
 
 # Build outputs
 bin/

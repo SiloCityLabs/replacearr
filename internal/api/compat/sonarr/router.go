@@ -1,6 +1,7 @@
 package sonarr
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -16,6 +17,7 @@ import (
 	"github.com/replacearr/replacearr/internal/db"
 	"github.com/replacearr/replacearr/internal/domain"
 	"github.com/replacearr/replacearr/internal/mediacover"
+	"github.com/replacearr/replacearr/internal/metadata"
 )
 
 type SearchFunc func(query string, mediaType string, tvdbID int, tmdbID int, season int, episode int) ([]domain.ReleaseResult, error)
@@ -24,6 +26,7 @@ type Handler struct {
 	store    *db.Store
 	cfg      *config.Config
 	searchFn SearchFunc
+	meta     *metadata.Service
 	covers   *mediacover.Store
 	start    time.Time
 
@@ -37,6 +40,7 @@ func NewHandler(store *db.Store, cfg *config.Config, searchFn SearchFunc) *Handl
 		store:    store,
 		cfg:      cfg,
 		searchFn: searchFn,
+		meta:     metadata.New(),
 		start:    time.Now().UTC(),
 		commands: []domain.CommandRecord{},
 		nextCmd:  1,
@@ -46,6 +50,24 @@ func NewHandler(store *db.Store, cfg *config.Config, searchFn SearchFunc) *Handl
 // SetCoverStore attaches the shared media cover cache used by /MediaCover routes.
 func (h *Handler) SetCoverStore(covers *mediacover.Store) {
 	h.covers = covers
+}
+
+// SetMetadata attaches the shared SkyHook lookup service.
+func (h *Handler) SetMetadata(meta *metadata.Service) {
+	if meta != nil {
+		h.meta = meta
+	}
+}
+
+func (h *Handler) preferredLanguage() string {
+	if h.store != nil {
+		if cfg, err := h.store.GetAppConfig(); err == nil {
+			if lang := strings.TrimSpace(cfg.Metadata.PreferredLanguage); lang != "" {
+				return lang
+			}
+		}
+	}
+	return "english"
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -325,17 +347,20 @@ func (h *Handler) handleCreateSeries(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid json: "+err.Error())
 		return
 	}
-	if sr.Title == "" && sr.TvdbID > 0 {
-		for _, c := range curatedSeriesCatalog() {
-			if c.TvdbID == sr.TvdbID {
-				sr.Title = c.Title
-				if sr.Year == 0 {
-					sr.Year = c.Year
-				}
-				if sr.Overview == "" {
-					sr.Overview = c.Overview
-				}
-				break
+	if sr.Title == "" && sr.TvdbID > 0 && h.meta != nil {
+		if looked, _, err := h.meta.GetSeriesByTVDB(r.Context(), sr.TvdbID, h.preferredLanguage()); err == nil {
+			sr.Title = looked.Title
+			if sr.Year == 0 {
+				sr.Year = looked.Year
+			}
+			if sr.Overview == "" {
+				sr.Overview = looked.Overview
+			}
+			if sr.ImdbID == "" {
+				sr.ImdbID = looked.ImdbID
+			}
+			if len(sr.Images) == 0 {
+				sr.Images = looked.Images
 			}
 		}
 		if sr.Title == "" {
@@ -347,6 +372,7 @@ func (h *Handler) handleCreateSeries(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	_ = h.syncSeriesEpisodes(r.Context(), created)
 	h.cacheCoverAsync(created)
 	writeJSON(w, http.StatusCreated, created)
 }
@@ -401,230 +427,20 @@ func (h *Handler) handleDeleteSeries(w http.ResponseWriter, _ *http.Request, id 
 	writeJSON(w, http.StatusOK, map[string]any{})
 }
 
-func curatedSeriesCatalog() []domain.Series {
-	return []domain.Series{
-		{
-			Title:             "Severance",
-			SortTitle:         "severance",
-			CleanTitle:        "severance",
-			TitleSlug:         "severance",
-			Status:            "continuing",
-			Ended:             false,
-			Overview:          "Mark leads a team of office workers whose memories have been surgically divided between their work and personal lives.",
-			Network:           "Apple TV+",
-			AirTime:           "21:00",
-			Year:              2022,
-			Runtime:           50,
-			TvdbID:            371980,
-			ImdbID:            "tt11280740",
-			SeriesType:        "standard",
-			QualityProfileID:  1,
-			LanguageProfileID: 1,
-			SeasonFolder:      true,
-			Monitored:         true,
-			Genres:            []string{"Drama", "Mystery", "Sci-Fi"},
-			Images: []domain.MediaImage{
-				{CoverType: "poster", RemoteURL: "https://artworks.thetvdb.com/banners/v4/series/371980/posters/61e9c2.jpg"},
-			},
-			Seasons: []domain.Season{
-				{SeasonNumber: 1, Monitored: true},
-				{SeasonNumber: 2, Monitored: true},
-			},
-		},
-		{
-			Title:             "Fallout",
-			SortTitle:         "fallout",
-			CleanTitle:        "fallout",
-			TitleSlug:         "fallout",
-			Status:            "continuing",
-			Ended:             false,
-			Overview:          "In a future, post-apocalyptic Los Angeles brought about by nuclear decimation, citizens must live in underground bunkers to protect themselves from radiation, mutants and bandits.",
-			Network:           "Prime Video",
-			AirTime:           "00:00",
-			Year:              2024,
-			Runtime:           60,
-			TvdbID:            416452,
-			ImdbID:            "tt12637874",
-			SeriesType:        "standard",
-			QualityProfileID:  1,
-			LanguageProfileID: 1,
-			SeasonFolder:      true,
-			Monitored:         true,
-			Genres:            []string{"Action", "Adventure", "Drama", "Sci-Fi"},
-			Images: []domain.MediaImage{
-				{CoverType: "poster", RemoteURL: "https://artworks.thetvdb.com/banners/v4/series/416452/posters/fallout.jpg"},
-			},
-			Seasons: []domain.Season{
-				{SeasonNumber: 1, Monitored: true},
-			},
-		},
-		{
-			Title:             "Shogun",
-			SortTitle:         "shogun",
-			CleanTitle:        "shogun",
-			TitleSlug:         "shogun",
-			Status:            "continuing",
-			Ended:             false,
-			Overview:          "When a mysterious European ship is found marooned in a nearby fishing village, Lord Yoshii Toranaga discovers secrets that could tip the scales of power.",
-			Network:           "FX",
-			AirTime:           "22:00",
-			Year:              2024,
-			Runtime:           60,
-			TvdbID:            392556,
-			ImdbID:            "tt2788316",
-			SeriesType:        "standard",
-			QualityProfileID:  1,
-			LanguageProfileID: 1,
-			SeasonFolder:      true,
-			Monitored:         true,
-			Genres:            []string{"Adventure", "Drama", "History"},
-			Images: []domain.MediaImage{
-				{CoverType: "poster", RemoteURL: "https://artworks.thetvdb.com/banners/v4/series/392556/posters/shogun.jpg"},
-			},
-			Seasons: []domain.Season{
-				{SeasonNumber: 1, Monitored: true},
-			},
-		},
-		{
-			Title:             "The Bear",
-			SortTitle:         "the bear",
-			CleanTitle:        "thebear",
-			TitleSlug:         "the-bear",
-			Status:            "continuing",
-			Ended:             false,
-			Overview:          "A young chef from the fine dining world returns to Chicago to run his family's sandwich shop.",
-			Network:           "FX / Hulu",
-			AirTime:           "00:00",
-			Year:              2022,
-			Runtime:           30,
-			TvdbID:            403294,
-			ImdbID:            "tt14452776",
-			SeriesType:        "standard",
-			QualityProfileID:  1,
-			LanguageProfileID: 1,
-			SeasonFolder:      true,
-			Monitored:         true,
-			Genres:            []string{"Comedy", "Drama"},
-			Images: []domain.MediaImage{
-				{CoverType: "poster", RemoteURL: "https://artworks.thetvdb.com/banners/v4/series/403294/posters/thebear.jpg"},
-			},
-			Seasons: []domain.Season{
-				{SeasonNumber: 1, Monitored: true},
-				{SeasonNumber: 2, Monitored: true},
-				{SeasonNumber: 3, Monitored: true},
-			},
-		},
-		{
-			Title:             "Arcane",
-			SortTitle:         "arcane",
-			CleanTitle:        "arcane",
-			TitleSlug:         "arcane",
-			Status:            "ended",
-			Ended:             true,
-			Overview:          "Set in Utopian Piltover and the oppressed underground of Zaun, the story follows the origins of two iconic League Of Legends champions and the power that will tear them apart.",
-			Network:           "Netflix",
-			AirTime:           "00:00",
-			Year:              2021,
-			Runtime:           40,
-			TvdbID:            371028,
-			ImdbID:            "tt11126994",
-			SeriesType:        "standard",
-			QualityProfileID:  1,
-			LanguageProfileID: 1,
-			SeasonFolder:      true,
-			Monitored:         true,
-			Genres:            []string{"Animation", "Action", "Adventure"},
-			Images: []domain.MediaImage{
-				{CoverType: "poster", RemoteURL: "https://artworks.thetvdb.com/banners/v4/series/371028/posters/arcane.jpg"},
-			},
-			Seasons: []domain.Season{
-				{SeasonNumber: 1, Monitored: true},
-				{SeasonNumber: 2, Monitored: true},
-			},
-		},
-	}
-}
-
 func (h *Handler) handleSeriesLookup(w http.ResponseWriter, r *http.Request) {
 	term := strings.TrimSpace(r.URL.Query().Get("term"))
-	catalog := curatedSeriesCatalog()
 	if term == "" {
-		writeJSON(w, http.StatusOK, catalog)
+		writeJSON(w, http.StatusOK, []domain.Series{})
 		return
 	}
-
-	lower := strings.ToLower(term)
-	if strings.HasPrefix(lower, "tvdb:") {
-		idStr := strings.TrimSpace(strings.TrimPrefix(lower, "tvdb:"))
-		if tvdbID, err := strconv.Atoi(idStr); err == nil && tvdbID > 0 {
-			for _, item := range catalog {
-				if item.TvdbID == tvdbID {
-					writeJSON(w, http.StatusOK, []domain.Series{item})
-					return
-				}
-			}
-			custom := domain.Series{
-				Title:             fmt.Sprintf("TVDB Series %d", tvdbID),
-				SortTitle:         fmt.Sprintf("tvdb series %d", tvdbID),
-				CleanTitle:        fmt.Sprintf("tvdbseries%d", tvdbID),
-				TitleSlug:         fmt.Sprintf("tvdb-series-%d", tvdbID),
-				Status:            "continuing",
-				Overview:          fmt.Sprintf("Lookup result for TVDB ID %d", tvdbID),
-				Network:           "Network",
-				Year:              2025,
-				Runtime:           45,
-				TvdbID:            tvdbID,
-				SeriesType:        "standard",
-				QualityProfileID:  1,
-				LanguageProfileID: 1,
-				SeasonFolder:      true,
-				Monitored:         true,
-				Genres:            []string{"Drama"},
-				Seasons:           []domain.Season{{SeasonNumber: 1, Monitored: true}},
-			}
-			writeJSON(w, http.StatusOK, append([]domain.Series{custom}, catalog...))
-			return
-		}
+	results, err := h.meta.SearchSeries(r.Context(), term, h.preferredLanguage())
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "series lookup failed: "+err.Error())
+		return
 	}
-
-	var matched []domain.Series
-	var rest []domain.Series
-	for _, item := range catalog {
-		if strings.Contains(strings.ToLower(item.Title), lower) ||
-			strings.Contains(strings.ToLower(item.Overview), lower) ||
-			strings.Contains(item.CleanTitle, lower) {
-			matched = append(matched, item)
-		} else {
-			rest = append(rest, item)
-		}
+	if results == nil {
+		results = []domain.Series{}
 	}
-
-	if len(matched) == 0 {
-		slug := strings.ToLower(strings.ReplaceAll(term, " ", "-"))
-		clean := strings.ToLower(strings.ReplaceAll(term, " ", ""))
-		matched = append(matched, domain.Series{
-			Title:             term,
-			SortTitle:         strings.ToLower(term),
-			CleanTitle:        clean,
-			TitleSlug:         slug,
-			Status:            "continuing",
-			Overview:          fmt.Sprintf("%s is a television series discovered via Replacearr lookup.", term),
-			Network:           "Streaming",
-			Year:              2025,
-			Runtime:           50,
-			TvdbID:            900000 + len(term)*137,
-			ImdbID:            "tt9988776",
-			SeriesType:        "standard",
-			QualityProfileID:  1,
-			LanguageProfileID: 1,
-			SeasonFolder:      true,
-			Monitored:         true,
-			Genres:            []string{"Drama"},
-			Seasons:           []domain.Season{{SeasonNumber: 1, Monitored: true}},
-		})
-	}
-
-	results := append(matched, rest...)
 	writeJSON(w, http.StatusOK, results)
 }
 
@@ -638,7 +454,32 @@ func (h *Handler) handleListEpisodes(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	if len(eps) == 0 && seriesID > 0 {
+		if sr, gerr := h.store.GetSeriesByID(seriesID); gerr == nil && sr != nil && sr.TvdbID > 0 {
+			if serr := h.syncSeriesEpisodes(r.Context(), sr); serr == nil {
+				eps, err = h.store.ListEpisodes(seriesID)
+				if err != nil {
+					writeError(w, http.StatusInternalServerError, err.Error())
+					return
+				}
+			}
+		}
+	}
 	writeJSON(w, http.StatusOK, eps)
+}
+
+func (h *Handler) syncSeriesEpisodes(ctx context.Context, sr *domain.Series) error {
+	if h.meta == nil || sr == nil || sr.TvdbID <= 0 || sr.ID <= 0 {
+		return nil
+	}
+	_, eps, err := h.meta.GetSeriesByTVDB(ctx, sr.TvdbID, h.preferredLanguage())
+	if err != nil {
+		return err
+	}
+	if len(eps) == 0 {
+		return nil
+	}
+	return h.store.ReplaceEpisodesForSeries(sr.ID, eps)
 }
 
 func (h *Handler) handleCalendar(w http.ResponseWriter, _ *http.Request) {
@@ -813,11 +654,20 @@ func (h *Handler) handleGrabRelease(w http.ResponseWriter, r *http.Request) {
 	if payload.Protocol == "" {
 		payload.Protocol = "torrent"
 	}
-	if payload.Size <= 0 {
-		payload.Size = 2147483648
-	}
 	if payload.Indexer == "" {
-		payload.Indexer = "Replacearr Indexer"
+		payload.Indexer = "unknown"
+	}
+	clients, _ := h.store.ListDownloadClients()
+	clientName := ""
+	for _, c := range clients {
+		if c.Enable {
+			clientName = c.Name
+			break
+		}
+	}
+	if clientName == "" {
+		writeError(w, http.StatusUnprocessableEntity, "no enabled download client configured")
+		return
 	}
 	if payload.DownloadID == "" {
 		payload.DownloadID = fmt.Sprintf("sonarr-%d", time.Now().UnixNano())
@@ -828,18 +678,17 @@ func (h *Handler) handleGrabRelease(w http.ResponseWriter, r *http.Request) {
 		SeriesID:              payload.SeriesID,
 		EpisodeID:             payload.EpisodeID,
 		Title:                 payload.Title,
-		Status:                "downloading",
+		Status:                "queued",
 		TrackedDownloadStatus: "ok",
 		TrackedDownloadState:  "downloading",
 		Size:                  payload.Size,
-		Sizeleft:              payload.Size / 2,
-		Timeleft:              "00:05:30",
-		EstimatedCompletion:   time.Now().UTC().Add(5 * time.Minute),
+		Sizeleft:              payload.Size,
+		Timeleft:              "",
 		Protocol:              payload.Protocol,
-		DownloadClient:        "Replacearr Internal",
+		DownloadClient:        clientName,
 		DownloadID:            payload.DownloadID,
 		Indexer:               payload.Indexer,
-		OutputPath:            "/data/tv",
+		OutputPath:            "",
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -1094,132 +943,31 @@ func populateIndexerFields(idx *domain.Indexer) {
 }
 
 func DefaultSearchReleases(query string, mediaType string, tvdbID int, tmdbID int, season int, episode int) []domain.ReleaseResult {
-	clean := strings.ReplaceAll(strings.TrimSpace(query), " ", ".")
-	if clean == "" {
-		clean = "Replacearr.Release"
-	}
-	now := time.Now().UTC()
-	if mediaType == "movie" {
-		return []domain.ReleaseResult{
-			{
-				Guid:        fmt.Sprintf("replacearr-movie-1080p-%s", strings.ToLower(clean)),
-				Title:       fmt.Sprintf("%s.2024.1080p.WEB-DL.DDP5.1.H.264-REPLACEARR", clean),
-				IndexerID:   1,
-				Indexer:     "Replacearr Built-in",
-				Protocol:    "torrent",
-				Size:        4831838208,
-				Age:         2,
-				PublishDate: now.Add(-48 * time.Hour),
-				DownloadURL: fmt.Sprintf("http://localhost:8989/prowlarr/1/download?guid=%s-1080p", clean),
-				InfoURL:     fmt.Sprintf("http://localhost:8989/prowlarr/1/details?guid=%s-1080p", clean),
-				Seeders:     142,
-				Leechers:    11,
-				Peers:       153,
-				Categories:  []int{2000, 2040},
-				Quality:     "WEBDL-1080p",
-				TmdbID:      tmdbID,
-			},
-			{
-				Guid:        fmt.Sprintf("replacearr-movie-2160p-%s", strings.ToLower(clean)),
-				Title:       fmt.Sprintf("%s.2024.2160p.UHD.BluRay.REMUX.HEVC-REPLACEARR", clean),
-				IndexerID:   1,
-				Indexer:     "Replacearr Built-in",
-				Protocol:    "torrent",
-				Size:        19327352832,
-				Age:         5,
-				PublishDate: now.Add(-120 * time.Hour),
-				DownloadURL: fmt.Sprintf("http://localhost:8989/prowlarr/1/download?guid=%s-2160p", clean),
-				InfoURL:     fmt.Sprintf("http://localhost:8989/prowlarr/1/details?guid=%s-2160p", clean),
-				Seeders:     89,
-				Leechers:    5,
-				Peers:       94,
-				Categories:  []int{2000, 2045},
-				Quality:     "Bluray-2160p",
-				TmdbID:      tmdbID,
-			},
-		}
-	}
-	epToken := domain.FormatSeasonEpisodeToken(season, episode)
-	pack := season > 0 && episode == 0
-	title1080 := fmt.Sprintf("%s.1080p.WEB-DL.DDP5.1.H.264-REPLACEARR", clean)
-	title2160 := fmt.Sprintf("%s.2160p.WEB-DL.DV.HDR.H.265-REPLACEARR", clean)
-	guidSuffix := "generic"
-	if epToken != "" {
-		if pack {
-			title1080 = fmt.Sprintf("%s.%s.COMPLETE.1080p.WEB-DL.DDP5.1.H.264-REPLACEARR", clean, epToken)
-			title2160 = fmt.Sprintf("%s.%s.COMPLETE.2160p.WEB-DL.DV.HDR.H.265-REPLACEARR", clean, epToken)
-		} else {
-			title1080 = fmt.Sprintf("%s.%s.1080p.WEB-DL.DDP5.1.H.264-REPLACEARR", clean, epToken)
-			title2160 = fmt.Sprintf("%s.%s.2160p.WEB-DL.DV.HDR.H.265-REPLACEARR", clean, epToken)
-		}
-		guidSuffix = strings.ToLower(epToken)
-	}
-	return []domain.ReleaseResult{
-		{
-			Guid:        fmt.Sprintf("replacearr-tv-1080p-%s-%s", strings.ToLower(clean), guidSuffix),
-			Title:       title1080,
-			IndexerID:   1,
-			Indexer:     "Replacearr Built-in",
-			Protocol:    "torrent",
-			Size:        2147483648,
-			Age:         1,
-			PublishDate: now.Add(-24 * time.Hour),
-			DownloadURL: fmt.Sprintf("http://localhost:8989/prowlarr/1/download?guid=%s-%s-1080p", clean, guidSuffix),
-			InfoURL:     fmt.Sprintf("http://localhost:8989/prowlarr/1/details?guid=%s-%s-1080p", clean, guidSuffix),
-			Seeders:     215,
-			Leechers:    14,
-			Peers:       229,
-			Categories:  []int{5000, 5040},
-			Quality:     "WEBDL-1080p",
-			TvdbID:      tvdbID,
-		},
-		{
-			Guid:        fmt.Sprintf("replacearr-tv-2160p-%s-%s", strings.ToLower(clean), guidSuffix),
-			Title:       title2160,
-			IndexerID:   1,
-			Indexer:     "Replacearr Built-in",
-			Protocol:    "torrent",
-			Size:        5368709120,
-			Age:         1,
-			PublishDate: now.Add(-24 * time.Hour),
-			DownloadURL: fmt.Sprintf("http://localhost:8989/prowlarr/1/download?guid=%s-%s-2160p", clean, guidSuffix),
-			InfoURL:     fmt.Sprintf("http://localhost:8989/prowlarr/1/details?guid=%s-%s-2160p", clean, guidSuffix),
-			Seeders:     112,
-			Leechers:    8,
-			Peers:       120,
-			Categories:  []int{5000, 5045},
-			Quality:     "WEBDL-2160p",
-			TvdbID:      tvdbID,
-		},
-	}
+	// No synthetic releases — real indexers/plugins must supply results.
+	return []domain.ReleaseResult{}
 }
 
 func (h *Handler) cacheCoverAsync(created *domain.Series) {
 	if h.covers == nil || created == nil {
 		return
 	}
-	remote := ""
-	for _, img := range created.Images {
-		if strings.TrimSpace(img.RemoteURL) != "" {
-			remote = img.RemoteURL
-			break
-		}
-	}
+	remote := mediacover.PosterRemoteURL(created.Images)
 	if remote == "" {
 		return
 	}
 	go func(id int64, remoteURL string) {
-		local, err := h.covers.Ensure("tv", id, remoteURL)
-		if err != nil || local == "" {
-			return
-		}
 		sr, err := h.store.GetSeriesByID(id)
 		if err != nil || sr == nil {
 			return
 		}
+		cacheKey := mediacover.CacheKeyTV(sr.ImdbID, sr.TvdbID, sr.ID)
+		local, err := h.covers.Ensure("tv", cacheKey, id, remoteURL, id)
+		if err != nil || local == "" {
+			return
+		}
 		updated := false
 		for i := range sr.Images {
-			if sr.Images[i].CoverType == "" || strings.EqualFold(sr.Images[i].CoverType, "poster") {
+			if strings.EqualFold(sr.Images[i].CoverType, "poster") {
 				sr.Images[i].CoverType = "poster"
 				sr.Images[i].URL = local
 				if sr.Images[i].RemoteURL == "" {
@@ -1237,7 +985,7 @@ func (h *Handler) cacheCoverAsync(created *domain.Series) {
 }
 
 func (h *Handler) handleMediaCover(w http.ResponseWriter, _ *http.Request, path string) {
-	// /MediaCover/{id}/poster.jpg (served as webp)
+	// /MediaCover/{id}/poster.jpg (cached poster bytes; Content-Type sniffed)
 	rest := strings.TrimPrefix(path, "/MediaCover/")
 	parts := strings.Split(rest, "/")
 	if len(parts) < 1 {
@@ -1249,13 +997,28 @@ func (h *Handler) handleMediaCover(w http.ResponseWriter, _ *http.Request, path 
 		writeError(w, http.StatusNotFound, "media cover not found")
 		return
 	}
-	f, err := h.covers.Open("tv", id)
+	sr, gerr := h.store.GetSeriesByID(id)
+	if gerr != nil || sr == nil {
+		writeError(w, http.StatusNotFound, "media cover not found")
+		return
+	}
+	cacheKey := mediacover.CacheKeyTV(sr.ImdbID, sr.TvdbID, sr.ID)
+	remote := mediacover.PosterRemoteURL(sr.Images)
+	f, ct, err := h.covers.Open("tv", cacheKey)
+	if err != nil && remote != "" {
+		if _, eerr := h.covers.Ensure("tv", cacheKey, id, remote, id); eerr == nil {
+			f, ct, err = h.covers.Open("tv", cacheKey)
+		}
+	}
 	if err != nil {
 		writeError(w, http.StatusNotFound, "media cover not found")
 		return
 	}
 	defer f.Close()
-	w.Header().Set("Content-Type", "image/webp")
+	if ct == "" {
+		ct = "application/octet-stream"
+	}
+	w.Header().Set("Content-Type", ct)
 	w.Header().Set("Cache-Control", "public, max-age=86400")
 	_, _ = io.Copy(w, f)
 }

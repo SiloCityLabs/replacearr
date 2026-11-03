@@ -79,7 +79,7 @@ func TestServeIOAllMethods(t *testing.T) {
 		`{"id":3,"method":"search","params":{"query":"Severance","type":"tvsearch","season":2,"episode":1}}`,
 		`{"id":4,"method":"enqueue_download","params":{"title":"Severance.S02E01","downloadUrl":"magnet:?xt=1","protocol":"torrent"}}`,
 		`{"id":5,"method":"lookup_media","params":{"mediaType":"tv","query":"Severance"}}`,
-		`{"id":6,"method":"notify","params":{"eventType":"OnGrab","payload":{"title":"Severance"}}}`,
+		`{"id":6,"method":"notify","params":{"eventType":"download.started","payload":{"title":"Severance"}}}`,
 		`{"id":7,"method":"health"}`,
 	}
 
@@ -111,7 +111,7 @@ func TestServeIOAllMethods(t *testing.T) {
 	if p.configured["api_key"] != "secret123" {
 		t.Fatalf("expected configured api_key='secret123', got %v", p.configured)
 	}
-	if len(p.notified) != 1 || p.notified[0] != "OnGrab" {
-		t.Fatalf("expected OnGrab notification, got %v", p.notified)
+	if len(p.notified) != 1 || p.notified[0] != EventDownloadStarted {
+		t.Fatalf("expected %s notification, got %v", EventDownloadStarted, p.notified)
 	}
 }

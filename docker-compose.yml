@@ -1,33 +1,58 @@
+# ==============================================================================
+# Replacearr — local containerized development
+#
+# Root = development. Production lives under docker/.
+#
+#   make start
+#   # or: docker compose up --build
+#
+# UI (Vite HMR):  http://localhost:5173
+# API:            http://localhost:8989
+#
+# Path layout matches production: /config, /data/TV, /data/Movies, /data/downloads
+# ==============================================================================
+
 services:
-  replacearr-dev:
+  replacearr:
     build:
       context: .
       dockerfile: Dockerfile
     container_name: replacearr-dev
-    ports:
-      - "8989:8989"
-      - "5173:5173"
+    working_dir: /workspace
     environment:
       - REPLACEARR_HOST=0.0.0.0
       - REPLACEARR_PORT=8989
       - REPLACEARR_CONFIG_DIR=/config
       - REPLACEARR_PLUGIN_DIR=/workspace/bin/plugins
+      - REPLACEARR_DEFINITIONS_DIR=/config/definitions
       - REPLACEARR_ADMIN_USER=admin
       - REPLACEARR_ADMIN_PASS=replacearr
       - REPLACEARR_FLARESOLVERR_URL=http://flaresolverr:8191/
       - REPLACEARR_ENV=development
       - TZ=UTC
+      - GOFLAGS=-buildvcs=false
+      - GOCACHE=/go-cache/build
+      - GOMODCACHE=/go-cache/mod
+    ports:
+      - "8989:8989"
+      - "5173:5173"
     volumes:
+      - .:/workspace
       - ./config:/config
       - ./data:/data
+      - replacearr-go-cache:/go-cache
+      - replacearr-web-node-modules:/workspace/web/node_modules
     depends_on:
       - flaresolverr
+    command: ["./entrypoint.sh"]
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8989/api/v1/system/health"]
       interval: 15s
       timeout: 5s
-      retries: 5
-      start_period: 10s
+      retries: 8
+      start_period: 90s
+    stdin_open: true
+    tty: true
     restart: unless-stopped
 
   flaresolverr:
@@ -43,3 +68,92 @@ services:
     tmpfs:
       - /tmp:size=256M,mode=1777
     restart: unless-stopped
+
+  # qbittorrent:
+  #   image: lscr.io/linuxserver/qbittorrent:latest
+  #   container_name: replacearr-qbittorrent-dev
+  #   environment:
+  #     - PUID=1000
+  #     - PGID=1000
+  #     - TZ=UTC
+  #     - WEBUI_PORT=8080
+  #   ports:
+  #     - "8080:8080"
+  #     - "6881:6881"
+  #     - "6881:6881/udp"
+  #   volumes:
+  #     - ./data/qbittorrent/config:/config
+  #     - ./data/downloads:/downloads
+  #   restart: unless-stopped
+
+  transmission:
+    image: lscr.io/linuxserver/transmission:latest
+    container_name: replacearr-transmission-dev
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=UTC
+      - USER=admin
+      - PASS=replacearr
+    ports:
+      - "9091:9091"
+      - "51413:51413"
+      - "51413:51413/udp"
+    volumes:
+      - ./data/transmission/config:/config
+      - ./data/downloads:/downloads
+      - ./data/downloads/watch:/watch
+    restart: unless-stopped
+
+  # deluge:
+  #   image: lscr.io/linuxserver/deluge:latest
+  #   container_name: replacearr-deluge-dev
+  #   environment:
+  #     - PUID=1000
+  #     - PGID=1000
+  #     - TZ=UTC
+  #     - DELUGE_LOGLEVEL=error
+  #   ports:
+  #     - "8112:8112"
+  #     - "58846:58846"
+  #     - "6882:6881"
+  #     - "6882:6881/udp"
+  #   volumes:
+  #     - ./data/deluge/config:/config
+  #     - ./data/downloads:/downloads
+  #   restart: unless-stopped
+
+  # nzbget:
+  #   image: lscr.io/linuxserver/nzbget:latest
+  #   container_name: replacearr-nzbget-dev
+  #   environment:
+  #     - PUID=1000
+  #     - PGID=1000
+  #     - TZ=UTC
+  #     - NZBGET_USER=admin
+  #     - NZBGET_PASS=replacearr
+  #   ports:
+  #     - "6789:6789"
+  #   volumes:
+  #     - ./data/nzbget/config:/config
+  #     - ./data/downloads:/downloads
+  #   restart: unless-stopped
+
+  # sabnzbd:
+  #   image: lscr.io/linuxserver/sabnzbd:latest
+  #   container_name: replacearr-sabnzbd-dev
+  #   environment:
+  #     - PUID=1000
+  #     - PGID=1000
+  #     - TZ=UTC
+  #   ports:
+  #     - "8085:8080"
+  #   volumes:
+  #     - ./data/sabnzbd/config:/config
+  #     - ./data/downloads:/downloads
+  #     - ./data/downloads/incomplete:/incomplete-downloads
+  #   restart: unless-stopped
+
+volumes:
+  replacearr-go-cache:
+  replacearr-web-node-modules:

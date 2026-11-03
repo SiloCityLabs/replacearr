@@ -18,9 +18,10 @@ import (
 	"github.com/replacearr/replacearr/internal/auth"
 	"github.com/replacearr/replacearr/internal/config"
 	"github.com/replacearr/replacearr/internal/db"
-	"github.com/replacearr/replacearr/internal/domain"
+	"github.com/replacearr/replacearr/internal/downloadmonitor"
 	"github.com/replacearr/replacearr/internal/pluginhost"
 	"github.com/replacearr/replacearr/internal/webui"
+	"github.com/replacearr/replacearr/pkg/pluginsdk"
 )
 
 var (
@@ -51,6 +52,10 @@ func main() {
 
 	nativeSrv := native.NewServer(store, cfg, authSvc, pluginMgr, Version)
 
+	monitorCtx, monitorCancel := context.WithCancel(context.Background())
+	defer monitorCancel()
+	go downloadmonitor.New(store, pluginMgr, nativeSrv).Run(monitorCtx)
+
 	mux := http.NewServeMux()
 
 	// 1. Auth routes (/api/v1/auth/*, users, roles, apikeys)
@@ -59,33 +64,20 @@ func main() {
 	// 2. Native unified API owns /api/v1/* (do not remount prowlarr over this).
 	nativeSrv.RegisterRoutes(mux)
 
-	// 3. Optional *arr compatibility mounts controlled by AppConfig.compatModules.
-	appCfg, err := store.GetAppConfig()
-	if err != nil {
-		appCfg = domain.DefaultAppConfig()
-	}
-
+	// 3. *arr compatibility mounts — always registered, gated by builtin-compat-* plugins
+	// so enable/disable takes effect without restart.
 	sonarrHandler := sonarr.NewHandler(store, cfg, nativeSrv.SearchReleases)
 	radarrHandler := radarr.NewHandler(store, cfg, nativeSrv.SearchReleases)
 	prowlarrHandler := prowlarr.NewHandler(store, cfg, nativeSrv.SearchReleases)
 	sonarrHandler.SetCoverStore(nativeSrv.CoverStore())
 	radarrHandler.SetCoverStore(nativeSrv.CoverStore())
+	sonarrHandler.SetMetadata(nativeSrv.Metadata())
+	radarrHandler.SetMetadata(nativeSrv.Metadata())
 
-	if appCfg.CompatModules.Sonarr {
-		mux.Handle("/sonarr/", authSvc.Middleware("sonarr", "", sonarrHandler))
-		// Root /api/v3/ maps to Sonarr for drop-in clients; native keeps /api/v1/*.
-		mux.Handle("/api/v3/", authSvc.Middleware("sonarr", "", sonarrHandler))
-		log.Printf("  compat: Sonarr enabled (/sonarr/, /api/v3/)")
-	}
-	if appCfg.CompatModules.Radarr {
-		mux.Handle("/radarr/", authSvc.Middleware("radarr", "", radarrHandler))
-		log.Printf("  compat: Radarr enabled (/radarr/)")
-	}
-	if appCfg.CompatModules.Prowlarr {
-		// Prowlarr stays under /prowlarr/ so it never shadows native /api/v1/*.
-		mux.Handle("/prowlarr/", authSvc.Middleware("prowlarr", "", prowlarrHandler))
-		log.Printf("  compat: Prowlarr enabled (/prowlarr/)")
-	}
+	mux.Handle("/sonarr/", authSvc.Middleware("sonarr", "", pluginMgr.Gate(pluginsdk.CompatPluginSonarr, sonarrHandler)))
+	mux.Handle("/api/v3/", authSvc.Middleware("sonarr", "", pluginMgr.Gate(pluginsdk.CompatPluginSonarr, sonarrHandler)))
+	mux.Handle("/radarr/", authSvc.Middleware("radarr", "", pluginMgr.Gate(pluginsdk.CompatPluginRadarr, radarrHandler)))
+	mux.Handle("/prowlarr/", authSvc.Middleware("prowlarr", "", pluginMgr.Gate(pluginsdk.CompatPluginProwlarr, prowlarrHandler)))
 
 	// 4. Embedded React SPA
 	mux.Handle("/", webui.NewHandler())
@@ -100,14 +92,20 @@ func main() {
 	go func() {
 		log.Printf("Replacearr v%s (%s) listening on http://%s", Version, Commit, addr)
 		log.Printf("  -> Unified Web UI & Native API : http://localhost:%d", cfg.Port)
-		if appCfg.CompatModules.Sonarr {
+		if pluginMgr.IsEnabled(pluginsdk.CompatPluginSonarr) {
 			log.Printf("  -> Sonarr v3 Compatibility     : http://localhost:%d/sonarr/api/v3", cfg.Port)
+		} else {
+			log.Printf("  -> Sonarr v3 Compatibility     : disabled (plugin)")
 		}
-		if appCfg.CompatModules.Radarr {
+		if pluginMgr.IsEnabled(pluginsdk.CompatPluginRadarr) {
 			log.Printf("  -> Radarr v3 Compatibility     : http://localhost:%d/radarr/api/v3", cfg.Port)
+		} else {
+			log.Printf("  -> Radarr v3 Compatibility     : disabled (plugin)")
 		}
-		if appCfg.CompatModules.Prowlarr {
+		if pluginMgr.IsEnabled(pluginsdk.CompatPluginProwlarr) {
 			log.Printf("  -> Prowlarr v1 Compatibility   : http://localhost:%d/prowlarr/api/v1", cfg.Port)
+		} else {
+			log.Printf("  -> Prowlarr v1 Compatibility   : disabled (plugin)")
 		}
 		log.Printf("  -> Master API Key              : %s", authSvc.GetMasterAPIKey())
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {

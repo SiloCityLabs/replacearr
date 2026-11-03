@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"syscall"
 
@@ -11,6 +12,41 @@ import (
 )
 
 const appConfigKey = "app"
+
+// LegacyCompatModules is the former AppConfig.compatModules shape used only for
+// one-time migration into builtin-compat-* plugin_configs rows.
+type LegacyCompatModules struct {
+	Sonarr   bool `json:"sonarr"`
+	Radarr   bool `json:"radarr"`
+	Prowlarr bool `json:"prowlarr"`
+}
+
+// PeekLegacyCompatModules reads a stored compatModules object if present.
+// found is false when no app config row exists or the key is absent (callers
+// should treat missing as "all enabled").
+func (s *Store) PeekLegacyCompatModules() (LegacyCompatModules, bool, error) {
+	var raw string
+	err := s.db.QueryRow(`SELECT value_json FROM app_config WHERE key = ?`, appConfigKey).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return LegacyCompatModules{}, false, nil
+	}
+	if err != nil {
+		return LegacyCompatModules{}, false, err
+	}
+	var doc map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(raw), &doc); err != nil {
+		return LegacyCompatModules{}, false, err
+	}
+	cmRaw, ok := doc["compatModules"]
+	if !ok || len(cmRaw) == 0 || string(cmRaw) == "null" {
+		return LegacyCompatModules{}, false, nil
+	}
+	var cm LegacyCompatModules
+	if err := json.Unmarshal(cmRaw, &cm); err != nil {
+		return LegacyCompatModules{}, false, err
+	}
+	return cm, true, nil
+}
 
 func (s *Store) GetAppConfig() (domain.AppConfig, error) {
 	cfg := domain.DefaultAppConfig()
@@ -150,8 +186,15 @@ func (s *Store) UpdateDownloadClient(dc domain.DownloadClient) (*domain.Download
 	if strings.TrimSpace(dc.Name) == "" {
 		return nil, errors.New("download client name is required")
 	}
+	dc.Protocol = domain.ProtocolForDownloadClientImplementation(dc.Implementation, dc.Protocol)
+	baseURL, err := domain.NormalizeDownloadClientBaseURL(dc.BaseURL)
+	if err != nil {
+		return nil, err
+	}
+	dc.BaseURL = baseURL
+	host, port, useSSL := domain.SplitDownloadClientBaseURL(baseURL)
 	var existingPassword string
-	err := s.db.QueryRow(`SELECT password FROM download_clients WHERE id = ?`, dc.ID).Scan(&existingPassword)
+	err = s.db.QueryRow(`SELECT password FROM download_clients WHERE id = ?`, dc.ID).Scan(&existingPassword)
 	if err != nil {
 		return nil, err
 	}
@@ -163,11 +206,11 @@ func (s *Store) UpdateDownloadClient(dc domain.DownloadClient) (*domain.Download
 	_, err = s.db.Exec(`
 		UPDATE download_clients SET
 			name = ?, implementation = ?, implementation_name = ?, config_contract = ?, protocol = ?, enable = ?,
-			priority = ?, host = ?, port = ?, use_ssl = ?, username = ?, password = ?, category = ?, remove_completed = ?,
+			priority = ?, host = ?, port = ?, use_ssl = ?, base_url = ?, username = ?, password = ?, category = ?, remove_completed = ?,
 			remove_failed = ?, fields_json = ?, tags_json = ?
 		WHERE id = ?`,
 		dc.Name, dc.Implementation, dc.ImplementationName, dc.ConfigContract, dc.Protocol,
-		boolToInt(dc.Enable), dc.Priority, dc.Host, dc.Port, boolToInt(dc.UseSsl),
+		boolToInt(dc.Enable), dc.Priority, host, port, boolToInt(useSSL), dc.BaseURL,
 		dc.Username, dc.Password, dc.Category, boolToInt(dc.RemoveCompletedDownloads),
 		boolToInt(dc.RemoveFailedDownloads), string(fldB), string(tagB), dc.ID,
 	)
@@ -178,25 +221,49 @@ func (s *Store) UpdateDownloadClient(dc domain.DownloadClient) (*domain.Download
 }
 
 func (s *Store) getDownloadClientByID(id int64) (*domain.DownloadClient, error) {
+	row := s.db.QueryRow(`
+		SELECT id, name, implementation, implementation_name, config_contract, protocol, enable,
+		       priority, host, port, use_ssl, base_url, username, password, category, remove_completed,
+		       remove_failed, fields_json, tags_json
+		FROM download_clients WHERE id = ?`, id)
+	return scanDownloadClient(row)
+}
+
+type downloadClientScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanDownloadClient(row downloadClientScanner) (*domain.DownloadClient, error) {
 	var dc domain.DownloadClient
 	var en, ssl, remComp, remFail int
-	var fldJSON, tagJSON string
-	err := s.db.QueryRow(`
-		SELECT id, name, implementation, implementation_name, config_contract, protocol, enable,
-		       priority, host, port, use_ssl, username, password, category, remove_completed,
-		       remove_failed, fields_json, tags_json
-		FROM download_clients WHERE id = ?`, id).Scan(
+	var host string
+	var port int
+	var baseURL, fldJSON, tagJSON string
+	err := row.Scan(
 		&dc.ID, &dc.Name, &dc.Implementation, &dc.ImplementationName, &dc.ConfigContract,
-		&dc.Protocol, &en, &dc.Priority, &dc.Host, &dc.Port, &ssl, &dc.Username, &dc.Password,
+		&dc.Protocol, &en, &dc.Priority, &host, &port, &ssl, &baseURL, &dc.Username, &dc.Password,
 		&dc.Category, &remComp, &remFail, &fldJSON, &tagJSON,
 	)
 	if err != nil {
 		return nil, err
 	}
 	dc.Enable = en == 1
-	dc.UseSsl = ssl == 1
 	dc.RemoveCompletedDownloads = remComp == 1
 	dc.RemoveFailedDownloads = remFail == 1
+	if strings.TrimSpace(baseURL) == "" {
+		scheme := "http"
+		if ssl == 1 {
+			scheme = "https"
+		}
+		if host == "" {
+			host = "localhost"
+		}
+		if port <= 0 {
+			port = 8080
+		}
+		baseURL = fmt.Sprintf("%s://%s:%d", scheme, host, port)
+	}
+	dc.BaseURL, _ = domain.NormalizeDownloadClientBaseURL(baseURL)
 	_ = json.Unmarshal([]byte(fldJSON), &dc.Fields)
 	_ = json.Unmarshal([]byte(tagJSON), &dc.Tags)
 	if dc.Fields == nil {

@@ -266,7 +266,12 @@ export const api = {
   async searchReleases(
     query: string,
     type = 'search',
-    opts?: { season?: number; episode?: number }
+    opts?: {
+      season?: number;
+      episode?: number;
+      tvdbId?: number;
+      tmdbId?: number;
+    }
   ): Promise<ReleaseResult[]> {
     const params = new URLSearchParams({ q: query, type });
     if (opts?.season != null && opts.season >= 0) {
@@ -274,6 +279,12 @@ export const api = {
     }
     if (opts?.episode != null && opts.episode >= 0) {
       params.set('ep', String(opts.episode));
+    }
+    if (opts?.tvdbId != null && opts.tvdbId > 0) {
+      params.set('tvdbId', String(opts.tvdbId));
+    }
+    if (opts?.tmdbId != null && opts.tmdbId > 0) {
+      params.set('tmdbId', String(opts.tmdbId));
     }
     const res = await request<unknown>(`/api/v1/search?${params.toString()}`);
     return unwrapArray<ReleaseResult>(res, 'results');
@@ -288,6 +299,8 @@ export const api = {
     mediaType?: string;
     seriesId?: number;
     movieId?: number;
+    episodeId?: number;
+    seasonNumber?: number;
   }): Promise<QueueItem> {
     return request<QueueItem>('/api/v1/releases/grab', {
       method: 'POST',
@@ -375,6 +388,19 @@ export const api = {
       method: 'POST',
     });
     return unwrapArray<DiscoveredPlugin>(res, 'plugins');
+  },
+
+  async testNotificationPlugin(
+    id: string,
+    settings?: Record<string, unknown>
+  ): Promise<{ ok: boolean; message: string; latencyMs: number }> {
+    return request<{ ok: boolean; message: string; latencyMs: number }>(
+      `/api/v1/plugins/${encodeURIComponent(id)}/test`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ settings: settings ?? {} }),
+      }
+    );
   },
 
   // Users, Roles, API Keys, Permissions
@@ -537,9 +563,7 @@ export const api = {
   },
 
   async testDownloadClient(payload: {
-    host: string;
-    port: number;
-    useSsl: boolean;
+    baseUrl: string;
   }): Promise<{ ok: boolean; message: string; latencyMs: number }> {
     return request<{ ok: boolean; message: string; latencyMs: number }>('/api/v1/downloadclients/test', {
       method: 'POST',

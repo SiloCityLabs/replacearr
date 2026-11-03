@@ -65,6 +65,11 @@ func (s *Store) migrate() error {
 			return fmt.Errorf("read migration %s: %w", entry.Name(), err)
 		}
 		if _, err := s.db.Exec(string(sqlBytes)); err != nil {
+			// Migrations are re-applied on every boot (CREATE IF NOT EXISTS).
+			// Ignore idempotent ALTER failures when a column was already added.
+			if strings.Contains(err.Error(), "duplicate column name") {
+				continue
+			}
 			return fmt.Errorf("exec migration %s: %w", entry.Name(), err)
 		}
 	}
@@ -810,6 +815,86 @@ func (s *Store) ListEpisodes(seriesID int64) ([]domain.Episode, error) {
 	return out, nil
 }
 
+// ReplaceEpisodesForSeries replaces the episode guide for a series while preserving has_file flags.
+func (s *Store) ReplaceEpisodesForSeries(seriesID int64, eps []domain.Episode) error {
+	if seriesID <= 0 {
+		return errors.New("series id is required")
+	}
+	existing, err := s.ListEpisodes(seriesID)
+	if err != nil {
+		return err
+	}
+	type epKey struct {
+		season  int
+		episode int
+	}
+	hasByTvdb := map[int]bool{}
+	hasByNum := map[epKey]bool{}
+	monByTvdb := map[int]bool{}
+	monByNum := map[epKey]bool{}
+	for _, ep := range existing {
+		key := epKey{season: ep.SeasonNumber, episode: ep.EpisodeNumber}
+		hasByNum[key] = ep.HasFile
+		monByNum[key] = ep.Monitored
+		if ep.TvdbID > 0 {
+			hasByTvdb[ep.TvdbID] = ep.HasFile
+			monByTvdb[ep.TvdbID] = ep.Monitored
+		}
+	}
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.Exec(`DELETE FROM episodes WHERE series_id = ?`, seriesID); err != nil {
+		return err
+	}
+	stmt, err := tx.Prepare(`
+		INSERT INTO episodes (
+			series_id, tvdb_id, episode_file_id, season_number, episode_number, title, air_date, air_date_utc,
+			overview, has_file, monitored, absolute_episode_number
+		) VALUES (?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	for _, ep := range eps {
+		key := epKey{season: ep.SeasonNumber, episode: ep.EpisodeNumber}
+		hasFile := ep.HasFile
+		if v, ok := hasByTvdb[ep.TvdbID]; ok {
+			hasFile = v
+		} else if v, ok := hasByNum[key]; ok {
+			hasFile = v
+		}
+		monitored := ep.Monitored
+		if v, ok := monByTvdb[ep.TvdbID]; ok {
+			monitored = v
+		} else if v, ok := monByNum[key]; ok {
+			monitored = v
+		}
+		abs := ep.AbsoluteEpisodeNum
+		if abs <= 0 {
+			abs = 1
+		}
+		airUTC := ep.AirDateUtc
+		if airUTC.IsZero() && ep.AirDate != "" {
+			if t, perr := time.Parse("2006-01-02", ep.AirDate); perr == nil {
+				airUTC = t.UTC()
+			}
+		}
+		if _, err := stmt.Exec(
+			seriesID, ep.TvdbID, ep.SeasonNumber, ep.EpisodeNumber, ep.Title, ep.AirDate, airUTC,
+			ep.Overview, boolToInt(hasFile), boolToInt(monitored), abs,
+		); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
 // --- Movies ---
 
 func (s *Store) ListMovies() ([]domain.Movie, error) {
@@ -1139,7 +1224,7 @@ func (s *Store) DeleteIndexer(id int64) error {
 func (s *Store) ListDownloadClients() ([]domain.DownloadClient, error) {
 	rows, err := s.db.Query(`
 		SELECT id, name, implementation, implementation_name, config_contract, protocol, enable,
-		       priority, host, port, use_ssl, username, password, category, remove_completed,
+		       priority, host, port, use_ssl, base_url, username, password, category, remove_completed,
 		       remove_failed, fields_json, tags_json
 		FROM download_clients ORDER BY priority ASC, id ASC`)
 	if err != nil {
@@ -1148,29 +1233,11 @@ func (s *Store) ListDownloadClients() ([]domain.DownloadClient, error) {
 	defer rows.Close()
 	out := []domain.DownloadClient{}
 	for rows.Next() {
-		var dc domain.DownloadClient
-		var en, ssl, remComp, remFail int
-		var fldJSON, tagJSON string
-		if err := rows.Scan(
-			&dc.ID, &dc.Name, &dc.Implementation, &dc.ImplementationName, &dc.ConfigContract,
-			&dc.Protocol, &en, &dc.Priority, &dc.Host, &dc.Port, &ssl, &dc.Username, &dc.Password,
-			&dc.Category, &remComp, &remFail, &fldJSON, &tagJSON,
-		); err != nil {
+		dc, err := scanDownloadClient(rows)
+		if err != nil {
 			return nil, err
 		}
-		dc.Enable = en == 1
-		dc.UseSsl = ssl == 1
-		dc.RemoveCompletedDownloads = remComp == 1
-		dc.RemoveFailedDownloads = remFail == 1
-		_ = json.Unmarshal([]byte(fldJSON), &dc.Fields)
-		_ = json.Unmarshal([]byte(tagJSON), &dc.Tags)
-		if dc.Fields == nil {
-			dc.Fields = []domain.ConfigField{}
-		}
-		if dc.Tags == nil {
-			dc.Tags = []int64{}
-		}
-		out = append(out, dc)
+		out = append(out, *dc)
 	}
 	return out, nil
 }
@@ -1185,28 +1252,26 @@ func (s *Store) CreateDownloadClient(dc domain.DownloadClient) (*domain.Download
 	if dc.ConfigContract == "" {
 		dc.ConfigContract = dc.Implementation + "Settings"
 	}
-	if dc.Protocol == "" {
-		dc.Protocol = "torrent"
-	}
+	dc.Protocol = domain.ProtocolForDownloadClientImplementation(dc.Implementation, dc.Protocol)
 	if dc.Priority == 0 {
 		dc.Priority = 1
 	}
-	if dc.Host == "" {
-		dc.Host = "localhost"
+	baseURL, err := domain.NormalizeDownloadClientBaseURL(dc.BaseURL)
+	if err != nil {
+		return nil, err
 	}
-	if dc.Port == 0 {
-		dc.Port = 8080
-	}
+	dc.BaseURL = baseURL
+	host, port, useSSL := domain.SplitDownloadClientBaseURL(baseURL)
 	fldB, _ := json.Marshal(dc.Fields)
 	tagB, _ := json.Marshal(dc.Tags)
 	res, err := s.db.Exec(`
 		INSERT INTO download_clients (
 			name, implementation, implementation_name, config_contract, protocol, enable,
-			priority, host, port, use_ssl, username, password, category, remove_completed,
+			priority, host, port, use_ssl, base_url, username, password, category, remove_completed,
 			remove_failed, fields_json, tags_json
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		dc.Name, dc.Implementation, dc.ImplementationName, dc.ConfigContract, dc.Protocol,
-		boolToInt(dc.Enable), dc.Priority, dc.Host, dc.Port, boolToInt(dc.UseSsl),
+		boolToInt(dc.Enable), dc.Priority, host, port, boolToInt(useSSL), dc.BaseURL,
 		dc.Username, dc.Password, dc.Category, boolToInt(dc.RemoveCompletedDownloads),
 		boolToInt(dc.RemoveFailedDownloads), string(fldB), string(tagB),
 	)
@@ -1257,7 +1322,7 @@ func (s *Store) ListQueueItems(mediaType string) ([]domain.QueueItem, error) {
 
 func (s *Store) CreateQueueItem(q domain.QueueItem) (*domain.QueueItem, error) {
 	if q.Status == "" {
-		q.Status = "downloading"
+		q.Status = "queued"
 	}
 	if q.TrackedDownloadStatus == "" {
 		q.TrackedDownloadStatus = "ok"
@@ -1265,11 +1330,9 @@ func (s *Store) CreateQueueItem(q domain.QueueItem) (*domain.QueueItem, error) {
 	if q.TrackedDownloadState == "" {
 		q.TrackedDownloadState = "downloading"
 	}
-	if q.Timeleft == "" {
-		q.Timeleft = "00:08:45"
-	}
-	if q.EstimatedCompletion.IsZero() {
-		q.EstimatedCompletion = time.Now().UTC().Add(9 * time.Minute)
+	// Do not invent ETA or progress — leave Timeleft empty and Sizeleft as provided.
+	if q.Sizeleft == 0 && q.Size > 0 && q.Status == "queued" {
+		q.Sizeleft = q.Size
 	}
 	res, err := s.db.Exec(`
 		INSERT INTO queue_items (
@@ -1291,6 +1354,40 @@ func (s *Store) CreateQueueItem(q domain.QueueItem) (*domain.QueueItem, error) {
 
 func (s *Store) DeleteQueueItem(id int64) error {
 	_, err := s.db.Exec(`DELETE FROM queue_items WHERE id = ?`, id)
+	return err
+}
+
+// UpdateQueueItem persists progress / CDH state for an existing queue row.
+func (s *Store) UpdateQueueItem(q domain.QueueItem) error {
+	_, err := s.db.Exec(`
+		UPDATE queue_items SET
+			status = ?, tracked_download_status = ?, tracked_download_state = ?,
+			size = ?, sizeleft = ?, timeleft = ?, output_path = ?, download_id = ?
+		WHERE id = ?`,
+		q.Status, q.TrackedDownloadStatus, q.TrackedDownloadState,
+		q.Size, q.Sizeleft, q.Timeleft, q.OutputPath, q.DownloadID, q.ID,
+	)
+	return err
+}
+
+// MarkEpisodeHasFile sets has_file for an episode by id.
+func (s *Store) MarkEpisodeHasFile(episodeID int64, hasFile bool) error {
+	_, err := s.db.Exec(`UPDATE episodes SET has_file = ? WHERE id = ?`, boolToInt(hasFile), episodeID)
+	return err
+}
+
+// MarkEpisodeHasFileByNumbers sets has_file for a season/episode of a series.
+func (s *Store) MarkEpisodeHasFileByNumbers(seriesID int64, season, episode int, hasFile bool) error {
+	_, err := s.db.Exec(
+		`UPDATE episodes SET has_file = ? WHERE series_id = ? AND season_number = ? AND episode_number = ?`,
+		boolToInt(hasFile), seriesID, season, episode,
+	)
+	return err
+}
+
+// MarkMovieHasFile sets has_file for a movie.
+func (s *Store) MarkMovieHasFile(movieID int64, hasFile bool) error {
+	_, err := s.db.Exec(`UPDATE movies SET has_file = ? WHERE id = ?`, boolToInt(hasFile), movieID)
 	return err
 }
 
@@ -1339,15 +1436,19 @@ func (s *Store) GetPluginConfig(pluginID string) (bool, map[string]any, error) {
 	var settingsJSON string
 	err := s.db.QueryRow(`SELECT enabled, settings_json FROM plugin_configs WHERE plugin_id = ?`, pluginID).
 		Scan(&en, &settingsJSON)
-	if errors.Is(err, sql.ErrNoRows) {
-		return true, map[string]any{}, nil
-	}
 	if err != nil {
 		return false, nil, err
 	}
 	out := map[string]any{}
 	_ = json.Unmarshal([]byte(settingsJSON), &out)
 	return en == 1, out, nil
+}
+
+// HasPluginConfig reports whether a plugin_configs row exists for pluginID.
+func (s *Store) HasPluginConfig(pluginID string) bool {
+	var n int
+	err := s.db.QueryRow(`SELECT COUNT(1) FROM plugin_configs WHERE plugin_id = ?`, pluginID).Scan(&n)
+	return err == nil && n > 0
 }
 
 func (s *Store) SavePluginConfig(pluginID string, enabled bool, settings map[string]any) error {

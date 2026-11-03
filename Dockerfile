@@ -1,10 +1,12 @@
 # ==============================================================================
 # Replacearr — Root Development Dockerfile
-# Provides a full Go + Node.js development & integration testing environment
+# Go + Node image for local containerized development (docker-compose.yml).
+# Production image: docker/Dockerfile
 # ==============================================================================
 FROM golang:alpine
 
-# Dev image uses Alpine-packaged nodejs/npm (unpinned). Host and CI use Node 24 (.nvmrc); production UI builds use node:24-alpine in docker/Dockerfile.
+# Dev image uses Alpine-packaged nodejs/npm (unpinned). Host and CI use Node 24 (.nvmrc);
+# production UI builds use node:24-alpine in docker/Dockerfile.
 RUN apk add --no-cache \
     nodejs \
     npm \
@@ -25,21 +27,22 @@ RUN go mod download
 COPY web/package*.json ./web/
 RUN cd web && npm install
 
-# Copy remaining project files
+# Copy remaining project files (overlaid by bind mount in docker-compose.yml)
 COPY . .
 
-# Pre-build bundled sample plugins and static frontend so backend works immediately
+# Pre-build sample plugins and static frontend so a cold image can serve immediately
 RUN make build-web build-plugins
 
 ENV REPLACEARR_HOST=0.0.0.0 \
     REPLACEARR_PORT=8989 \
     REPLACEARR_CONFIG_DIR=/config \
     REPLACEARR_PLUGIN_DIR=/workspace/bin/plugins \
+    REPLACEARR_DEFINITIONS_DIR=/config/definitions \
     REPLACEARR_ENV=development
 
 EXPOSE 8989 5173
 
-HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=5 \
+HEALTHCHECK --interval=15s --timeout=5s --start-period=90s --retries=8 \
     CMD curl -fsS http://localhost:8989/api/v1/system/health || exit 1
 
-CMD ["sh", "-c", "make dev-backend CONFIG_DIR=${REPLACEARR_CONFIG_DIR:-/config}"]
+CMD ["./entrypoint.sh"]

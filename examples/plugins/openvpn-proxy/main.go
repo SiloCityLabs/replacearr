@@ -8,10 +8,12 @@ package main
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/replacearr/replacearr/pkg/pluginsdk"
 )
@@ -31,7 +33,8 @@ func (p *OpenVPNProxyPlugin) Manifest() pluginsdk.Manifest {
 		Version:     "0.1.0",
 		Author:      "Replacearr Contributors",
 		Description: "Exposes a local SOCKS5 URL for outbound traffic; optionally launches OpenVPN (requires CAP_NET_ADMIN).",
-		Types:       []pluginsdk.PluginType{pluginsdk.PluginTypeNetworkProxy},
+		Types:             []pluginsdk.PluginType{pluginsdk.PluginTypeNetworkProxy},
+		DisabledByDefault: true,
 		ConfigSchema: []pluginsdk.ConfigFieldSchema{
 			{
 				Name:     "configPath",
@@ -106,6 +109,12 @@ func (p *OpenVPNProxyPlugin) ProxyURL() string {
 	if listen == "" {
 		listen = "127.0.0.1:1080"
 	}
+	// Do not advertise a SOCKS URL unless something is actually listening.
+	conn, err := net.DialTimeout("tcp", listen, 400*time.Millisecond)
+	if err != nil {
+		return ""
+	}
+	_ = conn.Close()
 	return "socks5://" + listen
 }
 

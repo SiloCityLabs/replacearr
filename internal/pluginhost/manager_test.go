@@ -2,6 +2,8 @@ package pluginhost
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -11,6 +13,75 @@ import (
 	"github.com/replacearr/replacearr/internal/db"
 	"github.com/replacearr/replacearr/pkg/pluginsdk"
 )
+
+func TestCompatBuiltinPluginsAndGate(t *testing.T) {
+	tmpDir := t.TempDir()
+	store, err := db.Open(filepath.Join(tmpDir, "test.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer store.Close()
+
+	// Seed legacy compatModules with radarr disabled before NewManager migrates.
+	_, err = store.DB().Exec(`
+		INSERT INTO app_config (key, value_json, updated_at)
+		VALUES ('app', '{"compatModules":{"sonarr":true,"radarr":false,"prowlarr":true}}', CURRENT_TIMESTAMP)`)
+	if err != nil {
+		t.Fatalf("seed legacy compatModules: %v", err)
+	}
+
+	mgr := NewManager(store, filepath.Join(tmpDir, "plugins"), "")
+	defer mgr.StopAll()
+
+	if !mgr.IsEnabled(pluginsdk.CompatPluginSonarr) {
+		t.Fatal("expected sonarr compat enabled after migration")
+	}
+	if mgr.IsEnabled(pluginsdk.CompatPluginRadarr) {
+		t.Fatal("expected radarr compat disabled after migration from legacy compatModules")
+	}
+	if !mgr.IsEnabled(pluginsdk.CompatPluginProwlarr) {
+		t.Fatal("expected prowlarr compat enabled after migration")
+	}
+
+	okHandler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	})
+
+	sonarrGate := mgr.Gate(pluginsdk.CompatPluginSonarr, okHandler)
+	radarrGate := mgr.Gate(pluginsdk.CompatPluginRadarr, okHandler)
+
+	rr := httptest.NewRecorder()
+	sonarrGate.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/sonarr/api/v3/system/status", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("sonarr gate status = %d, want 200", rr.Code)
+	}
+
+	rr = httptest.NewRecorder()
+	radarrGate.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/radarr/api/v3/system/status", nil))
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("radarr gate status = %d, want 404 while disabled", rr.Code)
+	}
+
+	if _, err := mgr.ConfigurePlugin(pluginsdk.CompatPluginRadarr, true, map[string]any{}); err != nil {
+		t.Fatalf("enable radarr: %v", err)
+	}
+	rr = httptest.NewRecorder()
+	radarrGate.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/radarr/api/v3/system/status", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("radarr gate status = %d after enable, want 200", rr.Code)
+	}
+
+	found := 0
+	for _, p := range mgr.ListPlugins() {
+		if (p.Manifest.Types != nil) && hasPluginType(p.Manifest.Types, pluginsdk.PluginTypeCompat) {
+			found++
+		}
+	}
+	if found != 3 {
+		t.Fatalf("expected 3 compat plugins in ListPlugins, got %d", found)
+	}
+}
 
 func TestManagerExternalPluginDiscoveryConfigureAndSearch(t *testing.T) {
 	tmpDir := t.TempDir()
@@ -31,7 +102,7 @@ func TestManagerExternalPluginDiscoveryConfigureAndSearch(t *testing.T) {
 		t.Fatalf("compile sample-indexer plugin failed: %v\n%s", err, string(out))
 	}
 
-	mgr := NewManager(store, pluginDir, "../../.tmp/ProwlarrIndexers/definitions/v11")
+	mgr := NewManager(store, pluginDir, t.TempDir())
 	defer mgr.StopAll()
 
 	if err := mgr.DiscoverAndStart(); err != nil {
@@ -53,11 +124,14 @@ func TestManagerExternalPluginDiscoveryConfigureAndSearch(t *testing.T) {
 	if sample == nil {
 		t.Fatalf("sample-torznab-indexer not discovered in %+v", plugins)
 	}
-	if sample.Status != "running" {
-		t.Fatalf("expected sample-torznab-indexer status 'running', got %q (lastError=%q)", sample.Status, sample.LastError)
+	if sample.Enabled || sample.Status != "disabled" {
+		t.Fatalf("expected sample-torznab-indexer disabled by default, got enabled=%v status=%q (lastError=%q)", sample.Enabled, sample.Status, sample.LastError)
 	}
 	if sample.Manifest.Name != "Replacearr Torznab Demo Indexer" {
 		t.Fatalf("unexpected manifest name: %q", sample.Manifest.Name)
+	}
+	if !sample.Manifest.DisabledByDefault {
+		t.Fatal("expected sample-torznab-indexer DisabledByDefault=true")
 	}
 
 	// Verify ConfigurePlugin updates settings on the external subprocess and persists to SQLite

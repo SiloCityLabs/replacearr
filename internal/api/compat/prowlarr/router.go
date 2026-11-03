@@ -445,11 +445,8 @@ func (h *Handler) handleGrabRelease(w http.ResponseWriter, r *http.Request) {
 	if payload.Protocol == "" {
 		payload.Protocol = "torrent"
 	}
-	if payload.Size <= 0 {
-		payload.Size = 2147483648
-	}
 	if payload.Indexer == "" {
-		payload.Indexer = "Prowlarr Indexer"
+		payload.Indexer = "unknown"
 	}
 	mediaType := payload.MediaType
 	if mediaType == "" {
@@ -461,22 +458,33 @@ func (h *Handler) handleGrabRelease(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	clients, _ := h.store.ListDownloadClients()
+	clientName := ""
+	for _, c := range clients {
+		if c.Enable {
+			clientName = c.Name
+			break
+		}
+	}
+	if clientName == "" {
+		writeError(w, http.StatusUnprocessableEntity, "no enabled download client configured")
+		return
+	}
 
 	qItem, err := h.store.CreateQueueItem(domain.QueueItem{
 		MediaType:             mediaType,
 		Title:                 payload.Title,
-		Status:                "downloading",
+		Status:                "queued",
 		TrackedDownloadStatus: "ok",
 		TrackedDownloadState:  "downloading",
 		Size:                  payload.Size,
-		Sizeleft:              payload.Size / 2,
-		Timeleft:              "00:06:00",
-		EstimatedCompletion:   time.Now().UTC().Add(6 * time.Minute),
+		Sizeleft:              payload.Size,
+		Timeleft:              "",
 		Protocol:              payload.Protocol,
-		DownloadClient:        "Replacearr Internal",
+		DownloadClient:        clientName,
 		DownloadID:            fmt.Sprintf("prowlarr-%d", time.Now().UnixNano()),
 		Indexer:               payload.Indexer,
-		OutputPath:            "/data/" + mediaType,
+		OutputPath:            "",
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())

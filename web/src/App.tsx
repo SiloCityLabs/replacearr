@@ -4,18 +4,17 @@ import {
   Tv,
   Film,
   Radio,
-  Search as SearchIcon,
   DownloadCloud,
   Puzzle,
   Users,
-  Link2,
   Settings,
   LogOut,
   RefreshCw,
   Shield,
-  Database,
   CheckCircle2,
   AlertCircle,
+  Menu,
+  X,
 } from 'lucide-react';
 import type {
   APIKey,
@@ -28,6 +27,7 @@ import type {
   OverviewResponse,
   QualityProfile,
   QueueItem,
+  ReleaseSearchRequest,
   Role,
   RootFolder,
   Series,
@@ -36,17 +36,17 @@ import type {
 } from './types';
 import { api, getStoredToken, setStoredToken } from './api';
 import { applyUiPreferences } from './uiPrefs';
+import { BROWSER_PLUGIN_ID, subscribeBrowserNotificationStream } from './notifications';
 import { LoginView } from './components/LoginView';
 import { DashboardTab } from './components/DashboardTab';
 import { SeriesTab } from './components/SeriesTab';
 import { MoviesTab } from './components/MoviesTab';
 import { IndexersSearchTab } from './components/IndexersSearchTab';
-import { SearchTab } from './components/SearchTab';
+import { InteractiveSearchModal } from './components/InteractiveSearchModal';
 import { SetupWizard } from './components/SetupWizard';
 import { QueueClientsTab } from './components/QueueClientsTab';
 import { PluginsTab } from './components/PluginsTab';
 import { UsersRbacTab } from './components/UsersRbacTab';
-import { CompatHubTab } from './components/CompatHubTab';
 import { SettingsTab } from './components/settings/SettingsTab';
 import { useGamepad } from './htpc/useGamepad';
 import { useRovingFocus } from './htpc/useRovingFocus';
@@ -56,6 +56,7 @@ export const App: React.FC = () => {
   const [masterApiKey, setMasterApiKey] = useState<string>('');
   const [authChecking, setAuthChecking] = useState<boolean>(true);
   const [activeTab, setActiveTab] = useState<NavTab>('dashboard');
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   // Unified Data State
   const [overview, setOverview] = useState<OverviewResponse | null>(null);
@@ -74,10 +75,9 @@ export const App: React.FC = () => {
   const [permissions, setPermissions] = useState<string[]>([]);
   const [appConfig, setAppConfig] = useState<AppConfig | null>(null);
 
-  // Cross-tab search state
-  const [pendingSearchQuery, setPendingSearchQuery] = useState<string>('');
-  const [pendingSearchType, setPendingSearchType] = useState<string>('search');
-  const [searchNonce, setSearchNonce] = useState(0);
+  const [interactiveSearch, setInteractiveSearch] = useState<ReleaseSearchRequest | null>(null);
+  const [pendingOpenAdd, setPendingOpenAdd] = useState(false);
+  const [addPanelNonce, setAddPanelNonce] = useState(0);
 
   const navRef = useRef<HTMLElement | null>(null);
 
@@ -94,6 +94,15 @@ export const App: React.FC = () => {
     const timer = setTimeout(() => setToast(null), 4000);
     return () => clearTimeout(timer);
   }, [toast]);
+
+  useEffect(() => {
+    if (!mobileNavOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setMobileNavOpen(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [mobileNavOpen]);
 
   const loadAllData = useCallback(async () => {
     setRefreshing(true);
@@ -150,18 +159,6 @@ export const App: React.FC = () => {
         const normalized: AppConfig = {
           ...cfg,
           setupComplete: Boolean(cfg.setupComplete),
-          compatModules: {
-            sonarr: cfg.compatModules?.sonarr ?? true,
-            radarr: cfg.compatModules?.radarr ?? true,
-            prowlarr: cfg.compatModules?.prowlarr ?? true,
-          },
-          browserNotifications: {
-            enabled: cfg.browserNotifications?.enabled ?? false,
-            onGrab: cfg.browserNotifications?.onGrab ?? true,
-            onDownload: cfg.browserNotifications?.onDownload ?? true,
-            onImport: cfg.browserNotifications?.onImport ?? true,
-            onHealthIssue: cfg.browserNotifications?.onHealthIssue ?? true,
-          },
         };
         setAppConfig(normalized);
         applyUiPreferences(normalized.ui);
@@ -193,6 +190,17 @@ export const App: React.FC = () => {
     void checkSession();
   }, [loadAllData]);
 
+  const browserPluginEnabled = plugins.some(
+    (p) => p.manifest.id === BROWSER_PLUGIN_ID && p.enabled
+  );
+
+  useEffect(() => {
+    if (!user || !browserPluginEnabled) {
+      return;
+    }
+    return subscribeBrowserNotificationStream(true);
+  }, [user, browserPluginEnabled]);
+
   const handleLogin = async (username: string, password: string) => {
     const res = await api.login(username, password);
     setUser(res.user);
@@ -207,11 +215,18 @@ export const App: React.FC = () => {
     setMasterApiKey('');
   };
 
-  const handleTriggerSearch = (query: string, type = 'search') => {
-    setPendingSearchQuery(query);
-    setPendingSearchType(type);
-    setSearchNonce((n) => n + 1);
-    setActiveTab('search');
+  const handleInteractiveSearch = (req: ReleaseSearchRequest) => {
+    if (!(req.seriesId || req.movieId)) {
+      notify('Interactive Search requires a library series or movie', true);
+      return;
+    }
+    setInteractiveSearch(req);
+  };
+
+  const handleOpenAddLibrary = (tab: 'series' | 'movies') => {
+    setPendingOpenAdd(true);
+    setAddPanelNonce((n) => n + 1);
+    setActiveTab(tab);
   };
 
   const saveAppConfig = useCallback(
@@ -236,12 +251,6 @@ export const App: React.FC = () => {
       label: 'Dashboard',
       accent: 'text-indigo-400',
       icon: LayoutDashboard,
-    },
-    {
-      id: 'search',
-      label: 'Search',
-      accent: 'text-sky-400',
-      icon: SearchIcon,
     },
     {
       id: 'series',
@@ -290,13 +299,6 @@ export const App: React.FC = () => {
       label: 'Settings',
       accent: 'text-indigo-300',
       icon: Settings,
-    },
-    {
-      id: 'compatibility',
-      label: 'Compatibility Hub',
-      badge: 'v3/v1',
-      accent: 'text-amber-400',
-      icon: Link2,
     },
   ];
 
@@ -371,38 +373,56 @@ export const App: React.FC = () => {
     );
   }
 
+  const activeNavLabel = navItems.find((n) => n.id === activeTab)?.label ?? 'Dashboard';
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col lg:flex-row">
       {/* Sidebar Navigation */}
-      <aside className="w-full lg:w-64 bg-slate-900/95 border-b lg:border-b-0 lg:border-r border-slate-800 shrink-0 flex flex-col justify-between">
+      <aside className="w-full lg:w-64 bg-slate-900/95 border-b lg:border-b-0 lg:border-r border-slate-800 shrink-0 flex flex-col justify-between relative z-40 sticky top-0 lg:static">
         <div>
           {/* Brand Header */}
-          <div className="p-5 border-b border-slate-800 flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500 via-emerald-500 to-amber-500 p-[1px]">
-                <div className="w-full h-full bg-slate-950 rounded-[11px] flex items-center justify-center overflow-hidden">
-                  <img
-                    src="/icon-192.png"
-                    alt="Replacearr"
-                    className="w-7 h-7 object-contain"
-                  />
-                </div>
-              </div>
-              <div>
+          <div className="h-14 px-4 lg:h-auto lg:p-5 border-b border-slate-800 flex items-center gap-3">
+            <div className="flex items-center gap-3 min-w-0">
+              <img
+                src="/icon-192.png"
+                alt="Replacearr"
+                className="w-8 h-8 lg:w-9 lg:h-9 rounded-xl shrink-0"
+              />
+              <div className="min-w-0">
                 <div className="flex items-center gap-1.5">
-                  <span className="font-bold text-base text-white tracking-tight">
+                  <span className="lg:hidden font-semibold text-sm text-white truncate">
+                    {activeNavLabel}
+                  </span>
+                  <span className="hidden lg:inline font-bold text-base text-white tracking-tight truncate">
                     Replacearr
                   </span>
-                  <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300">
+                  <span className="hidden lg:inline text-[10px] font-mono px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 shrink-0">
                     Go
                   </span>
                 </div>
               </div>
             </div>
+
+            <button
+              type="button"
+              className="lg:hidden ml-auto inline-flex items-center justify-center min-h-10 min-w-10 rounded-lg bg-slate-950/60 border border-slate-800 text-slate-200 hover:bg-slate-800 transition"
+              aria-label={mobileNavOpen ? 'Close navigation' : 'Open navigation'}
+              aria-expanded={mobileNavOpen}
+              aria-controls="app-primary-nav"
+              onClick={() => setMobileNavOpen((open) => !open)}
+            >
+              {mobileNavOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+            </button>
           </div>
 
           {/* Navigation Links */}
-          <nav ref={navRef} className="p-3 flex lg:flex-col gap-1 overflow-x-auto">
+          <nav
+            id="app-primary-nav"
+            ref={navRef}
+            className={`${
+              mobileNavOpen ? 'flex' : 'hidden'
+            } lg:flex absolute lg:static inset-x-0 top-14 lg:top-auto p-3 flex-col gap-1 bg-slate-900 border-b border-slate-800 lg:border-b-0 shadow-xl lg:shadow-none max-h-[calc(100dvh-3.5rem)] overflow-y-auto`}
+          >
             {navItems.map((item, index) => {
               const Icon = item.icon;
               const isActive = activeTab === item.id;
@@ -412,8 +432,11 @@ export const App: React.FC = () => {
                   key={item.id}
                   type="button"
                   {...roving}
-                  onClick={() => setActiveTab(item.id)}
-                  className={`flex items-center justify-between gap-2.5 px-3 py-2.5 rounded-xl text-xs font-medium whitespace-nowrap transition w-auto shrink-0 lg:w-full lg:shrink ${
+                  onClick={() => {
+                    setActiveTab(item.id);
+                    setMobileNavOpen(false);
+                  }}
+                  className={`flex items-center justify-between gap-2.5 px-3 py-2.5 rounded-xl text-xs font-medium whitespace-nowrap transition w-full ${
                     isActive
                       ? 'bg-indigo-600/15 text-white border border-indigo-500/30 shadow-sm'
                       : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/60 border border-transparent'
@@ -437,25 +460,51 @@ export const App: React.FC = () => {
                 </button>
               );
             })}
+
+            <div className="lg:hidden mt-2 pt-3 border-t border-slate-800 space-y-2 px-1">
+              <button
+                type="button"
+                onClick={() => {
+                  void loadAllData();
+                  setMobileNavOpen(false);
+                }}
+                disabled={refreshing}
+                title="Reload library, queue, and settings from the server"
+                aria-label="Reload library, queue, and settings from the server"
+                className="w-full inline-flex items-center justify-between gap-2.5 px-3 py-2.5 rounded-xl text-xs font-medium text-slate-300 bg-slate-950 hover:bg-slate-800 border border-slate-800 transition disabled:opacity-60"
+              >
+                <span className="inline-flex items-center gap-2.5">
+                  <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin text-indigo-400' : ''}`} />
+                  Sync
+                </span>
+              </button>
+
+              <div className="flex items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xs font-bold text-white truncate">{user.username}</span>
+                    <span className="inline-flex items-center gap-0.5 text-[10px] font-mono uppercase px-1.5 py-0.5 rounded bg-indigo-500/15 text-indigo-300 border border-indigo-500/30">
+                      <Shield className="w-2.5 h-2.5" />
+                      {user.roleName}
+                    </span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleLogout}
+                  title="Sign Out"
+                  className="p-2 rounded-lg bg-slate-950 hover:bg-rose-500/15 text-slate-400 hover:text-rose-300 border border-slate-800 transition"
+                >
+                  <LogOut className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
           </nav>
         </div>
 
-        {/* Sidebar Footer: System & User Info */}
-        <div className="hidden lg:block p-4 border-t border-slate-800 space-y-3 bg-slate-950/40">
-          <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 space-y-1.5 text-xs">
-            <div className="flex items-center justify-between text-slate-400">
-              <span className="inline-flex items-center gap-1.5">
-                <Database className="w-3.5 h-3.5 text-emerald-400" />
-                SQLite WAL
-              </span>
-              <span className="text-[11px] font-mono text-emerald-400">ONLINE</span>
-            </div>
-            <div className="text-[11px] font-mono text-slate-500 truncate">
-              v{overview?.system?.version || '1.0.0'} • Zero-CGO
-            </div>
-          </div>
-
-          <div className="flex items-center justify-between gap-2 pt-1">
+        {/* Sidebar Footer: User Info */}
+        <div className="hidden lg:block p-4 border-t border-slate-800 bg-slate-950/40">
+          <div className="flex items-center justify-between gap-2">
             <div className="min-w-0">
               <div className="flex items-center gap-1.5">
                 <span className="text-xs font-bold text-white truncate">{user.username}</span>
@@ -464,9 +513,6 @@ export const App: React.FC = () => {
                   {user.roleName}
                 </span>
               </div>
-              <p className="text-[11px] text-slate-500 truncate">
-                {user.email || `${user.username}@replacearr.local`}
-              </p>
             </div>
 
             <button
@@ -480,13 +526,22 @@ export const App: React.FC = () => {
         </div>
       </aside>
 
+      {mobileNavOpen && (
+        <button
+          type="button"
+          aria-label="Dismiss navigation"
+          className="lg:hidden fixed inset-0 z-30 bg-slate-950/50"
+          onClick={() => setMobileNavOpen(false)}
+        />
+      )}
+
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0">
-        {/* Top Bar */}
-        <header className="h-14 border-b border-slate-800 bg-slate-900/60 backdrop-blur px-3 sm:px-6 flex items-center justify-between gap-2 sm:gap-4 sticky top-0 z-30">
+        {/* Top Bar (desktop only — mobile uses the compact nav header) */}
+        <header className="hidden lg:flex h-14 border-b border-slate-800 bg-slate-900/60 backdrop-blur px-3 sm:px-6 items-center justify-between gap-2 sm:gap-4 sticky top-0 z-30">
           <div className="flex items-center gap-2 sm:gap-3 min-w-0">
             <span className="text-sm font-semibold text-white capitalize truncate">
-              {navItems.find((n) => n.id === activeTab)?.label}
+              {activeNavLabel}
             </span>
           </div>
 
@@ -494,18 +549,12 @@ export const App: React.FC = () => {
             <button
               onClick={() => void loadAllData()}
               disabled={refreshing}
+              title="Reload library, queue, and settings from the server"
+              aria-label="Reload library, queue, and settings from the server"
               className="inline-flex items-center justify-center gap-1.5 min-h-8 min-w-8 px-2.5 sm:px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-800 text-xs text-slate-300 transition"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin text-indigo-400' : ''}`} />
               <span className="hidden sm:inline">Sync</span>
-            </button>
-
-            <button
-              onClick={handleLogout}
-              className="lg:hidden inline-flex items-center justify-center min-h-8 min-w-8 px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs text-slate-300"
-              title="Sign Out"
-            >
-              <LogOut className="w-3.5 h-3.5" />
             </button>
           </div>
         </header>
@@ -527,6 +576,15 @@ export const App: React.FC = () => {
           </div>
         )}
 
+        {interactiveSearch && (
+          <InteractiveSearchModal
+            request={interactiveSearch}
+            onClose={() => setInteractiveSearch(null)}
+            onRefresh={loadAllData}
+            onNotify={notify}
+          />
+        )}
+
         {/* Active View Container */}
         <main className="flex-1 p-4 sm:p-6 max-w-7xl w-full mx-auto">
           {activeTab === 'dashboard' && (
@@ -535,7 +593,8 @@ export const App: React.FC = () => {
               profiles={profiles}
               rootFolders={rootFolders}
               onNavigate={setActiveTab}
-              onQuickSearch={handleTriggerSearch}
+              onAddSeries={() => handleOpenAddLibrary('series')}
+              onAddMovie={() => handleOpenAddLibrary('movies')}
               appUi={appConfig?.ui}
             />
           )}
@@ -546,9 +605,12 @@ export const App: React.FC = () => {
               profiles={profiles}
               rootFolders={rootFolders}
               onRefresh={loadAllData}
-              onSearchReleases={handleTriggerSearch}
+              onSearchReleases={handleInteractiveSearch}
               onNotify={notify}
               appUi={appConfig?.ui}
+              openAddPanel={pendingOpenAdd && activeTab === 'series'}
+              openAddNonce={addPanelNonce}
+              onAddPanelOpened={() => setPendingOpenAdd(false)}
             />
           )}
 
@@ -558,19 +620,11 @@ export const App: React.FC = () => {
               profiles={profiles}
               rootFolders={rootFolders}
               onRefresh={loadAllData}
-              onSearchReleases={handleTriggerSearch}
+              onSearchReleases={handleInteractiveSearch}
               onNotify={notify}
-            />
-          )}
-
-          {activeTab === 'search' && (
-            <SearchTab
-              initialQuery={pendingSearchQuery}
-              initialType={pendingSearchType}
-              searchNonce={searchNonce}
-              onRefresh={loadAllData}
-              onNotify={notify}
-              browserNotifications={appConfig?.browserNotifications}
+              openAddPanel={pendingOpenAdd && activeTab === 'movies'}
+              openAddNonce={addPanelNonce}
+              onAddPanelOpened={() => setPendingOpenAdd(false)}
             />
           )}
 
@@ -581,7 +635,6 @@ export const App: React.FC = () => {
               plugins={plugins}
               onRefresh={loadAllData}
               onNotify={notify}
-              onOpenSearchTab={() => setActiveTab('search')}
             />
           )}
 
@@ -599,6 +652,7 @@ export const App: React.FC = () => {
           {activeTab === 'plugins' && (
             <PluginsTab
               plugins={plugins}
+              masterApiKey={masterApiKey}
               onRefresh={loadAllData}
               onNotify={notify}
             />
@@ -618,6 +672,7 @@ export const App: React.FC = () => {
           {activeTab === 'settings' && (
             <SettingsTab
               config={appConfig}
+              overview={overview}
               indexers={indexers}
               definitions={definitions}
               plugins={plugins}
@@ -634,15 +689,6 @@ export const App: React.FC = () => {
                 setAppConfig(next);
                 applyUiPreferences(next.ui);
               }}
-            />
-          )}
-
-          {activeTab === 'compatibility' && appConfig && (
-            <CompatHubTab
-              masterApiKey={masterApiKey}
-              config={appConfig}
-              onSave={saveAppConfig}
-              onNotify={notify}
             />
           )}
         </main>

@@ -43,7 +43,7 @@ jobs:
           mkdir -p internal/webui/dist
           cp -a web/dist/. internal/webui/dist/
 
-      - name: Build static binary and sample plugin
+      - name: Build static binary
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
@@ -51,8 +51,7 @@ jobs:
         run: |
           mkdir -p dist
           go build -ldflags="-s -w" -o dist/replacearr ./cmd/replacearr
-          go build -ldflags="-s -w" -o dist/sample-indexer ./examples/plugins/sample-indexer
-          tar -C dist -czf replacearr-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz replacearr sample-indexer
+          tar -C dist -czf replacearr-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz replacearr
 
       - uses: actions/upload-artifact@v6
         with:

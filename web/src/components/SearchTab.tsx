@@ -1,44 +1,74 @@
 import React, { useEffect, useState } from 'react';
 import { Search, Download, ArrowUpDown } from 'lucide-react';
-import type { BrowserNotificationsConfig, ReleaseResult } from '../types';
+import type { ReleaseResult } from '../types';
 import { api, formatBytes } from '../api';
-import { notifyBrowser } from '../notifications';
 
 interface SearchTabProps {
   initialQuery?: string;
   initialType?: string;
+  initialTvdbId?: number;
+  initialTmdbId?: number;
+  initialSeason?: number;
+  initialEpisode?: number;
+  contextLabel?: string;
   searchNonce?: number;
   onRefresh: () => Promise<void>;
   onNotify: (msg: string, isError?: boolean) => void;
-  browserNotifications?: BrowserNotificationsConfig | null;
 }
 
 export const SearchTab: React.FC<SearchTabProps> = ({
   initialQuery = '',
   initialType = 'search',
+  initialTvdbId,
+  initialTmdbId,
+  initialSeason,
+  initialEpisode,
+  contextLabel = '',
   searchNonce = 0,
   onRefresh,
   onNotify,
-  browserNotifications,
 }) => {
   const [query, setQuery] = useState(initialQuery);
   const [searchType, setSearchType] = useState(initialType || 'search');
   const [results, setResults] = useState<ReleaseResult[]>([]);
   const [searching, setSearching] = useState(false);
   const [grabbingGuid, setGrabbingGuid] = useState<string | null>(null);
-  const [season, setSeason] = useState('');
-  const [episode, setEpisode] = useState('');
+  const [season, setSeason] = useState(
+    initialSeason != null && initialSeason >= 0 ? String(initialSeason) : ''
+  );
+  const [episode, setEpisode] = useState(
+    initialEpisode != null && initialEpisode >= 0 ? String(initialEpisode) : ''
+  );
+  const [tvdbId, setTvdbId] = useState<number | undefined>(initialTvdbId);
+  const [tmdbId, setTmdbId] = useState<number | undefined>(initialTmdbId);
+  const [context, setContext] = useState(contextLabel);
 
-  const runSearch = async (q: string, t: string) => {
+  const runSearch = async (
+    q: string,
+    t: string,
+    opts?: { tvdbId?: number; tmdbId?: number; season?: number; episode?: number }
+  ) => {
     const trimmed = q.trim();
     if (!trimmed) return;
     setSearching(true);
     try {
-      const seasonNum = season.trim() === '' ? undefined : Number(season);
-      const episodeNum = episode.trim() === '' ? undefined : Number(episode);
+      const seasonNum =
+        opts?.season != null
+          ? opts.season
+          : season.trim() === ''
+            ? undefined
+            : Number(season);
+      const episodeNum =
+        opts?.episode != null
+          ? opts.episode
+          : episode.trim() === ''
+            ? undefined
+            : Number(episode);
       const res = await api.searchReleases(trimmed, t, {
-        season: Number.isFinite(seasonNum) ? seasonNum : undefined,
-        episode: Number.isFinite(episodeNum) ? episodeNum : undefined,
+        season: Number.isFinite(seasonNum as number) ? seasonNum : undefined,
+        episode: Number.isFinite(episodeNum as number) ? episodeNum : undefined,
+        tvdbId: opts?.tvdbId ?? tvdbId,
+        tmdbId: opts?.tmdbId ?? tmdbId,
       });
       setResults(res);
     } catch (err) {
@@ -52,10 +82,20 @@ export const SearchTab: React.FC<SearchTabProps> = ({
     if (initialQuery) {
       setQuery(initialQuery);
       setSearchType(initialType || 'search');
-      void runSearch(initialQuery, initialType || 'search');
+      setTvdbId(initialTvdbId);
+      setTmdbId(initialTmdbId);
+      setContext(contextLabel || '');
+      if (initialSeason != null && initialSeason >= 0) setSeason(String(initialSeason));
+      if (initialEpisode != null && initialEpisode >= 0) setEpisode(String(initialEpisode));
+      void runSearch(initialQuery, initialType || 'search', {
+        tvdbId: initialTvdbId,
+        tmdbId: initialTmdbId,
+        season: initialSeason,
+        episode: initialEpisode,
+      });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialQuery, initialType, searchNonce]);
+  }, [initialQuery, initialType, initialTvdbId, initialTmdbId, searchNonce]);
 
   const handleGrab = async (rel: ReleaseResult) => {
     setGrabbingGuid(rel.guid || rel.title);
@@ -68,10 +108,7 @@ export const SearchTab: React.FC<SearchTabProps> = ({
         size: rel.size || 1500000000,
         mediaType: searchType === 'movie' ? 'movie' : 'tv',
       });
-      onNotify(`Grabbed "${rel.title}" and sent to Download Queue!`);
-      if (browserNotifications?.enabled && browserNotifications.onGrab) {
-        notifyBrowser('Release grabbed', rel.title);
-      }
+      onNotify(`Queued "${rel.title}" with your download client`);
       await onRefresh();
     } catch (err) {
       onNotify(err instanceof Error ? err.message : 'Failed to grab release', true);
@@ -90,8 +127,15 @@ export const SearchTab: React.FC<SearchTabProps> = ({
           <div>
             <h2 className="text-lg font-bold text-white">Release Search</h2>
             <p className="text-xs text-slate-400">
-              Query Torznab, Newznab, Cardigann, and plugin indexers in one place
+              Indexer releases only — use Add Series / Add Movie for TVDB / TMDB / IMDb lookup
             </p>
+            {context ? (
+              <p className="mt-1 inline-flex items-center px-2 py-0.5 rounded-md bg-sky-500/15 border border-sky-500/30 text-[11px] text-sky-300">
+                Searching releases for {context}
+                {tvdbId ? ` · tvdb:${tvdbId}` : ''}
+                {tmdbId ? ` · tmdb:${tmdbId}` : ''}
+              </p>
+            ) : null}
           </div>
         </div>
       </div>

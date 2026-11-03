@@ -263,7 +263,7 @@ func (s *Server) handleDeleteRootFolder(w http.ResponseWriter, r *http.Request) 
 	}
 	for _, sr := range series {
 		if sr.RootFolderPath == folder.Path {
-			writeErr(w, http.StatusConflict, errors.New("root folder is in use"))
+			writeErr(w, http.StatusConflict, errors.New("root folder is in use by a series; remove or reassign that series first"))
 			return
 		}
 	}
@@ -274,7 +274,7 @@ func (s *Server) handleDeleteRootFolder(w http.ResponseWriter, r *http.Request) 
 	}
 	for _, mv := range movies {
 		if mv.RootFolderPath == folder.Path {
-			writeErr(w, http.StatusConflict, errors.New("root folder is in use"))
+			writeErr(w, http.StatusConflict, errors.New("root folder is in use by a movie; remove or reassign that movie first"))
 			return
 		}
 	}
@@ -345,22 +345,20 @@ func (s *Server) handleUpdateDownloadClient(w http.ResponseWriter, r *http.Reque
 
 func (s *Server) handleTestDownloadClient(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Host   string `json:"host"`
-		Port   int    `json:"port"`
-		UseSsl bool   `json:"useSsl"`
+		BaseURL string `json:"baseUrl"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
-	host := strings.TrimSpace(req.Host)
-	if host == "" || req.Port < 1 || req.Port > 65535 {
-		writeErr(w, http.StatusBadRequest, errors.New("host and a port between 1 and 65535 are required"))
+	baseURL, err := domain.NormalizeDownloadClientBaseURL(req.BaseURL)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
-	_ = req.UseSsl
+	host, port, _ := domain.SplitDownloadClientBaseURL(baseURL)
 	start := time.Now()
-	conn, err := net.DialTimeout("tcp", net.JoinHostPort(host, strconv.Itoa(req.Port)), 3*time.Second)
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort(host, strconv.Itoa(port)), 3*time.Second)
 	latency := time.Since(start).Milliseconds()
 	if err != nil {
 		writeJSON(w, http.StatusOK, map[string]any{
@@ -373,7 +371,7 @@ func (s *Server) handleTestDownloadClient(w http.ResponseWriter, r *http.Request
 	_ = conn.Close()
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":        true,
-		"message":   "connected",
+		"message":   "connected to " + baseURL,
 		"latencyMs": latency,
 	})
 }

@@ -1,6 +1,13 @@
 package domain
 
-import "time"
+import (
+	"errors"
+	"fmt"
+	"net/url"
+	"strconv"
+	"strings"
+	"time"
+)
 
 // Permissions constants for RBAC
 const (
@@ -283,9 +290,7 @@ type DownloadClient struct {
 	Protocol                 string        `json:"protocol"` // torrent, usenet
 	Enable                   bool          `json:"enable"`
 	Priority                 int           `json:"priority"`
-	Host                     string        `json:"host"`
-	Port                     int           `json:"port"`
-	UseSsl                   bool          `json:"useSsl"`
+	BaseURL                  string        `json:"baseUrl"` // e.g. http://localhost:8080 or https://qbittorrent.example/qbittorrent
 	Username                 string        `json:"username"`
 	Password                 string        `json:"password,omitempty"`
 	Category                 string        `json:"category"`
@@ -293,6 +298,84 @@ type DownloadClient struct {
 	RemoveFailedDownloads    bool          `json:"removeFailedDownloads"`
 	Fields                   []ConfigField `json:"fields"`
 	Tags                     []int64       `json:"tags"`
+}
+
+// ProtocolForDownloadClientImplementation returns the protocol fixed by client type.
+// Built-in torrent clients are always "torrent"; SABnzbd/NZBGet are always "usenet".
+// Plugin (and unknown) implementations keep preferred when it is torrent/usenet.
+func ProtocolForDownloadClientImplementation(implementation, preferred string) string {
+	switch strings.TrimSpace(implementation) {
+	case "SABnzbd", "NZBGet":
+		return "usenet"
+	case "qBittorrent", "Transmission", "Deluge":
+		return "torrent"
+	case "Plugin":
+		if strings.EqualFold(preferred, "usenet") {
+			return "usenet"
+		}
+		return "torrent"
+	default:
+		return "torrent"
+	}
+}
+
+// NormalizeDownloadClientBaseURL accepts a full client URL (scheme, host, optional
+// port and path) and returns a trimmed canonical form. Empty input defaults to
+// http://localhost:8080. A missing scheme is treated as http.
+func NormalizeDownloadClientBaseURL(raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "http://localhost:8080", nil
+	}
+	if !strings.Contains(raw, "://") {
+		raw = "http://" + raw
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "", fmt.Errorf("invalid base URL: %w", err)
+	}
+	scheme := strings.ToLower(u.Scheme)
+	if scheme != "http" && scheme != "https" {
+		return "", errors.New("base URL must use http or https")
+	}
+	if strings.TrimSpace(u.Host) == "" {
+		return "", errors.New("base URL must include a host")
+	}
+	path := u.EscapedPath()
+	if path == "/" {
+		path = ""
+	}
+	out := (&url.URL{Scheme: scheme, Host: u.Host, Path: path}).String()
+	return strings.TrimRight(out, "/"), nil
+}
+
+// SplitDownloadClientBaseURL derives legacy host/port/ssl values for columns kept
+// after the base_url migration.
+func SplitDownloadClientBaseURL(base string) (host string, port int, useSSL bool) {
+	normalized, err := NormalizeDownloadClientBaseURL(base)
+	if err != nil {
+		return "localhost", 8080, false
+	}
+	u, err := url.Parse(normalized)
+	if err != nil {
+		return "localhost", 8080, false
+	}
+	useSSL = strings.EqualFold(u.Scheme, "https")
+	host = u.Hostname()
+	if host == "" {
+		host = "localhost"
+	}
+	if p := u.Port(); p != "" {
+		port, _ = strconv.Atoi(p)
+	}
+	if port <= 0 {
+		if useSSL {
+			port = 443
+		} else {
+			port = 80
+		}
+	}
+	return host, port, useSSL
 }
 
 type QueueItem struct {

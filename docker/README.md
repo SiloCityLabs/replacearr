@@ -5,7 +5,7 @@
 - Unified TV, movie, indexer, and download-client management
 - Drop-in compatible **Sonarr v3**, **Radarr v3**, and **Prowlarr v1** APIs, so Overseerr, Jellyseerr, Bazarr, Homepage, LunaSea, nzb360 and friends work unchanged
 - Multi-user accounts with role-based access control (RBAC) and scoped API keys
-- Native Cardigann YAML indexer definitions (Prowlarr/Jackett compatible)
+- Native Cardigann YAML indexer definitions
 - Out-of-process Go plugin SDK for custom indexers, download clients, and notifications
 - Built-in FlareSolverr integration for Cloudflare-protected indexers
 - LinuxServer-style `PUID` / `PGID` / `TZ` support
@@ -86,7 +86,7 @@ On the very first start (when the database contains no users), Replacearr:
 2. Creates a master API key with full access and writes it to **`/config/api_key.txt`**. If `REPLACEARR_API_KEY` is set, that value is used instead.
 3. Generates a JWT signing secret and stores it at **`/config/jwt_secret.key`** (unless `REPLACEARR_JWT_SECRET` is set).
 4. Seeds a FlareSolverr indexer proxy pointing at `REPLACEARR_FLARESOLVERR_URL`.
-5. Copies bundled plugins into `/config/plugins`.
+5. Copies any image-bundled plugins into `/config/plugins` (production images ship none by default; SDK examples stay in-repo under `examples/plugins/`).
 
 To read the generated master API key:
 
@@ -147,7 +147,7 @@ docker exec replacearr cat /config/api_key.txt
 | Path | Description |
 | :--- | :--- |
 | `/config` | Persistent application data: SQLite database, JWT secret, master API key, plugins, and Cardigann definitions. **Back this up.** |
-| `/data` | Media library and downloads. The container creates `/data/tv`, `/data/movies`, and `/data/downloads` if they don't exist. |
+| `/data` | Media library and downloads. The container creates `/data/TV`, `/data/Movies`, and `/data/downloads` if they don't exist. |
 
 Layout of `/config`:
 
@@ -213,7 +213,7 @@ Authentication accepts the `X-Api-Key` header, the `?apikey=` query parameter, o
 ## Plugins and Indexer Definitions
 
 - **Plugins:** drop executable Go plugin binaries into `/config/plugins` and make them executable (`chmod +x`). Bundled plugins are copied there on startup only if a file with the same name doesn't already exist, so your own versions are never overwritten. See the [Plugin SDK docs](https://github.com/replacearr/replacearr#go-plugin-sdk-pkgpluginsdk).
-- **Cardigann definitions:** place Prowlarr/Jackett-compatible `.yml` definitions in `/config/definitions`, e.g. from [Prowlarr/Indexers](https://github.com/Prowlarr/Indexers).
+- **Indexer YAML definitions:** the image bundles the Replacearr `definitions/` catalog (~580 Cardigann YAML files) and seeds missing files into `/config/definitions` on startup without overwriting local edits. Drop additional custom `.yml` files there as needed.
 
 ---
 

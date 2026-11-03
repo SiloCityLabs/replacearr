@@ -70,9 +70,9 @@ Captured at 1440×900. API keys are redacted in these images.
 
 ![Import lists](16-settings-import-lists.png)
 
-## Settings — Connect
+## Settings — System
 
-![Notifications and webhooks](17-settings-connect.png)
+![System status and compat endpoints](17-settings-system.png)
 
 ## Settings — Metadata
 
@@ -82,6 +82,6 @@ Captured at 1440×900. API keys are redacted in these images.
 
 ![Tags](19-settings-tags.png)
 
-## Compatibility hub
+## Compatibility (*arr clients)
 
-![Sonarr, Radarr, and Prowlarr compatibility URLs](20-compatibility.png)
+![Connect Overseerr, Bazarr, and nzb360 via built-in *arr plugins](20-compatibility.png)

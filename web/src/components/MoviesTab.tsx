@@ -1,29 +1,30 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Film,
   Plus,
   Search,
-  Trash2,
   CheckCircle2,
   Clock,
   Folder,
   X,
-  Radio,
   Sparkles,
-  Magnet,
 } from 'lucide-react';
-import type { Movie, QualityProfile, RootFolder } from '../types';
+import type { Movie, QualityProfile, ReleaseSearchRequest, RootFolder } from '../types';
 import { api, formatBytes } from '../api';
 import { useRovingFocus } from '../htpc/useRovingFocus';
 import { ManualTorrentForm, type ManualTorrentTarget } from './ManualTorrentForm';
+import { MovieDetailPanel } from './MovieDetailPanel';
 
 interface MoviesTabProps {
   movies: Movie[];
   profiles: QualityProfile[];
   rootFolders: RootFolder[];
   onRefresh: () => Promise<void>;
-  onSearchReleases: (query: string, type: string) => void;
+  onSearchReleases: (req: ReleaseSearchRequest) => void;
   onNotify: (msg: string, isError?: boolean) => void;
+  openAddPanel?: boolean;
+  openAddNonce?: number;
+  onAddPanelOpened?: () => void;
 }
 
 export const MoviesTab: React.FC<MoviesTabProps> = ({
@@ -33,6 +34,9 @@ export const MoviesTab: React.FC<MoviesTabProps> = ({
   onRefresh,
   onSearchReleases,
   onNotify,
+  openAddPanel = false,
+  openAddNonce = 0,
+  onAddPanelOpened,
 }) => {
   const movieRoots = rootFolders.filter((r) => r.mediaType === 'movie');
   const availableRoots = movieRoots.length > 0 ? movieRoots : rootFolders;
@@ -48,6 +52,7 @@ export const MoviesTab: React.FC<MoviesTabProps> = ({
   );
   const [minAvailability, setMinAvailability] = useState('released');
   const [manualTarget, setManualTarget] = useState<ManualTorrentTarget | null>(null);
+  const [activeMovie, setActiveMovie] = useState<Movie | null>(null);
 
   const filteredMovies = movies.filter(
     (m) =>
@@ -59,6 +64,10 @@ export const MoviesTab: React.FC<MoviesTabProps> = ({
     itemCount: filteredMovies.length,
     orientation: 'grid',
     columns: 3,
+    onActivate: (index) => {
+      const m = filteredMovies[index];
+      if (m) setActiveMovie(m);
+    },
   });
 
   const handleLookup = async (e?: React.FormEvent, customTerm?: string) => {
@@ -101,6 +110,9 @@ export const MoviesTab: React.FC<MoviesTabProps> = ({
     try {
       await api.deleteMovie(m.id);
       onNotify(`Removed "${m.title}" from library`);
+      if (activeMovie?.id === m.id) {
+        setActiveMovie(null);
+      }
       await onRefresh();
     } catch (err) {
       onNotify(err instanceof Error ? err.message : 'Failed to delete movie', true);
@@ -109,17 +121,46 @@ export const MoviesTab: React.FC<MoviesTabProps> = ({
 
   const getPosterUrl = (m: Movie): string | null => {
     const poster = m.images?.find((img) => img.coverType === 'poster') || m.images?.[0];
-    return poster?.remoteUrl || poster?.url || null;
+    return poster?.url || poster?.remoteUrl || null;
   };
 
-  const openAddPanel = () => {
+  const startAddPanel = () => {
     setShowAddPanel(true);
     setSelectedRootFolder(availableRoots[0]?.path || '');
-    if (lookupResults.length === 0) {
-      setLookupTerm('Dune');
-      void handleLookup(undefined, 'Dune');
-    }
+    setLookupTerm('');
+    setLookupResults([]);
   };
+
+  useEffect(() => {
+    if (openAddPanel) {
+      startAddPanel();
+      onAddPanelOpened?.();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openAddNonce]);
+
+  if (activeMovie) {
+    return (
+      <>
+        <MovieDetailPanel
+          movie={activeMovie}
+          posterUrl={getPosterUrl(activeMovie)}
+          onBack={() => setActiveMovie(null)}
+          onDelete={() => void handleDeleteMovie(activeMovie)}
+          onSearchReleases={onSearchReleases}
+          onManualTorrent={setManualTarget}
+        />
+        {manualTarget && (
+          <ManualTorrentForm
+            target={manualTarget}
+            onClose={() => setManualTarget(null)}
+            onNotify={onNotify}
+            onSuccess={onRefresh}
+          />
+        )}
+      </>
+    );
+  }
 
   if (showAddPanel) {
     return (
@@ -130,7 +171,7 @@ export const MoviesTab: React.FC<MoviesTabProps> = ({
             <div>
               <h3 className="text-base font-bold text-white">Add Movie</h3>
               <p className="text-xs text-slate-400">
-                Lookup metadata and monitor releases automatically
+                Lookup on TMDB / IMDb — not torrent search
               </p>
             </div>
           </div>
@@ -148,7 +189,7 @@ export const MoviesTab: React.FC<MoviesTabProps> = ({
               type="text"
               value={lookupTerm}
               onChange={(e) => setLookupTerm(e.target.value)}
-              placeholder="Enter movie title or TMDB/IMDb ID..."
+              placeholder="Movie title, tmdb:12345, or imdb:tt…"
               className="flex-1 px-3.5 py-2.5 bg-slate-900 border border-slate-800 rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
               autoFocus
             />
@@ -157,7 +198,7 @@ export const MoviesTab: React.FC<MoviesTabProps> = ({
               disabled={lookupLoading}
               className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-xl transition"
             >
-              {lookupLoading ? 'Searching...' : 'Lookup'}
+              {lookupLoading ? 'Looking up…' : 'Lookup'}
             </button>
           </form>
 
@@ -262,10 +303,10 @@ export const MoviesTab: React.FC<MoviesTabProps> = ({
             <Film className="w-5 h-5" />
           </div>
           <div>
-            <h2 className="text-lg font-bold text-white">Movies Library</h2>
-            <p className="text-xs text-slate-400">
-              {movies.length} movies monitored • TMDB & IMDb release automation
-            </p>
+            <h2 className="text-lg font-bold text-white">
+              Movies Library - {movies.length}{' '}
+              {movies.length === 1 ? 'movie' : 'movies'}
+            </h2>
           </div>
         </div>
 
@@ -281,7 +322,7 @@ export const MoviesTab: React.FC<MoviesTabProps> = ({
             />
           </div>
           <button
-            onClick={openAddPanel}
+            onClick={startAddPanel}
             className="inline-flex items-center justify-center gap-2 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-lg shadow-lg shadow-emerald-600/20 transition shrink-0"
           >
             <Plus className="w-4 h-4" />
@@ -298,7 +339,7 @@ export const MoviesTab: React.FC<MoviesTabProps> = ({
             Look up a movie by title or TMDB/IMDb ID to add it to your library.
           </p>
           <button
-            onClick={openAddPanel}
+            onClick={startAddPanel}
             className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-lg transition"
           >
             <Plus className="w-4 h-4" />
@@ -313,10 +354,12 @@ export const MoviesTab: React.FC<MoviesTabProps> = ({
               <div
                 key={m.id}
                 {...gridFocus.itemProps(index)}
-                className="group bg-slate-900/90 border border-slate-800 hover:border-emerald-500/40 rounded-xl overflow-hidden flex flex-col justify-between transition shadow-lg outline-none"
+                role="button"
+                onClick={() => setActiveMovie(m)}
+                className="group bg-slate-900/90 border border-slate-800 hover:border-emerald-500/40 rounded-xl overflow-hidden flex flex-col justify-between transition shadow-lg outline-none cursor-pointer"
               >
-                <div className="p-4 flex flex-col sm:flex-row gap-4">
-                  <div className="w-28 h-40 sm:w-24 sm:h-36 mx-auto sm:mx-0 rounded-lg bg-gradient-to-br from-emerald-900/60 via-slate-900 to-slate-950 border border-slate-800 shrink-0 overflow-hidden flex items-center justify-center relative">
+                <div className="p-4 flex flex-row gap-3 sm:gap-4">
+                  <div className="w-20 h-28 sm:w-24 sm:h-36 rounded-lg bg-gradient-to-br from-emerald-900/60 via-slate-900 to-slate-950 border border-slate-800 shrink-0 overflow-hidden flex items-center justify-center relative">
                     {posterUrl ? (
                       <img
                         src={posterUrl}
@@ -335,14 +378,14 @@ export const MoviesTab: React.FC<MoviesTabProps> = ({
                   </div>
 
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-start justify-between gap-2">
-                      <h3 className="text-base font-bold text-white truncate">{m.title}</h3>
+                    <h3 className="text-base font-bold text-white truncate">{m.title}</h3>
+                    <div className="mt-1">
                       {m.hasFile ? (
-                        <span className="inline-flex items-center gap-1 text-[10px] font-mono uppercase px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 shrink-0">
+                        <span className="inline-flex items-center gap-1 text-[10px] font-mono uppercase px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
                           <CheckCircle2 className="w-3 h-3" /> Downloaded
                         </span>
                       ) : (
-                        <span className="inline-flex items-center gap-1 text-[10px] font-mono uppercase px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30 shrink-0">
+                        <span className="inline-flex items-center gap-1 text-[10px] font-mono uppercase px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30">
                           <Clock className="w-3 h-3" /> Monitored
                         </span>
                       )}
@@ -373,54 +416,10 @@ export const MoviesTab: React.FC<MoviesTabProps> = ({
                   </div>
                 </div>
 
-                <div className="px-4 py-3 bg-slate-950/70 border-t border-slate-800/80 flex items-center justify-between gap-2">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-[11px] font-mono text-slate-500">
-                      TMDB #{m.tmdbId || m.id}
-                    </span>
-                    <button
-                      onClick={() => onSearchReleases(`${m.title} ${m.year}`, 'movie')}
-                      className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/30 text-xs font-medium transition"
-                    >
-                      <Radio className="w-3.5 h-3.5" />
-                      <span>Search</span>
-                    </button>
-                    <button
-                      onClick={() =>
-                        setManualTarget({
-                          title: m.title,
-                          mediaType: 'movie',
-                          movieId: m.id,
-                        })
-                      }
-                      className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 text-xs font-medium transition"
-                    >
-                      <Magnet className="w-3.5 h-3.5" />
-                      <span>Add torrent</span>
-                    </button>
-                  </div>
-
-                  <button
-                    onClick={() => void handleDeleteMovie(m)}
-                    title="Delete movie"
-                    className="p-1.5 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </div>
               </div>
             );
           })}
         </div>
-      )}
-
-      {manualTarget && (
-        <ManualTorrentForm
-          target={manualTarget}
-          onClose={() => setManualTarget(null)}
-          onNotify={onNotify}
-          onSuccess={onRefresh}
-        />
       )}
     </div>
   );

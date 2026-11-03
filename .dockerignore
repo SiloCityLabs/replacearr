@@ -2,9 +2,6 @@
 .git
 .gitignore
 
-# Upstream reference repositories & local temp state
-.tmp
-
 # Build artifacts
 bin
 coverage.out

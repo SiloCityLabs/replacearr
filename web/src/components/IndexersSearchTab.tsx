@@ -7,9 +7,6 @@ import {
   FileCode2,
   Globe,
   Lock,
-  Sparkles,
-  X,
-  Puzzle,
   ShieldCheck,
   Activity,
   RefreshCw,
@@ -23,6 +20,18 @@ import type {
   IndexerProxy,
 } from '../types';
 import { api } from '../api';
+import {
+  blankIndexerForm,
+  IndexerForm,
+  IndexerModal,
+  indexerToForm,
+} from './modals/IndexerModal';
+import {
+  blankIndexerProxyForm,
+  IndexerProxyForm,
+  IndexerProxyModal,
+  indexerProxyToForm,
+} from './modals/IndexerProxyModal';
 
 interface IndexersSearchTabProps {
   indexers: Indexer[];
@@ -30,7 +39,6 @@ interface IndexersSearchTabProps {
   plugins: DiscoveredPlugin[];
   onRefresh: () => Promise<void>;
   onNotify: (msg: string, isError?: boolean) => void;
-  onOpenSearchTab?: () => void;
 }
 
 export const IndexersSearchTab: React.FC<IndexersSearchTabProps> = ({
@@ -39,7 +47,6 @@ export const IndexersSearchTab: React.FC<IndexersSearchTabProps> = ({
   plugins,
   onRefresh,
   onNotify,
-  onOpenSearchTab,
 }) => {
   const [subView, setSubView] = useState<'indexers' | 'cardigann' | 'flaresolverr'>('indexers');
 
@@ -51,30 +58,13 @@ export const IndexersSearchTab: React.FC<IndexersSearchTabProps> = ({
   const [clearances, setClearances] = useState<DomainClearance[]>([]);
   const [testingHost, setTestingHost] = useState<string | null>(null);
   const [healthByHost, setHealthByHost] = useState<Record<string, FlareSolverrHealth>>({});
-  const [showAddProxyModal, setShowAddProxyModal] = useState(false);
-  const [proxyName, setProxyName] = useState('FlareSolverr');
-  const [proxyImpl, setProxyImpl] = useState<'FlareSolverr' | 'Http' | 'Socks5'>('FlareSolverr');
-  const [proxyHost, setProxyHost] = useState('http://localhost:8191/');
-  const [proxyTimeout, setProxyTimeout] = useState(60);
-  const [proxySessionTtl, setProxySessionTtl] = useState(15);
-  const [proxyDisableMedia, setProxyDisableMedia] = useState(false);
+  const [indexerForm, setIndexerForm] = useState<IndexerForm | null>(null);
+  const [proxyForm, setProxyForm] = useState<IndexerProxyForm | null>(null);
 
   // Interactive Solve Test State
   const [solveUrl, setSolveUrl] = useState('https://1337x.to/');
   const [solving, setSolving] = useState(false);
   const [solveResult, setSolveResult] = useState<Record<string, unknown> | null>(null);
-
-  // Add Indexer Modal State
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [idxName, setIdxName] = useState('');
-  const [idxImplementation, setIdxImplementation] = useState('Torznab');
-  const [idxProtocol, setIdxProtocol] = useState<'torrent' | 'usenet'>('torrent');
-  const [idxPrivacy, setIdxPrivacy] = useState<'public' | 'private' | 'semiPrivate'>('public');
-  const [idxBaseUrl, setIdxBaseUrl] = useState('https://1337x.to/');
-  const [idxApiKey, setIdxApiKey] = useState('');
-  const [idxDefFile, setIdxDefFile] = useState('');
-  const [idxPluginId, setIdxPluginId] = useState('');
-  const [idxPriority, setIdxPriority] = useState(25);
 
   const loadProxiesAndClearances = async () => {
     try {
@@ -93,35 +83,6 @@ export const IndexersSearchTab: React.FC<IndexersSearchTabProps> = ({
     void loadProxiesAndClearances();
   }, []);
 
-  const handleCreateIndexer = async (e: React.FormEvent) => {
-    e.preventDefault();
-    try {
-      const created = await api.addIndexer({
-        name: idxName,
-        implementation: idxImplementation,
-        implementationName: idxImplementation,
-        configContract: `${idxImplementation}Settings`,
-        protocol: idxProtocol,
-        privacy: idxPrivacy,
-        enable: true,
-        enableRss: true,
-        enableAutomaticSearch: true,
-        enableInteractiveSearch: true,
-        priority: idxPriority,
-        baseUrl: idxBaseUrl,
-        apiKey: idxApiKey,
-        definitionFile: idxDefFile,
-        pluginId: idxPluginId,
-        categories: [2000, 5000],
-      });
-      onNotify(`Added indexer "${created.name}" (${created.implementation})`);
-      setShowAddModal(false);
-      await onRefresh();
-    } catch (err) {
-      onNotify(err instanceof Error ? err.message : 'Failed to create indexer', true);
-    }
-  };
-
   const handleDeleteIndexer = async (idx: Indexer) => {
     try {
       await api.deleteIndexer(idx.id);
@@ -129,28 +90,6 @@ export const IndexersSearchTab: React.FC<IndexersSearchTabProps> = ({
       await onRefresh();
     } catch (err) {
       onNotify(err instanceof Error ? err.message : 'Failed to delete indexer', true);
-    }
-  };
-
-  const handleCreateProxy = async (e: React.FormEvent) => {
-    e.preventDefault();
-    try {
-      const created = await api.addIndexerProxy({
-        name: proxyName,
-        implementation: proxyImpl,
-        implementationName: proxyImpl,
-        configContract: `${proxyImpl}Settings`,
-        host: proxyHost,
-        requestTimeout: proxyTimeout,
-        sessionTtlMinutes: proxySessionTtl,
-        disableMedia: proxyDisableMedia,
-        enable: true,
-      });
-      onNotify(`Added indexer proxy "${created.name}" (${created.host})`);
-      setShowAddProxyModal(false);
-      await loadProxiesAndClearances();
-    } catch (err) {
-      onNotify(err instanceof Error ? err.message : 'Failed to add indexer proxy', true);
     }
   };
 
@@ -221,16 +160,16 @@ export const IndexersSearchTab: React.FC<IndexersSearchTabProps> = ({
   };
 
   const handleSelectCardigannDef = (def: CardigannDefinition) => {
-    setIdxName(def.name);
-    setIdxImplementation('Cardigann');
-    setIdxProtocol('torrent');
-    setIdxPrivacy(
-      def.type === 'private' ? 'private' : def.type === 'semi-private' ? 'semiPrivate' : 'public'
-    );
-    setIdxBaseUrl(def.links?.[0] || 'https://');
-    setIdxDefFile(def.id);
-    setIdxPluginId('');
-    setShowAddModal(true);
+    setIndexerForm({
+      ...blankIndexerForm(),
+      name: def.name,
+      implementation: 'Cardigann',
+      protocol: 'torrent',
+      privacy:
+        def.type === 'private' ? 'private' : def.type === 'semi-private' ? 'semiPrivate' : 'public',
+      baseUrl: def.links?.[0] || 'https://',
+      definitionFile: def.fileName || def.id,
+    });
   };
 
   const filteredDefs = definitions.filter(
@@ -252,22 +191,12 @@ export const IndexersSearchTab: React.FC<IndexersSearchTabProps> = ({
             <h2 className="text-lg font-bold text-white">Indexers</h2>
             <p className="text-xs text-slate-400">
               {indexers.length} active indexers • {proxies.length} FlareSolverr/Indexer proxies •{' '}
-              {definitions.length} Cardigann YAML definitions
+              {definitions.length} YAML definitions
             </p>
           </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          {onOpenSearchTab ? (
-            <button
-              type="button"
-              onClick={onOpenSearchTab}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-sky-500/15 hover:bg-sky-500/25 text-sky-300 border border-sky-500/30 text-xs font-semibold rounded-lg transition"
-            >
-              <Search className="w-4 h-4" />
-              <span>Open Search tab</span>
-            </button>
-          ) : null}
           <div className="inline-flex flex-wrap rounded-xl bg-slate-950 p-1 border border-slate-800">
             <button
               onClick={() => setSubView('indexers')}
@@ -287,7 +216,7 @@ export const IndexersSearchTab: React.FC<IndexersSearchTabProps> = ({
                   : 'text-slate-400 hover:text-white'
               }`}
             >
-              Cardigann YAML ({definitions.length})
+              YAML Definitions ({definitions.length})
             </button>
             <button
               onClick={() => {
@@ -306,13 +235,8 @@ export const IndexersSearchTab: React.FC<IndexersSearchTabProps> = ({
           </div>
 
           <button
-            onClick={() => {
-              setIdxName('');
-              setIdxImplementation('Torznab');
-              setIdxBaseUrl('https://indexer.example.com/api');
-              setIdxDefFile('');
-              setShowAddModal(true);
-            }}
+            type="button"
+            onClick={() => setIndexerForm(blankIndexerForm())}
             className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold rounded-lg transition"
           >
             <Plus className="w-4 h-4" />
@@ -374,13 +298,23 @@ export const IndexersSearchTab: React.FC<IndexersSearchTabProps> = ({
                   <span className="w-2 h-2 rounded-full bg-emerald-400" />
                   <span>RSS & Interactive Search Enabled</span>
                 </div>
-                <button
-                  onClick={() => handleDeleteIndexer(idx)}
-                  className="p-1.5 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition"
-                  title="Delete Indexer"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setIndexerForm(indexerToForm(idx))}
+                    className="px-2 py-1 rounded-lg text-xs text-slate-300 hover:text-white hover:bg-slate-800 transition"
+                  >
+                    Edit
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleDeleteIndexer(idx)}
+                    className="p-1.5 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition"
+                    title="Delete Indexer"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
             </div>
           ))}
@@ -395,10 +329,10 @@ export const IndexersSearchTab: React.FC<IndexersSearchTabProps> = ({
               <FileCode2 className="w-5 h-5 text-amber-400" />
               <div>
                 <h3 className="text-sm font-bold text-white">
-                  Prowlarr Cardigann YAML Definitions (.tmp/ProwlarrIndexers)
+                  Indexer YAML Definitions
                 </h3>
                 <p className="text-xs text-slate-400">
-                  Click any YAML definition to add and configure it as an active Replacearr indexer
+                  Click any definition to add and configure it as an active indexer
                 </p>
               </div>
             </div>
@@ -498,15 +432,8 @@ export const IndexersSearchTab: React.FC<IndexersSearchTabProps> = ({
             </div>
 
             <button
-              onClick={() => {
-                setProxyName('FlareSolverr');
-                setProxyImpl('FlareSolverr');
-                setProxyHost('http://localhost:8191/');
-                setProxyTimeout(60);
-                setProxySessionTtl(15);
-                setProxyDisableMedia(false);
-                setShowAddProxyModal(true);
-              }}
+              type="button"
+              onClick={() => setProxyForm(blankIndexerProxyForm())}
               className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-orange-500 hover:bg-orange-400 text-slate-950 text-xs font-bold rounded-lg transition shrink-0"
             >
               <Plus className="w-4 h-4" />
@@ -535,13 +462,23 @@ export const IndexersSearchTab: React.FC<IndexersSearchTabProps> = ({
                         <p className="text-xs text-slate-400 font-mono mt-1 break-all">{proxy.host}</p>
                       </div>
 
-                      <button
-                        onClick={() => handleDeleteProxy(proxy)}
-                        className="p-1.5 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition"
-                        title="Delete Indexer Proxy"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => setProxyForm(indexerProxyToForm(proxy))}
+                          className="px-2 py-1 rounded-lg text-xs text-slate-300 hover:text-white hover:bg-slate-800 transition"
+                        >
+                          Edit
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void handleDeleteProxy(proxy)}
+                          className="p-1.5 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition"
+                          title="Delete Indexer Proxy"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
                     </div>
 
                     <div className="mt-4 flex flex-wrap gap-2 text-[11px]">
@@ -692,326 +629,25 @@ export const IndexersSearchTab: React.FC<IndexersSearchTabProps> = ({
         </div>
       )}
 
-      {/* Add Indexer Proxy (FlareSolverr) Modal */}
-      {showAddProxyModal && (
-        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm overflow-y-auto flex items-start justify-center p-4">
-          <div className="w-full max-w-lg bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl max-h-[calc(100dvh-2rem)] overflow-y-auto my-auto">
-            <div className="p-5 border-b border-slate-800 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <ShieldCheck className="w-5 h-5 text-orange-400" />
-                <h3 className="text-base font-bold text-white">
-                  Add FlareSolverr / Indexer Proxy
-                </h3>
-              </div>
-              <button
-                onClick={() => setShowAddProxyModal(false)}
-                className="p-1.5 rounded-lg bg-slate-800 text-slate-400 hover:text-white"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
+      {indexerForm ? (
+        <IndexerModal
+          initial={indexerForm}
+          definitions={definitions}
+          plugins={plugins}
+          onClose={() => setIndexerForm(null)}
+          onSaved={onRefresh}
+          onNotify={onNotify}
+        />
+      ) : null}
 
-            <form onSubmit={handleCreateProxy} className="p-5 space-y-4">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-medium text-slate-300 mb-1">
-                    Proxy Name
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={proxyName}
-                    onChange={(e) => setProxyName(e.target.value)}
-                    placeholder="FlareSolverr"
-                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-medium text-slate-300 mb-1">
-                    Implementation
-                  </label>
-                  <select
-                    value={proxyImpl}
-                    onChange={(e) =>
-                      setProxyImpl(e.target.value as 'FlareSolverr' | 'Http' | 'Socks5')
-                    }
-                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white"
-                  >
-                    <option value="FlareSolverr">FlareSolverr (Cloudflare / Turnstile)</option>
-                    <option value="Http">HTTP Proxy</option>
-                    <option value="Socks5">SOCKS5 Proxy</option>
-                  </select>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-slate-300 mb-1">
-                  Host URL
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={proxyHost}
-                  onChange={(e) => setProxyHost(e.target.value)}
-                  placeholder="http://localhost:8191/ or http://flaresolverr:8191/"
-                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white font-mono"
-                />
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-medium text-slate-300 mb-1">
-                    Request Timeout (seconds, 1-180)
-                  </label>
-                  <input
-                    type="number"
-                    min={1}
-                    max={180}
-                    value={proxyTimeout}
-                    onChange={(e) => setProxyTimeout(Number(e.target.value))}
-                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-medium text-slate-300 mb-1">
-                    Session TTL (minutes)
-                  </label>
-                  <input
-                    type="number"
-                    min={0}
-                    max={1440}
-                    value={proxySessionTtl}
-                    onChange={(e) => setProxySessionTtl(Number(e.target.value))}
-                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white"
-                  />
-                </div>
-              </div>
-
-              <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={proxyDisableMedia}
-                  onChange={(e) => setProxyDisableMedia(e.target.checked)}
-                  className="rounded border-slate-700 bg-slate-950 text-orange-500"
-                />
-                <span>
-                  Disable Media (<code className="text-amber-300">disableMedia: true</code>) — skip
-                  images, CSS, and fonts in headless Chrome
-                </span>
-              </label>
-
-              <div className="pt-3 border-t border-slate-800 flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setShowAddProxyModal(false)}
-                  className="px-4 py-2 rounded-lg bg-slate-800 text-slate-300 text-xs font-medium"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 rounded-lg bg-orange-500 hover:bg-orange-400 text-slate-950 text-xs font-bold transition"
-                >
-                  Save Proxy
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Add Indexer Modal */}
-      {showAddModal && (
-        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm overflow-y-auto flex items-start justify-center p-4">
-          <div className="w-full max-w-xl bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl max-h-[calc(100dvh-2rem)] overflow-y-auto my-auto">
-            <div className="p-5 border-b border-slate-800 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Sparkles className="w-5 h-5 text-amber-400" />
-                <h3 className="text-base font-bold text-white">Add Indexer</h3>
-              </div>
-              <button
-                onClick={() => setShowAddModal(false)}
-                className="p-1.5 rounded-lg bg-slate-800 text-slate-400 hover:text-white"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <form onSubmit={handleCreateIndexer} className="p-5 space-y-4">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-medium text-slate-300 mb-1">
-                    Indexer Name
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={idxName}
-                    onChange={(e) => setIdxName(e.target.value)}
-                    placeholder="e.g. 1337x, NZBGeek, Custom Torznab"
-                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-medium text-slate-300 mb-1">
-                    Implementation
-                  </label>
-                  <select
-                    value={idxImplementation}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setIdxImplementation(val);
-                      if (val === 'Newznab') setIdxProtocol('usenet');
-                      else setIdxProtocol('torrent');
-                    }}
-                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white"
-                  >
-                    <option value="Torznab">Torznab (Torrent Feed)</option>
-                    <option value="Newznab">Newznab (Usenet Feed)</option>
-                    <option value="Cardigann">Cardigann YAML Definition</option>
-                    <option value="Plugin">Go Subprocess Plugin</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div>
-                  <label className="block text-xs font-medium text-slate-300 mb-1">
-                    Protocol
-                  </label>
-                  <select
-                    value={idxProtocol}
-                    onChange={(e) => setIdxProtocol(e.target.value as 'torrent' | 'usenet')}
-                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white"
-                  >
-                    <option value="torrent">torrent</option>
-                    <option value="usenet">usenet</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-medium text-slate-300 mb-1">
-                    Privacy
-                  </label>
-                  <select
-                    value={idxPrivacy}
-                    onChange={(e) =>
-                      setIdxPrivacy(e.target.value as 'public' | 'private' | 'semiPrivate')
-                    }
-                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white"
-                  >
-                    <option value="public">Public</option>
-                    <option value="semiPrivate">Semi-Private</option>
-                    <option value="private">Private</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-medium text-slate-300 mb-1">
-                    Priority (1-50)
-                  </label>
-                  <input
-                    type="number"
-                    min={1}
-                    max={50}
-                    value={idxPriority}
-                    onChange={(e) => setIdxPriority(Number(e.target.value))}
-                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-slate-300 mb-1">
-                  Base URL
-                </label>
-                <input
-                  type="text"
-                  value={idxBaseUrl}
-                  onChange={(e) => setIdxBaseUrl(e.target.value)}
-                  placeholder="https://indexer.example.com"
-                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white font-mono"
-                />
-              </div>
-
-              {idxImplementation === 'Cardigann' && (
-                <div>
-                  <label className="block text-xs font-medium text-slate-300 mb-1">
-                    Cardigann Definition ID
-                  </label>
-                  <select
-                    value={idxDefFile}
-                    onChange={(e) => setIdxDefFile(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white font-mono"
-                  >
-                    <option value="">-- Select YAML Definition --</option>
-                    {definitions.map((d) => (
-                      <option key={d.id} value={d.id}>
-                        {d.name} ({d.id}.yml)
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
-
-              {idxImplementation === 'Plugin' && (
-                <div>
-                  <label className="block text-xs font-medium text-slate-300 mb-1">
-                    Go Plugin ID
-                  </label>
-                  <div className="flex items-center gap-2">
-                    <Puzzle className="w-4 h-4 text-purple-400" />
-                    <select
-                      value={idxPluginId}
-                      onChange={(e) => setIdxPluginId(e.target.value)}
-                      className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white font-mono"
-                    >
-                      <option value="">-- Select Discovered Go Plugin --</option>
-                      {plugins.map((p) => (
-                        <option key={p.manifest.id} value={p.manifest.id}>
-                          {p.manifest.name} ({p.manifest.id})
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-              )}
-
-              <div>
-                <label className="block text-xs font-medium text-slate-300 mb-1">
-                  API Key (optional for public indexers)
-                </label>
-                <input
-                  type="password"
-                  value={idxApiKey}
-                  onChange={(e) => setIdxApiKey(e.target.value)}
-                  placeholder="Optional Torznab/Newznab API Key"
-                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white font-mono"
-                />
-              </div>
-
-              <div className="pt-3 border-t border-slate-800 flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setShowAddModal(false)}
-                  className="px-4 py-2 rounded-lg bg-slate-800 text-slate-300 text-xs font-medium"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold transition"
-                >
-                  Save Indexer
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      {proxyForm ? (
+        <IndexerProxyModal
+          initial={proxyForm}
+          onClose={() => setProxyForm(null)}
+          onSaved={loadProxiesAndClearances}
+          onNotify={onNotify}
+        />
+      ) : null}
     </div>
   );
 };

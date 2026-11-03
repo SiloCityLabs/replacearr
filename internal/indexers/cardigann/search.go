@@ -1,0 +1,217 @@
+package cardigann
+
+import (
+	"context"
+	"fmt"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"time"
+
+	cdefinition "github.com/Kcchouette/cardigann-go/definition"
+	cengine "github.com/Kcchouette/cardigann-go/engine"
+	chttp "github.com/Kcchouette/cardigann-go/httpclient"
+
+	"github.com/replacearr/replacearr/internal/domain"
+)
+
+// SearchRequest is a Cardigann keyword search against one enabled indexer.
+type SearchRequest struct {
+	DefinitionsDir string
+	DefinitionFile string
+	BaseURL        string
+	IndexerID      int64
+	IndexerName    string
+	Fields         []domain.ConfigField
+	Query          string
+	Season         int
+	Episode        int
+	Categories     []int
+	HTTPClient     *http.Client // optional; when nil a default client is used
+	ProxyURL       string
+}
+
+// ResolveDefinitionPath finds definitionFile.yml/.yaml under dir.
+func ResolveDefinitionPath(dir, definitionFile string) (string, error) {
+	id := strings.TrimSpace(definitionFile)
+	if id == "" {
+		return "", fmt.Errorf("empty definition file")
+	}
+	id = strings.TrimSuffix(strings.TrimSuffix(id, ".yml"), ".yaml")
+	candidates := []string{
+		filepath.Join(dir, id+".yml"),
+		filepath.Join(dir, id+".yaml"),
+		filepath.Join(dir, definitionFile),
+	}
+	for _, p := range candidates {
+		if st, err := os.Stat(p); err == nil && !st.IsDir() {
+			return p, nil
+		}
+	}
+	return "", fmt.Errorf("definition %q not found in %s", definitionFile, dir)
+}
+
+// Search executes a Cardigann definition search and maps results to domain.ReleaseResult.
+func Search(ctx context.Context, req SearchRequest) ([]domain.ReleaseResult, error) {
+	path, err := ResolveDefinitionPath(req.DefinitionsDir, req.DefinitionFile)
+	if err != nil {
+		return nil, err
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	def, err := cdefinition.Parse(raw)
+	if err != nil {
+		return nil, fmt.Errorf("parse definition %s: %w", path, err)
+	}
+
+	baseURL := strings.TrimSpace(req.BaseURL)
+	if baseURL == "" && len(def.Links) > 0 {
+		baseURL = def.Links[0]
+	}
+	if baseURL == "" {
+		return nil, fmt.Errorf("no base URL for indexer %s", req.IndexerName)
+	}
+	if !strings.HasSuffix(baseURL, "/") {
+		baseURL += "/"
+	}
+
+	cfg := configFromDefinition(def, req.Fields)
+	// Prefer unsorted keyword paths for sites that break sort under load (1337x).
+	if _, ok := cfg["disablesort"]; !ok {
+		cfg["disablesort"] = "true"
+	}
+
+	delay := time.Duration(0)
+	if def.RequestDelay > 0 {
+		delay = time.Duration(def.RequestDelay * float64(time.Second))
+	}
+	proxyForClient := req.ProxyURL
+	if req.HTTPClient != nil && req.HTTPClient.Transport != nil {
+		// Caller already built a (possibly proxied) transport; do not also
+		// wrap SOCKS inside IndexerClient or requests double-proxy.
+		proxyForClient = ""
+	}
+	client, err := chttp.New(chttp.Options{
+		IndexerID:    def.ID,
+		ProxyURL:     proxyForClient,
+		RequestDelay: delay,
+		Timeout:      45 * time.Second,
+		MaxRetries:   2,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if req.HTTPClient != nil && req.HTTPClient.Transport != nil {
+		client.HTTPClient().Transport = req.HTTPClient.Transport
+		if req.HTTPClient.Timeout > 0 {
+			client.HTTPClient().Timeout = req.HTTPClient.Timeout
+		}
+	}
+
+	provider := cengine.NewAuthenticatedProvider(def, baseURL, cfg, client)
+	q := cengine.Query{
+		Keywords:   strings.TrimSpace(req.Query),
+		Categories: req.Categories,
+	}
+	if req.Season > 0 {
+		q.Season = strconv.Itoa(req.Season)
+	}
+	if req.Episode > 0 {
+		q.Ep = strconv.Itoa(req.Episode)
+	}
+
+	releases, err := provider.Search(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]domain.ReleaseResult, 0, len(releases))
+	for _, rel := range releases {
+		pub := rel.PublishDate
+		if pub.IsZero() {
+			pub = time.Now().UTC()
+		}
+		ageDays := int(time.Since(pub).Hours() / 24)
+		if ageDays < 0 {
+			ageDays = 0
+		}
+		leechers := rel.Peers - rel.Seeders
+		if leechers < 0 {
+			leechers = 0
+		}
+		protocol := string(rel.Protocol)
+		if protocol == "" {
+			protocol = "torrent"
+		}
+		cats := rel.Categories
+		if cats == nil {
+			cats = []int{}
+		}
+		downloadURL := rel.DownloadLink
+		infoURL := rel.Details
+		if infoURL != "" && strings.HasPrefix(infoURL, "/") {
+			infoURL = strings.TrimRight(baseURL, "/") + infoURL
+		}
+		if downloadURL != "" && strings.HasPrefix(downloadURL, "/") {
+			downloadURL = strings.TrimRight(baseURL, "/") + downloadURL
+		}
+		guid := downloadURL
+		if guid == "" {
+			guid = infoURL
+		}
+		if guid == "" {
+			guid = fmt.Sprintf("%s-%s", def.ID, rel.Title)
+		}
+		out = append(out, domain.ReleaseResult{
+			Guid:        guid,
+			Title:       rel.Title,
+			IndexerID:   req.IndexerID,
+			Indexer:     req.IndexerName,
+			Protocol:    protocol,
+			Size:        rel.Size,
+			Age:         ageDays,
+			PublishDate: pub.UTC(),
+			DownloadURL: downloadURL,
+			InfoURL:     infoURL,
+			Seeders:     rel.Seeders,
+			Leechers:    leechers,
+			Peers:       rel.Peers,
+			Categories:  cats,
+		})
+	}
+	return out, nil
+}
+
+func configFromDefinition(def cdefinition.IndexerDefinition, fields []domain.ConfigField) map[string]string {
+	cfg := map[string]string{}
+	for _, s := range def.Settings {
+		name := strings.TrimSpace(s.Name)
+		if name == "" {
+			continue
+		}
+		if s.Default != "" {
+			cfg[name] = s.Default
+		}
+	}
+	for _, f := range fields {
+		name := strings.TrimSpace(f.Name)
+		if name == "" || f.Value == nil {
+			continue
+		}
+		switch v := f.Value.(type) {
+		case bool:
+			if v {
+				cfg[name] = "true"
+			} else {
+				cfg[name] = "false"
+			}
+		default:
+			cfg[name] = fmt.Sprint(v)
+		}
+	}
+	return cfg
+}

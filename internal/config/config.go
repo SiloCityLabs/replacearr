@@ -33,14 +33,7 @@ func Load() *Config {
 	_ = os.MkdirAll(pluginDir, 0o755)
 
 	defDir := envOrDefault("REPLACEARR_DEFINITIONS_DIR", filepath.Join(cfgDir, "definitions"))
-	if _, err := os.Stat(defDir); os.IsNotExist(err) {
-		// Fallback to .tmp/ProwlarrIndexers/definitions/v11 if present in dev
-		if _, errTmp := os.Stat(".tmp/ProwlarrIndexers/definitions/v11"); errTmp == nil {
-			defDir = ".tmp/ProwlarrIndexers/definitions/v11"
-		} else {
-			_ = os.MkdirAll(defDir, 0o755)
-		}
-	}
+	_ = os.MkdirAll(defDir, 0o755)
 
 	port := 8989
 	if pStr := os.Getenv("REPLACEARR_PORT"); pStr != "" {

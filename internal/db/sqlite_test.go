@@ -47,9 +47,36 @@ func TestStoreOpenAndCRUD(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list episodes: %v", err)
 	}
-	// CreateSeries no longer invents placeholder episodes; import/metadata fills them later.
+	// CreateSeries no longer invents placeholder episodes; metadata sync fills them later.
 	if len(eps) != 0 {
 		t.Fatalf("expected no auto-seeded episodes, got %d", len(eps))
+	}
+	if err := store.ReplaceEpisodesForSeries(sr.ID, []domain.Episode{
+		{TvdbID: 11, SeasonNumber: 1, EpisodeNumber: 1, Title: "Good News About Hell", Monitored: true},
+		{TvdbID: 12, SeasonNumber: 1, EpisodeNumber: 2, Title: "Half Loop", Monitored: true},
+	}); err != nil {
+		t.Fatalf("replace episodes: %v", err)
+	}
+	eps, err = store.ListEpisodes(sr.ID)
+	if err != nil || len(eps) != 2 {
+		t.Fatalf("list after replace: %v len=%d", err, len(eps))
+	}
+	if err := store.MarkEpisodeHasFile(eps[0].ID, true); err != nil {
+		t.Fatalf("mark has file: %v", err)
+	}
+	if err := store.ReplaceEpisodesForSeries(sr.ID, []domain.Episode{
+		{TvdbID: 11, SeasonNumber: 1, EpisodeNumber: 1, Title: "Good News About Hell (updated)", Monitored: true},
+		{TvdbID: 12, SeasonNumber: 1, EpisodeNumber: 2, Title: "Half Loop", Monitored: true},
+		{TvdbID: 13, SeasonNumber: 1, EpisodeNumber: 3, Title: "In Perpetuity", Monitored: true},
+	}); err != nil {
+		t.Fatalf("replace episodes again: %v", err)
+	}
+	eps, err = store.ListEpisodes(sr.ID)
+	if err != nil || len(eps) != 3 {
+		t.Fatalf("list after second replace: %v len=%d", err, len(eps))
+	}
+	if !eps[0].HasFile || eps[0].Title != "Good News About Hell (updated)" {
+		t.Fatalf("expected preserved hasFile + updated title, got %+v", eps[0])
 	}
 
 	mv, err := store.CreateMovie(domain.Movie{

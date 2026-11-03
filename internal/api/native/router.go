@@ -13,9 +13,12 @@ import (
 	"github.com/replacearr/replacearr/internal/config"
 	"github.com/replacearr/replacearr/internal/db"
 	"github.com/replacearr/replacearr/internal/domain"
+	"github.com/replacearr/replacearr/internal/downloadclient/qbittorrent"
 	"github.com/replacearr/replacearr/internal/flaresolverr"
 	"github.com/replacearr/replacearr/internal/httpclient"
+	"github.com/replacearr/replacearr/internal/indexers/cardigann"
 	"github.com/replacearr/replacearr/internal/mediacover"
+	"github.com/replacearr/replacearr/internal/metadata"
 	"github.com/replacearr/replacearr/internal/pluginhost"
 	"github.com/replacearr/replacearr/pkg/pluginsdk"
 )
@@ -25,6 +28,7 @@ type Server struct {
 	cfg         *config.Config
 	authSvc     *auth.Service
 	pluginMgr   *pluginhost.Manager
+	meta        *metadata.Service
 	flareClient *flaresolverr.Client
 	covers      *mediacover.Store
 	version     string
@@ -35,9 +39,13 @@ func NewServer(store *db.Store, cfg *config.Config, authSvc *auth.Service, plugi
 	flare := flaresolverr.NewClient()
 	appCfg, _ := store.GetAppConfig()
 	proxyURLs := []string{}
+	metaSvc := metadata.New()
 	if pluginMgr != nil {
 		if u := pluginMgr.ActiveProxyURL(); u != "" {
 			proxyURLs = append(proxyURLs, u)
+		}
+		if m := pluginMgr.Metadata(); m != nil {
+			metaSvc = m
 		}
 	}
 	httpCli := httpclient.New(httpclient.Options{
@@ -56,6 +64,7 @@ func NewServer(store *db.Store, cfg *config.Config, authSvc *auth.Service, plugi
 		cfg:         cfg,
 		authSvc:     authSvc,
 		pluginMgr:   pluginMgr,
+		meta:        metaSvc,
 		flareClient: flare,
 		covers:      mediacover.NewStore(configDir, httpCli),
 		version:     version,
@@ -65,65 +74,33 @@ func NewServer(store *db.Store, cfg *config.Config, authSvc *auth.Service, plugi
 	return s
 }
 
+// Metadata exposes the shared Add New lookup service for compat mounts.
+func (s *Server) Metadata() *metadata.Service {
+	if s == nil || s.meta == nil {
+		return metadata.New()
+	}
+	return s.meta
+}
+
+func (s *Server) preferredMetadataLanguage() string {
+	if s.store != nil {
+		if cfg, err := s.store.GetAppConfig(); err == nil {
+			if lang := strings.TrimSpace(cfg.Metadata.PreferredLanguage); lang != "" {
+				return lang
+			}
+		}
+	}
+	return "english"
+}
+
 // CoverStore exposes the media cover cache for compat MediaCover mounts.
 func (s *Server) CoverStore() *mediacover.Store {
 	return s.covers
 }
 
 func (s *Server) seedInitialDemoData() {
-	if idxList, err := s.store.ListIndexers(); err == nil && len(idxList) == 0 {
-		_, _ = s.store.CreateIndexer(domain.Indexer{
-			Name:                    "Replacearr Built-in Torznab",
-			Implementation:          "Torznab",
-			ImplementationName:      "Torznab",
-			ConfigContract:          "TorznabSettings",
-			Protocol:                "torrent",
-			Privacy:                 "public",
-			Enable:                  true,
-			EnableRss:               true,
-			EnableAutomaticSearch:   true,
-			EnableInteractiveSearch: true,
-			Priority:                10,
-			BaseURL:                 "https://indexer.replacearr.local",
-			Categories:              []int{2000, 5000},
-		})
-		_, _ = s.store.CreateIndexer(domain.Indexer{
-			Name:                    "Cardigann Public Tracker Pool",
-			Implementation:          "Cardigann",
-			ImplementationName:      "Cardigann",
-			ConfigContract:          "CardigannSettings",
-			Protocol:                "torrent",
-			Privacy:                 "public",
-			Enable:                  true,
-			EnableRss:               true,
-			EnableAutomaticSearch:   true,
-			EnableInteractiveSearch: true,
-			Priority:                20,
-			DefinitionFile:          "1337x",
-			BaseURL:                 "https://1337x.to",
-			Categories:              []int{2000, 5000},
-		})
-	}
-
-	// Download clients are configured via the first-run wizard — do not seed one.
-
-	if proxies, err := s.store.ListIndexerProxies(); err == nil && len(proxies) == 0 {
-		host := "http://localhost:8191/"
-		if s.cfg != nil && s.cfg.FlareSolverrURL != "" {
-			host = s.cfg.FlareSolverrURL
-		}
-		_, _ = s.store.CreateIndexerProxy(domain.IndexerProxy{
-			Name:               "FlareSolverr (Primary)",
-			Implementation:     "FlareSolverr",
-			ImplementationName: "FlareSolverr",
-			ConfigContract:     "FlareSolverrSettings",
-			Host:               host,
-			RequestTimeout:     60,
-			SessionTTLMinutes:  15,
-			DisableMedia:       false,
-			Enable:             true,
-		})
-	}
+	// Do not seed fake indexers, download clients, or demo media.
+	// Users configure these via the wizard / settings. FlareSolverr is optional.
 }
 
 func (s *Server) activeFlareSolverrHost() string {
@@ -141,7 +118,7 @@ func (s *Server) activeFlareSolverrHost() string {
 }
 
 func (s *Server) SearchReleases(query string, mediaType string, tvdbID int, tmdbID int, season int, episode int) ([]domain.ReleaseResult, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 
 	aliases := []string{}
@@ -193,52 +170,102 @@ func (s *Server) SearchReleases(query string, mediaType string, tvdbID int, tmdb
 		FlareSolverrURL: s.activeFlareSolverrHost(),
 		ProxyURL:        proxyURL,
 	}
-	var pluginResults []domain.ReleaseResult
-	if s.pluginMgr != nil {
-		pluginResults, _ = s.pluginMgr.SearchAllIndexers(ctx, req)
-	}
 
-	// Also synthesize results for configured DB indexers
-	dbIndexers, _ := s.store.ListIndexers()
-	clean := strings.TrimSpace(searchQuery)
-	if clean == "" {
-		clean = "Replacearr.Release"
-	}
-	dotTitle := strings.Join(strings.Fields(clean), ".")
-	if tok := domain.FormatSeasonEpisodeToken(season, episode); tok != "" {
-		if season > 0 && episode == 0 {
-			dotTitle = fmt.Sprintf("%s.%s.COMPLETE", dotTitle, tok)
-		} else {
-			dotTitle = fmt.Sprintf("%s.%s", dotTitle, tok)
+	results := []domain.ReleaseResult{}
+	var searchErrs []string
+
+	if s.pluginMgr != nil {
+		pluginResults, err := s.pluginMgr.SearchAllIndexers(ctx, req)
+		if err != nil {
+			searchErrs = append(searchErrs, err.Error())
+		} else if pluginResults != nil {
+			results = append(results, pluginResults...)
 		}
 	}
-	now := time.Now().UTC()
 
-	for _, idx := range dbIndexers {
-		if !idx.Enable {
+	cardigannResults, cardigannErrs := s.searchCardigannIndexers(ctx, searchQuery, season, episode, proxyURL)
+	results = append(results, cardigannResults...)
+	searchErrs = append(searchErrs, cardigannErrs...)
+
+	if len(results) == 0 && len(searchErrs) > 0 {
+		return results, fmt.Errorf("search failed: %s", strings.Join(searchErrs, "; "))
+	}
+	return results, nil
+}
+
+func (s *Server) searchCardigannIndexers(ctx context.Context, query string, season, episode int, proxyURL string) ([]domain.ReleaseResult, []string) {
+	indexers, err := s.store.ListIndexers()
+	if err != nil {
+		return nil, []string{err.Error()}
+	}
+	defsDir := ""
+	if s.cfg != nil {
+		defsDir = s.cfg.DefinitionsDir
+	}
+	if defsDir == "" {
+		return nil, nil
+	}
+
+	flareHost := strings.TrimSpace(s.activeFlareSolverrHost())
+	baseTransport := http.DefaultTransport
+	appCfg, _ := s.store.GetAppConfig()
+	httpCli := httpclient.New(httpclient.Options{
+		AppProxy:   appCfg.Proxy,
+		PluginURLs: []string{proxyURL},
+		Timeout:    60 * time.Second,
+	})
+	if httpCli != nil && httpCli.Transport != nil {
+		baseTransport = httpCli.Transport
+	}
+	transport := baseTransport
+	if flareHost != "" && s.flareClient != nil {
+		transport = &flaresolverr.SolvingTransport{
+			Base:     baseTransport,
+			Client:   s.flareClient,
+			Host:     flareHost,
+			TimeoutS: 60,
+		}
+	}
+	client := &http.Client{Timeout: 60 * time.Second, Transport: transport}
+
+	var out []domain.ReleaseResult
+	var errs []string
+	for _, idx := range indexers {
+		if !idx.Enable || !idx.SupportsSearch {
 			continue
 		}
-		pluginResults = append(pluginResults, domain.ReleaseResult{
-			Guid:        fmt.Sprintf("db-idx-%d-%d", idx.ID, now.UnixNano()),
-			Title:       fmt.Sprintf("%s.1080p.WEB-DL.DDP5.1.H.264-REPLACEARR", dotTitle),
-			IndexerID:   idx.ID,
-			Indexer:     idx.Name,
-			Protocol:    idx.Protocol,
-			Size:        4294967296,
-			Age:         1,
-			PublishDate: now.Add(-6 * time.Hour),
-			DownloadURL: fmt.Sprintf("magnet:?xt=urn:btih:replacearr%d&dn=%s", idx.ID, dotTitle),
-			InfoURL:     fmt.Sprintf("%s/details/%s", strings.TrimRight(idx.BaseURL, "/"), dotTitle),
-			Seeders:     245,
-			Leechers:    18,
-			Peers:       263,
-			Categories:  idx.Categories,
-			Quality:     "WEBDL-1080p",
-			TvdbID:      tvdbID,
-			TmdbID:      tmdbID,
+		if !strings.EqualFold(idx.Implementation, "Cardigann") {
+			continue
+		}
+		defFile := strings.TrimSpace(idx.DefinitionFile)
+		if defFile == "" {
+			defFile = strings.ToLower(strings.ReplaceAll(idx.Name, " ", ""))
+		}
+		rels, err := cardigann.Search(ctx, cardigann.SearchRequest{
+			DefinitionsDir: defsDir,
+			DefinitionFile: defFile,
+			BaseURL:        idx.BaseURL,
+			IndexerID:      idx.ID,
+			IndexerName:    idx.Name,
+			Fields:         idx.Fields,
+			Query:          query,
+			Season:         season,
+			Episode:        episode,
+			Categories:     idx.Categories,
+			HTTPClient:     client,
+			ProxyURL:       proxyURL,
 		})
+		if err != nil {
+			msg := err.Error()
+			if strings.Contains(msg, "403") || strings.Contains(strings.ToLower(msg), "cloudflare") {
+				msg += " — site blocked the request; add an enabled FlareSolverr indexer proxy under Indexers"
+			}
+			errs = append(errs, fmt.Sprintf("%s: %s", idx.Name, msg))
+			continue
+		}
+		out = append(out, rels...)
 	}
-	return pluginResults, nil
+	return out, errs
 }
 
 func (s *Server) RegisterRoutes(mux *http.ServeMux) {
@@ -319,6 +346,8 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/plugins", s.authSvc.RequirePermission(domain.PermPluginsRead, s.handleListPlugins))
 	mux.HandleFunc("PUT /api/v1/plugins/{id}", s.authSvc.RequirePermission(domain.PermPluginsManage, s.handleUpdatePlugin))
 	mux.HandleFunc("POST /api/v1/plugins/reload", s.authSvc.RequirePermission(domain.PermPluginsManage, s.handleReloadPlugins))
+	mux.HandleFunc("POST /api/v1/plugins/{id}/test", s.authSvc.RequirePermission(domain.PermPluginsManage, s.handleTestNotificationPlugin))
+	mux.HandleFunc("GET /api/v1/notifications/stream", s.authSvc.RequirePermission(domain.PermSystemRead, s.handleNotificationStream))
 }
 
 func (s *Server) handleOverview(w http.ResponseWriter, _ *http.Request) {
@@ -381,6 +410,7 @@ func (s *Server) handleCreateSeries(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
+	_ = s.syncSeriesEpisodes(r.Context(), created)
 	s.cacheCoverAsync("tv", created.ID, created.Images)
 	writeJSON(w, http.StatusCreated, created)
 }
@@ -396,70 +426,19 @@ func (s *Server) handleDeleteSeries(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleLookupSeries(w http.ResponseWriter, r *http.Request) {
 	term := strings.TrimSpace(r.URL.Query().Get("term"))
-	catalog := []domain.Series{
-		{
-			Title:      "Severance",
-			Year:       2022,
-			TvdbID:     371980,
-			ImdbID:     "tt11280740",
-			Network:    "Apple TV+",
-			Status:     "continuing",
-			Runtime:    50,
-			SeriesType: "standard",
-			Overview:   "Mark leads a team of office workers whose memories have been surgically divided between their work and personal lives.",
-			Genres:     []string{"Drama", "Mystery", "Sci-Fi"},
-		},
-		{
-			Title:      "Fallout",
-			Year:       2024,
-			TvdbID:     416744,
-			ImdbID:     "tt12637874",
-			Network:    "Prime Video",
-			Status:     "continuing",
-			Runtime:    60,
-			SeriesType: "standard",
-			Overview:   "In a future, post-apocalyptic Los Angeles brought about by nuclear decimation, citizens must live in underground bunkers.",
-			Genres:     []string{"Action", "Adventure", "Sci-Fi"},
-		},
-		{
-			Title:      "Shogun",
-			Year:       2024,
-			TvdbID:     392256,
-			ImdbID:     "tt2788316",
-			Network:    "FX",
-			Status:     "continuing",
-			Runtime:    60,
-			SeriesType: "standard",
-			Overview:   "When a mysterious European ship is found marooned in a nearby fishing village, Lord Yoshii Toranaga discovers secrets that could tip the scales of power.",
-			Genres:     []string{"Adventure", "Drama", "History"},
-		},
+	if term == "" {
+		writeJSON(w, http.StatusOK, []domain.Series{})
+		return
 	}
-
-	if term != "" {
-		var filtered []domain.Series
-		lower := strings.ToLower(term)
-		for _, item := range catalog {
-			if strings.Contains(strings.ToLower(item.Title), lower) {
-				filtered = append(filtered, item)
-			}
-		}
-		if len(filtered) == 0 {
-			filtered = append(filtered, domain.Series{
-				Title:      term,
-				Year:       2025,
-				TvdbID:     990001,
-				ImdbID:     "tt9900001",
-				Network:    "Streaming",
-				Status:     "continuing",
-				Runtime:    45,
-				SeriesType: "standard",
-				Overview:   fmt.Sprintf("TVDB lookup match for %q.", term),
-				Genres:     []string{"Drama"},
-			})
-		}
-		catalog = filtered
+	results, err := s.meta.SearchSeries(r.Context(), term, s.preferredMetadataLanguage())
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, fmt.Errorf("series lookup failed: %w", err))
+		return
 	}
-	writeJSON(w, http.StatusOK, catalog)
+	if results == nil {
+		results = []domain.Series{}
+	}
+	writeJSON(w, http.StatusOK, results)
 }
 
 func (s *Server) handleListEpisodes(w http.ResponseWriter, r *http.Request) {
@@ -469,7 +448,32 @@ func (s *Server) handleListEpisodes(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
+	if len(eps) == 0 && seriesID > 0 {
+		if sr, gerr := s.store.GetSeriesByID(seriesID); gerr == nil && sr != nil && sr.TvdbID > 0 {
+			if serr := s.syncSeriesEpisodes(r.Context(), sr); serr == nil {
+				eps, err = s.store.ListEpisodes(seriesID)
+				if err != nil {
+					writeErr(w, http.StatusInternalServerError, err)
+					return
+				}
+			}
+		}
+	}
 	writeJSON(w, http.StatusOK, eps)
+}
+
+func (s *Server) syncSeriesEpisodes(ctx context.Context, sr *domain.Series) error {
+	if s.meta == nil || sr == nil || sr.TvdbID <= 0 || sr.ID <= 0 {
+		return nil
+	}
+	_, eps, err := s.meta.GetSeriesByTVDB(ctx, sr.TvdbID, s.preferredMetadataLanguage())
+	if err != nil {
+		return err
+	}
+	if len(eps) == 0 {
+		return nil
+	}
+	return s.store.ReplaceEpisodesForSeries(sr.ID, eps)
 }
 
 func (s *Server) handleListMovies(w http.ResponseWriter, _ *http.Request) {
@@ -507,70 +511,19 @@ func (s *Server) handleDeleteMovie(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleLookupMovies(w http.ResponseWriter, r *http.Request) {
 	term := strings.TrimSpace(r.URL.Query().Get("term"))
-	catalog := []domain.Movie{
-		{
-			Title:               "Dune: Part Two",
-			Year:                2024,
-			TmdbID:              693134,
-			ImdbID:              "tt15239678",
-			Studio:              "Legendary Pictures",
-			Status:              "released",
-			MinimumAvailability: "released",
-			Runtime:             166,
-			Overview:            "Follow the mythic journey of Paul Atreides as he unites with Chani and the Fremen while on a path of revenge against the conspirators who destroyed his family.",
-			Genres:              []string{"Sci-Fi", "Adventure"},
-		},
-		{
-			Title:               "Oppenheimer",
-			Year:                2023,
-			TmdbID:              872585,
-			ImdbID:              "tt15398776",
-			Studio:              "Universal Pictures",
-			Status:              "released",
-			MinimumAvailability: "released",
-			Runtime:             180,
-			Overview:            "The story of J. Robert Oppenheimer's role in the development of the atomic bomb during World War II.",
-			Genres:              []string{"Biography", "Drama", "History"},
-		},
-		{
-			Title:               "Blade Runner 2049",
-			Year:                2017,
-			TmdbID:              335984,
-			ImdbID:              "tt1856101",
-			Studio:              "Warner Bros.",
-			Status:              "released",
-			MinimumAvailability: "released",
-			Runtime:             164,
-			Overview:            "Young Blade Runner K's discovery of a long-buried secret leads him to track down former Blade Runner Rick Deckard.",
-			Genres:              []string{"Sci-Fi", "Drama"},
-		},
+	if term == "" {
+		writeJSON(w, http.StatusOK, []domain.Movie{})
+		return
 	}
-
-	if term != "" {
-		var filtered []domain.Movie
-		lower := strings.ToLower(term)
-		for _, item := range catalog {
-			if strings.Contains(strings.ToLower(item.Title), lower) {
-				filtered = append(filtered, item)
-			}
-		}
-		if len(filtered) == 0 {
-			filtered = append(filtered, domain.Movie{
-				Title:               term,
-				Year:                2025,
-				TmdbID:              880001,
-				ImdbID:              "tt8800001",
-				Studio:              "Independent",
-				Status:              "released",
-				MinimumAvailability: "released",
-				Runtime:             120,
-				Overview:            fmt.Sprintf("TMDB lookup match for %q.", term),
-				Genres:              []string{"Action", "Drama"},
-			})
-		}
-		catalog = filtered
+	results, err := s.meta.SearchMovies(r.Context(), term)
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, fmt.Errorf("movie lookup failed: %w", err))
+		return
 	}
-	writeJSON(w, http.StatusOK, catalog)
+	if results == nil {
+		results = []domain.Movie{}
+	}
+	writeJSON(w, http.StatusOK, results)
 }
 
 func (s *Server) handleListIndexers(w http.ResponseWriter, _ *http.Request) {
@@ -654,8 +607,12 @@ func (s *Server) handleGrabRelease(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
+	if strings.TrimSpace(req.DownloadURL) == "" {
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("downloadUrl is required"))
+		return
+	}
 	if req.Title == "" {
-		req.Title = "Replacearr.Grabbed.Release.1080p"
+		req.Title = req.DownloadURL
 	}
 	if req.Protocol == "" {
 		req.Protocol = "torrent"
@@ -667,17 +624,11 @@ func (s *Server) handleGrabRelease(w http.ResponseWriter, r *http.Request) {
 			req.MediaType = "tv"
 		}
 	}
-	if req.Size <= 0 {
-		req.Size = 3221225472
-	}
 
-	downloadID := fmt.Sprintf("dl-%d", time.Now().UnixNano())
-	downloadClient := "Primary qBittorrent"
-	if req.DownloadURL != "" && s.pluginMgr != nil {
-		if id, err := s.pluginMgr.EnqueueDownload(r.Context(), req.Title, req.DownloadURL, req.Protocol); err == nil && id != "" {
-			downloadID = id
-			downloadClient = "plugin"
-		}
+	clientName, downloadID, err := s.enqueueToDownloadClient(r.Context(), req.Title, req.DownloadURL, req.Protocol)
+	if err != nil {
+		writeErr(w, http.StatusUnprocessableEntity, err)
+		return
 	}
 
 	item, err := s.store.CreateQueueItem(domain.QueueItem{
@@ -686,17 +637,17 @@ func (s *Server) handleGrabRelease(w http.ResponseWriter, r *http.Request) {
 		EpisodeID:             req.EpisodeID,
 		MovieID:               req.MovieID,
 		Title:                 req.Title,
-		Status:                "downloading",
+		Status:                "queued",
 		TrackedDownloadStatus: "ok",
 		TrackedDownloadState:  "downloading",
 		Size:                  req.Size,
-		Sizeleft:              req.Size / 2,
-		Timeleft:              "00:06:15",
+		Sizeleft:              req.Size,
+		Timeleft:              "",
 		Protocol:              req.Protocol,
-		DownloadClient:        downloadClient,
+		DownloadClient:        clientName,
 		DownloadID:            downloadID,
 		Indexer:               req.Indexer,
-		OutputPath:            "/data/downloads/" + req.Title,
+		OutputPath:            "",
 	})
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
@@ -709,16 +660,76 @@ func (s *Server) handleGrabRelease(w http.ResponseWriter, r *http.Request) {
 		EpisodeID:   req.EpisodeID,
 		MovieID:     req.MovieID,
 		SourceTitle: req.Title,
-		Quality:     map[string]any{"quality": map[string]any{"name": "WEBDL-1080p"}},
+		Quality:     map[string]any{"quality": map[string]any{"name": "Unknown"}},
 		EventType:   "grabbed",
 		Data: map[string]any{
-			"indexer":      req.Indexer,
-			"downloadUrl":  req.DownloadURL,
-			"seasonNumber": req.SeasonNumber,
+			"indexer":        req.Indexer,
+			"downloadUrl":    req.DownloadURL,
+			"seasonNumber":   req.SeasonNumber,
+			"downloadClient": clientName,
+			"downloadId":     downloadID,
 		},
 	})
 
+	s.emitNotification(r.Context(), pluginsdk.EventDownloadStarted, map[string]any{
+		"title":      req.Title,
+		"queueId":    item.ID,
+		"downloadId": downloadID,
+		"mediaType":  req.MediaType,
+		"indexer":    req.Indexer,
+		"protocol":   req.Protocol,
+	})
+
 	writeJSON(w, http.StatusCreated, item)
+}
+
+// enqueueToDownloadClient prefers enabled qBittorrent rows, then plugin download clients.
+func (s *Server) enqueueToDownloadClient(ctx context.Context, title, downloadURL, protocol string) (clientName, downloadID string, err error) {
+	clients, err := s.store.ListDownloadClients()
+	if err != nil {
+		return "", "", err
+	}
+	for _, c := range clients {
+		if !c.Enable {
+			continue
+		}
+		if strings.EqualFold(c.Implementation, "qBittorrent") {
+			cli := qbittorrent.NewFromDownloadClient(c)
+			id, addErr := cli.Add(ctx, title, downloadURL, protocol)
+			if addErr != nil {
+				return "", "", addErr
+			}
+			return c.Name, id, nil
+		}
+	}
+	if s.pluginMgr != nil {
+		id, qErr := s.pluginMgr.EnqueueDownload(ctx, title, downloadURL, protocol)
+		if qErr == nil && id != "" {
+			name, _ := s.requireEnabledDownloadClient()
+			if name == "" {
+				name = "plugin"
+			}
+			return name, id, nil
+		}
+		if qErr != nil {
+			return "", "", qErr
+		}
+	}
+	return "", "", fmt.Errorf("no enabled download client configured; add qBittorrent in Queue & Clients before grabbing")
+}
+
+// requireEnabledDownloadClient returns the name of an enabled DB download client, or an error.
+func (s *Server) requireEnabledDownloadClient() (string, error) {
+	clients, err := s.store.ListDownloadClients()
+	if err != nil {
+		return "", err
+	}
+	for _, c := range clients {
+		if c.Enable {
+			return c.Name, nil
+		}
+	}
+	return "", fmt.Errorf("no enabled download client configured; add one in Queue & Clients or Settings before grabbing")
 }
 
 func (s *Server) handleManualRelease(w http.ResponseWriter, r *http.Request) {
@@ -752,11 +763,14 @@ func (s *Server) handleManualRelease(w http.ResponseWriter, r *http.Request) {
 		mediaType = "movie"
 	}
 	protocol := "torrent"
-	downloadID := fmt.Sprintf("manual-%d", time.Now().UnixNano())
-	if url != "" && s.pluginMgr != nil {
-		if id, err := s.pluginMgr.EnqueueDownload(r.Context(), req.Title, url, protocol); err == nil && id != "" {
-			downloadID = id
-		}
+	if url == "" && req.TorrentBase64 != "" {
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("torrent file upload is not supported yet; use a magnet or HTTP .torrent URL"))
+		return
+	}
+	clientName, downloadID, err := s.enqueueToDownloadClient(r.Context(), req.Title, url, protocol)
+	if err != nil {
+		writeErr(w, http.StatusUnprocessableEntity, err)
+		return
 	}
 	item, err := s.store.CreateQueueItem(domain.QueueItem{
 		MediaType:             mediaType,
@@ -764,15 +778,17 @@ func (s *Server) handleManualRelease(w http.ResponseWriter, r *http.Request) {
 		EpisodeID:             req.EpisodeID,
 		MovieID:               req.MovieID,
 		Title:                 req.Title,
-		Status:                "downloading",
+		Status:                "queued",
 		TrackedDownloadStatus: "ok",
 		TrackedDownloadState:  "downloading",
 		Size:                  0,
+		Sizeleft:              0,
+		Timeleft:              "",
 		Protocol:              protocol,
-		DownloadClient:        "plugin",
+		DownloadClient:        clientName,
 		DownloadID:            downloadID,
 		Indexer:               "manual",
-		OutputPath:            "/data/downloads/" + req.Title,
+		OutputPath:            "",
 	})
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
@@ -792,6 +808,15 @@ func (s *Server) handleManualRelease(w http.ResponseWriter, r *http.Request) {
 			"manual":       true,
 		},
 	})
+	s.emitNotification(r.Context(), pluginsdk.EventDownloadStarted, map[string]any{
+		"title":      req.Title,
+		"queueId":    item.ID,
+		"downloadId": downloadID,
+		"mediaType":  mediaType,
+		"indexer":    "manual",
+		"protocol":   protocol,
+		"manual":     true,
+	})
 	writeJSON(w, http.StatusCreated, item)
 }
 
@@ -801,6 +826,9 @@ func (s *Server) handleListQueue(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
+	}
+	if s.pluginMgr != nil {
+		s.pluginMgr.CheckStalledDownloads(r.Context(), items)
 	}
 	writeJSON(w, http.StatusOK, items)
 }

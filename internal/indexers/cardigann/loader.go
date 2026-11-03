@@ -1,4 +1,4 @@
-// Package cardigann loads and parses Prowlarr/Jackett Cardigann YAML indexer definitions.
+// Package cardigann loads and parses Cardigann YAML indexer definitions.
 package cardigann
 
 import (
@@ -13,6 +13,7 @@ import (
 // Definition represents a parsed Cardigann YAML indexer definition.
 type Definition struct {
 	ID          string           `json:"id" yaml:"id"`
+	FileName    string           `json:"fileName" yaml:"-"`
 	Name        string           `json:"name" yaml:"name"`
 	Description string           `json:"description" yaml:"description"`
 	Language    string           `json:"language" yaml:"language"`
@@ -80,9 +81,10 @@ func ParseDefinitionFile(path string) (Definition, error) {
 	if err := yaml.Unmarshal(b, &def); err != nil {
 		return Definition{}, err
 	}
+	base := filepath.Base(path)
+	def.FileName = strings.TrimSuffix(strings.TrimSuffix(base, ".yml"), ".yaml")
 	if def.ID == "" {
-		base := filepath.Base(path)
-		def.ID = strings.TrimSuffix(strings.TrimSuffix(base, ".yml"), ".yaml")
+		def.ID = def.FileName
 	}
 	if def.Name == "" {
 		def.Name = def.ID
@@ -113,6 +115,7 @@ func BuiltinDefinitions() []Definition {
 	return []Definition{
 		{
 			ID:          "1337x",
+			FileName:    "1337x",
 			Name:        "1337x",
 			Description: "1337x is a Public torrent site that offers verified torrent downloads",
 			Language:    "en-US",
@@ -132,6 +135,7 @@ func BuiltinDefinitions() []Definition {
 		},
 		{
 			ID:          "yts",
+			FileName:    "yts",
 			Name:        "YTS",
 			Description: "YTS is a Public torrent site specialising in HD movies of small size",
 			Language:    "en-US",
@@ -150,6 +154,7 @@ func BuiltinDefinitions() []Definition {
 		},
 		{
 			ID:          "nyaasi",
+			FileName:    "nyaasi",
 			Name:        "Nyaa.si",
 			Description: "Nyaa is a Public torrent site focused on East Asian media including anime and manga",
 			Language:    "en-US",
@@ -166,6 +171,7 @@ func BuiltinDefinitions() []Definition {
 		},
 		{
 			ID:          "eztv",
+			FileName:    "eztv",
 			Name:        "EZTV",
 			Description: "EZTV is a Public torrent site for TV shows",
 			Language:    "en-US",
@@ -182,6 +188,7 @@ func BuiltinDefinitions() []Definition {
 		},
 		{
 			ID:          "torrentleech",
+			FileName:    "torrentleech",
 			Name:        "TorrentLeech",
 			Description: "TorrentLeech (TL) is a Private Torrent Tracker for 0DAY / GENERAL",
 			Language:    "en-US",

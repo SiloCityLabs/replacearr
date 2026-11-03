@@ -20,7 +20,6 @@ Replacearr is a single-binary Go replacement for Sonarr, Radarr, and Prowlarr. O
 | `pkg/pluginsdk` | Public plugin SDK |
 | `web/` | React source and the installable PWA (`public/manifest.webmanifest`, `public/sw.js`) |
 | `.github/workflows` | CI, Docker Hub image publish, and tagged release binaries |
-| `.tmp/` | Read-only upstream reference clones |
 
 ## Rules
 
@@ -34,13 +33,13 @@ Replacearr is a single-binary Go replacement for Sonarr, Radarr, and Prowlarr. O
 
 ## Working agreement
 
-- Prefer `make` targets over ad-hoc commands: `make dev`, `make test`, `make build`.
+- Prefer `make` targets over ad-hoc commands: `make start`, `make test`, `make build`.
+- Local UI/API checks use `make start` (root `docker-compose.yml`) so media paths match production (`/data/TV`, `/data/Movies`). After Go or plugin changes, restart the compose service so `:8989` picks up the new binary. Vite HMR covers most `web/` edits without a restart. Stop with `make stop`.
 - Run `go test -race ./...` for Go changes and `npm run typecheck` in `web/` for UI changes.
-- Treat `.tmp/` as reference material. Do not edit, format, or commit it.
 - Do not hand-edit `internal/webui/dist` or `web/dist`. Rebuild with `make build-web`.
-- Do not commit databases, `.env`, API keys, or `.tmp/dev-config/`.
+- Do not commit databases, `.env`, API keys, or `./config/`.
 - New permissions go in `internal/domain` and the built-in role seed, then the UI permission list.
-- Compat routes must stay compatible with the upstream JSON in `.tmp/`. Read `docs/discovery/01`–`03` and the matching upstream controller before changing a response, then update the discovery note.
+- Compat routes must stay compatible with upstream Sonarr/Radarr/Prowlarr JSON. Read `docs/discovery/01`–`03` and the matching upstream controller on GitHub before changing a response, then update the discovery note.
 - Keep search in-process. Do not add HTTP sync from a Prowlarr module into Sonarr or Radarr modules.
 - Auth stays JWT (`Authorization: Bearer`, `replacearr_token` cookie) plus `*arr` keys (`X-Api-Key`, `?apikey=`). Key scopes are `all`, `sonarr`, `radarr`, or `prowlarr`.
 
@@ -53,7 +52,8 @@ Replacearr is a single-binary Go replacement for Sonarr, Radarr, and Prowlarr. O
 ## Verify
 
 ```bash
-make test-go     # go test -v -race ./...
-make test-web    # tsc --noEmit
-make build       # SPA + plugins + static binary
+make test-go             # go test -v -race ./...
+make test-web            # tsc --noEmit
+make build               # SPA + plugins + static binary
+make start               # containerized API+UI with /data paths
 ```

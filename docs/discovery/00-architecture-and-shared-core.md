@@ -10,7 +10,7 @@ Upstream **Sonarr**, **Radarr**, and **Prowlarr** are separate C#/.NET forks der
 
 ## 2. How `NzbDrone.Core` is Shared Across Sonarr, Radarr, and Prowlarr
 
-Inspection of `.tmp/Sonarr/src/NzbDrone.Core`, `.tmp/Radarr/src/NzbDrone.Core`, and `.tmp/Prowlarr/src/NzbDrone.Core` reveals that ~75% of the codebase is structurally identical across the three applications, differing only in the domain entity (`Series`/`Episode` vs. `Movie` vs. `Indexer`-only).
+Inspection of `Sonarr/src/NzbDrone.Core`, `Radarr/src/NzbDrone.Core`, and `Prowlarr/src/NzbDrone.Core` reveals that ~75% of the codebase is structurally identical across the three applications, differing only in the domain entity (`Series`/`Episode` vs. `Movie` vs. `Indexer`-only).
 
 | Subsystem | Sonarr (`src/NzbDrone.Core`) | Radarr (`src/NzbDrone.Core`) | Prowlarr (`src/NzbDrone.Core`) | Replacearr (`internal/`) |
 | :--- | :--- | :--- | :--- | :--- |
@@ -30,10 +30,10 @@ Inspection of `.tmp/Sonarr/src/NzbDrone.Core`, `.tmp/Radarr/src/NzbDrone.Core`, 
 
 ### 3.1 Quality Definitions & Quality Profiles
 * **Upstream Source**:
-  * `.tmp/Sonarr/src/NzbDrone.Core/Qualities/Quality.cs`
-  * `.tmp/Sonarr/src/NzbDrone.Core/Qualities/QualityModel.cs`
-  * `.tmp/Sonarr/src/NzbDrone.Core/Profiles/Qualities/QualityProfile.cs`
-  * `.tmp/Sonarr/src/NzbDrone.Core/Profiles/Qualities/QualityProfileQualityItem.cs`
+  * `Sonarr/src/NzbDrone.Core/Qualities/Quality.cs`
+  * `Sonarr/src/NzbDrone.Core/Qualities/QualityModel.cs`
+  * `Sonarr/src/NzbDrone.Core/Profiles/Qualities/QualityProfile.cs`
+  * `Sonarr/src/NzbDrone.Core/Profiles/Qualities/QualityProfileQualityItem.cs`
 * **Mechanics**:
   * `Quality` defines static definitions with integer IDs (`0` = `Unknown`, `1` = `SDTV`, `2` = `DVD`, `3` = `WEBDL-1080p`, `4` = `HDTV-720p`, `5` = `WEBDL-720p`, `6` = `Bluray-720p`, `7` = `Bluray-1080p`, `8` = `WEBDL-480p`, `9` = `HDTV-1080p`, `10` = `Raw-HD`, `12` = `WEBRip-480p`, `13` = `Bluray-480p`, `14` = `WEBRip-720p`, `15` = `WEBRip-1080p`, `16` = `HDTV-2160p`, `17` = `WEBRip-2160p`, `18` = `WEBDL-2160p`, `19` = `Bluray-2160p`, `20` = `Bluray-1080p Remux`, `21` = `Bluray-2160p Remux`, `22` = `Bluray-576p`), each with a `QualitySource` (`television`, `web`, `webRip`, `dvd`, `bluray`, `blurayRaw`) and `Resolution` (`480`, `576`, `720`, `1080`, `2160`).
   * `QualityModel` wraps a `Quality` alongside a `Revision` (`version`, `real`, `isRepack`) to track `PROPER` and `REPACK` releases.
@@ -42,9 +42,9 @@ Inspection of `.tmp/Sonarr/src/NzbDrone.Core`, `.tmp/Radarr/src/NzbDrone.Core`, 
 
 ### 3.2 Custom Formats & Scoring
 * **Upstream Source**:
-  * `.tmp/Sonarr/src/NzbDrone.Core/CustomFormats/CustomFormat.cs`
-  * `.tmp/Sonarr/src/NzbDrone.Core/CustomFormats/CustomFormatCalculationService.cs`
-  * `.tmp/Sonarr/src/NzbDrone.Core/CustomFormats/Specifications/*` (`ReleaseTitleSpecification.cs`, `ReleaseGroupSpecification.cs`, `SourceSpecification.cs`, `ResolutionSpecification.cs`, `LanguageSpecification.cs`, `SizeSpecification.cs`, `IndexerFlagSpecification.cs`, `ReleaseTypeSpecification.cs`)
+  * `Sonarr/src/NzbDrone.Core/CustomFormats/CustomFormat.cs`
+  * `Sonarr/src/NzbDrone.Core/CustomFormats/CustomFormatCalculationService.cs`
+  * `Sonarr/src/NzbDrone.Core/CustomFormats/Specifications/*` (`ReleaseTitleSpecification.cs`, `ReleaseGroupSpecification.cs`, `SourceSpecification.cs`, `ResolutionSpecification.cs`, `LanguageSpecification.cs`, `SizeSpecification.cs`, `IndexerFlagSpecification.cs`, `ReleaseTypeSpecification.cs`)
 * **Mechanics**:
   * Each `CustomFormat` contains a list of `ICustomFormatSpecification` rules.
   * In `CustomFormatCalculationService.ParseCustomFormat(CustomFormatInput input, List<CustomFormat> allCustomFormats)`, specifications are grouped by their concrete `.GetType()` into `SpecificationMatchesGroup`. A group matches if:
@@ -55,9 +55,9 @@ Inspection of `.tmp/Sonarr/src/NzbDrone.Core`, `.tmp/Radarr/src/NzbDrone.Core`, 
 
 ### 3.3 Release Parsing (`Parser.cs`, `QualityParser.cs`, `LanguageParser.cs`)
 * **Upstream Source**:
-  * `.tmp/Sonarr/src/NzbDrone.Core/Parser/Parser.cs`
-  * `.tmp/Radarr/src/NzbDrone.Core/Parser/Parser.cs`
-  * `.tmp/Sonarr/src/NzbDrone.Core/Parser/QualityParser.cs`
+  * `Sonarr/src/NzbDrone.Core/Parser/Parser.cs`
+  * `Radarr/src/NzbDrone.Core/Parser/Parser.cs`
+  * `Sonarr/src/NzbDrone.Core/Parser/QualityParser.cs`
 * **Mechanics**:
   * **Sonarr (`ReportTitleRegex`)**: Evaluates ~45 ordered compiled regular expressions to extract `title`, `season`, `episode` (multi-episode, split episode, daily `airyear`-`airmonth`-`airday`, anime `[SubGroup]` + `absoluteepisode`, full season packs, and partial season packs) into `ParsedEpisodeInfo`.
   * **Radarr (`ReportMovieTitleRegex`)**: Evaluates movie-specific regexes to extract `title`, `year`, `edition` (`Director's Cut`, `Extended`, `IMAX`, `Remastered`, `Unrated`, `Open Matte`), `imdbid`, and `tmdbid` into `ParsedMovieInfo`.
@@ -65,10 +65,10 @@ Inspection of `.tmp/Sonarr/src/NzbDrone.Core`, `.tmp/Radarr/src/NzbDrone.Core`, 
 
 ### 3.4 Decision Engine (`DownloadDecisionMaker.cs` & Specifications)
 * **Upstream Source**:
-  * `.tmp/Sonarr/src/NzbDrone.Core/DecisionEngine/DownloadDecisionMaker.cs`
-  * `.tmp/Sonarr/src/NzbDrone.Core/DecisionEngine/DownloadDecisionPriorizationService.cs`
-  * `.tmp/Sonarr/src/NzbDrone.Core/DecisionEngine/DownloadDecisionComparer.cs`
-  * `.tmp/Sonarr/src/NzbDrone.Core/DecisionEngine/Specifications/*`
+  * `Sonarr/src/NzbDrone.Core/DecisionEngine/DownloadDecisionMaker.cs`
+  * `Sonarr/src/NzbDrone.Core/DecisionEngine/DownloadDecisionPriorizationService.cs`
+  * `Sonarr/src/NzbDrone.Core/DecisionEngine/DownloadDecisionComparer.cs`
+  * `Sonarr/src/NzbDrone.Core/DecisionEngine/Specifications/*`
 * **Mechanics**:
   * `DownloadDecisionMaker.GetDecisions` parses each `ReleaseInfo`, maps it to a domain target (`RemoteEpisode` or `RemoteMovie`), augments it with scene mappings and Custom Formats, and runs all `IDownloadDecisionEngineSpecification` implementations grouped by `SpecificationPriority` (`Default`, `Parsing`, `Database`, `Disk`).
   * Key specifications include:
@@ -82,20 +82,21 @@ Inspection of `.tmp/Sonarr/src/NzbDrone.Core`, `.tmp/Radarr/src/NzbDrone.Core`, 
 
 ### 3.5 Download Clients & Completed Download Handling
 * **Upstream Source**:
-  * `.tmp/Sonarr/src/NzbDrone.Core/Download/IDownloadClient.cs`
-  * `.tmp/Sonarr/src/NzbDrone.Core/Download/TorrentClientBase.cs` & `UsenetClientBase.cs`
-  * `.tmp/Sonarr/src/NzbDrone.Core/Download/TrackedDownloads/TrackedDownloadService.cs`
-  * `.tmp/Sonarr/src/NzbDrone.Core/Download/CompletedDownloadService.cs`
+  * `Sonarr/src/NzbDrone.Core/Download/IDownloadClient.cs`
+  * `Sonarr/src/NzbDrone.Core/Download/TorrentClientBase.cs` & `UsenetClientBase.cs`
+  * `Sonarr/src/NzbDrone.Core/Download/TrackedDownloads/TrackedDownloadService.cs`
+  * `Sonarr/src/NzbDrone.Core/Download/CompletedDownloadService.cs`
 * **Mechanics**:
   * `IDownloadClient` abstracts Torrent (`qBittorrent`, `Transmission`, `Deluge`, `rTorrent`, `uTorrent`, `Aria2`, `Flood`, `RQbit`) and Usenet (`SABnzbd`, `NZBGet`, `Pneumatic`) clients via `Download(RemoteEpisode/RemoteMovie, IIndexer)` returning a `downloadClientId` string (typically infohash or NZB ID), `GetItems()` returning `IEnumerable<DownloadClientItem>`, and `RemoveItem()`.
   * `DownloadMonitoringService` periodically polls enabled download clients, passing each `DownloadClientItem` into `TrackedDownloadService.TrackDownload()`.
   * `TrackedDownloadService` correlates the `DownloadId` against `History` (`Grabbed` event) or parses the item title to attach `RemoteEpisode`/`RemoteMovie`, maintaining a state machine (`TrackedDownloadState`: `Downloading` -> `ImportPending` -> `Importing` -> `Imported` / `ImportBlocked` / `FailedPending` / `Failed` / `Ignored`).
   * When `DownloadItem.Status == DownloadItemStatus.Completed`, `CompletedDownloadService.Check()` verifies path accessibility (applying `RemotePathMapping` if configured) and transitions the item to `ImportPending`, after which `CompletedDownloadService.Import()` invokes `DownloadedEpisodesImportService` / `DownloadedMoviesImportService` to hardlink/copy/move the media file into the `RootFolder`, create an `EpisodeFile`/`MovieFile` record, and emit `DownloadCompletedEvent`.
+* **Replacearr mapping**: Grab stores `seriesId`/`movieId`/`episodeId` on `queue_items`. `internal/downloadclient/qbittorrent` enqueues and lists torrents. `internal/downloadmonitor` polls (~15s), applies `RemotePathMappings`, and when `DownloadClientOptions.EnableCompletedDownloadHandling` is true imports the primary video into the series/movie library path (hardlink or copy), marks `hasFile`, writes `downloadFolderImported` history, and emits `download.complete` / `download.moved`. SABnzbd and full quality upgrade decisions remain follow-ons.
 
 ### 3.6 Root Folders & Tags
 * **Upstream Source**:
-  * `.tmp/Sonarr/src/NzbDrone.Core/RootFolders/RootFolderService.cs`
-  * `.tmp/Sonarr/src/NzbDrone.Core/Tags/TagService.cs`
+  * `Sonarr/src/NzbDrone.Core/RootFolders/RootFolderService.cs`
+  * `Sonarr/src/NzbDrone.Core/Tags/TagService.cs`
 * **Mechanics**:
   * `RootFolderService` validates disk paths, calculates `FreeSpace` and `TotalSpace`, and scans immediate subdirectories to return `UnmappedFolders` (folders on disk not yet linked to a `Series` or `Movie` in the database).
   * `TagService` manages lowercase alphanumeric + hyphen labels (`^[a-z0-9-]+$`) and computes `TagDetails` (cross-referencing which Series/Movies, Notifications, Release Profiles, Indexers, Download Clients, and AutoTagging rules use each Tag ID).
@@ -105,7 +106,7 @@ Inspection of `.tmp/Sonarr/src/NzbDrone.Core`, `.tmp/Radarr/src/NzbDrone.Core`, 
 ## 4. How Replacearr Unifies the Core & Eliminates HTTP Self-Syncing
 
 ### 4.1 The Problem with Upstream Prowlarr Application Sync
-In upstream `.tmp/Prowlarr/src/NzbDrone.Core/Applications/ApplicationService.cs` and `.tmp/Prowlarr/src/NzbDrone.Core/Applications/Sonarr/Sonarr.cs` (and `Radarr.cs`):
+In upstream `Prowlarr/src/NzbDrone.Core/Applications/ApplicationService.cs` and `Prowlarr/src/NzbDrone.Core/Applications/Sonarr/Sonarr.cs` (and `Radarr.cs`):
 1. Every time an indexer is added, updated, or deleted in Prowlarr (`ProviderAddedEvent<IIndexer>`, `ProviderUpdatedEvent<IIndexer>`, `ApplicationIndexerSyncCommand`), `ApplicationService.SyncIndexers()` iterates over all configured target applications (`Sonarr`, `Radarr`, `Lidarr`, `Readarr`, `Whisparr`).
 2. For each app, Prowlarr makes HTTP calls (`GET /api/v3/indexer/schema`, `GET /api/v3/indexer`, `POST /api/v3/indexer`, `PUT /api/v3/indexer/{id}`, `DELETE /api/v3/indexer/{id}`) using `SonarrV3Proxy` / `RadarrV3Proxy`.
 3. Prowlarr synthesizes a proxy `Torznab` or `Newznab` indexer inside Sonarr/Radarr with `Name: "{indexer.Name} (Prowlarr)"`, `baseUrl: "{ProwlarrUrl}/{indexer.Id}/"`, `apiPath: "/api"`, and `apiKey: "{ProwlarrApiKey}"`, and tracks the foreign key pair `(IndexerId, RemoteIndexerId)` in Prowlarr's `AppIndexerMap` table.
@@ -148,7 +149,7 @@ Replacearr stores all shared and media-specific state in a single WAL-mode SQLit
   * `root_folders` (`id`, `path`, `media_type`, `accessible`, `free_space`, `total_space`): Filtered by `media_type` (`tv` for Sonarr endpoints, `movie` for Radarr endpoints, or `all`).
   * `quality_profiles` (`id`, `name`, `upgrade_allowed`, `cutoff`, `items_json`, `min_format_score`, `cutoff_format_score`): Shared across media modules.
   * `indexers` (`id`, `name`, `implementation`, `protocol`, `privacy`, `enable`, `priority`, `base_url`, `definition_file`, `plugin_id`, `categories_json`, `fields_json`, `tags_json`): Single source of truth for all indexers.
-  * `download_clients` (`id`, `name`, `implementation`, `protocol`, `enable`, `priority`, `host`, `port`, `category`, `fields_json`, `tags_json`): Single pool of download clients.
+  * `download_clients` (`id`, `name`, `implementation`, `protocol`, `enable`, `priority`, `base_url`, `category`, `fields_json`, `tags_json`): Single pool of download clients. `base_url` is the full connection URL (scheme, host, port, optional path); legacy `host`/`port`/`use_ssl` columns are kept in sync for older rows.
 * **Discriminator-Backed Operational Tables**:
   * `queue_items` (`media_type` = `'tv'` | `'movie'`, `series_id`, `episode_id`, `movie_id`, `status`, `tracked_download_status`, `tracked_download_state`, `size`, `sizeleft`, `timeleft`, `protocol`, `download_client`, `download_id`, `indexer`, `output_path`).
   * `history_records` (`media_type` = `'tv'` | `'movie'`, `series_id`, `episode_id`, `movie_id`, `source_title`, `quality_json`, `date`, `event_type`, `data_json`).
@@ -156,12 +157,25 @@ Replacearr stores all shared and media-specific state in a single WAL-mode SQLit
   * `series` and `episodes` (with `ON DELETE CASCADE` foreign key).
   * `movies`.
 
-### 4.3 Direct In-Memory Indexer Execution vs. Compatibility Emulation
+### 4.3 Two “searches”: metadata lookup vs release search
+
+Replacearr mirrors Sonarr/Radarr’s split (native SPA labels match):
+
+| Concern | When | Native UI | API | Backend |
+| :--- | :--- | :--- | :--- | :--- |
+| **Add to library (metadata)** | Before the item exists | **Add Series / Add Movie** | `GET /api/v1/series/lookup`, `GET /api/v1/movies/lookup` (compat: `/series/lookup`, `/movie/lookup*`) | `internal/metadata` — SkyHook (`skyhook.sonarr.tv`, TVDB-backed) for series; `api.radarr.video` (TMDB/IMDb-backed) for movies. Supports free-text and `tvdb:` / `tmdb:` / `imdb:` terms. |
+| **Find releases (indexers)** | After the item is in the library | **Interactive Search** modal only (opened from a series/movie/episode card — not a sidebar tab) | `GET /api/v1/search` then `POST /api/v1/releases/grab` with `seriesId`/`movieId` | In-process Cardigann + indexer plugins; Grab associates the queue row; CDH imports into the library folder via qBittorrent monitor. |
+
+There is no free-form “Releases” sidebar destination. Prowlarr-style federated search must not be used as Add New / IMDb title discovery.
+
+### 4.4 Direct In-Memory Indexer Execution vs. Compatibility Emulation
 1. **Internal Search & RSS Sync**: When Replacearr executes a `SeriesSearch`, `SeasonSearch`, `EpisodeSearch`, `MoviesSearch`, or `RssSync` command, it queries the `indexers` table directly in-memory, executes the matching Cardigann YAML definition or Go indexer plugin, and feeds the resulting `domain.ReleaseResult` structs straight into the Decision Engine—zero HTTP loopback and zero XML serialization overhead.
 2. **Ecosystem Compatibility**:
    * Querying `GET /sonarr/api/v3/indexer` or `GET /radarr/api/v3/indexer` reads directly from the unified `indexers` table, formatting each row as a `Torznab`/`Newznab` resource so third-party tools inspecting Sonarr/Radarr see all active indexers immediately.
    * Querying `GET /prowlarr/api/v1/applications` returns virtualized self-loopback application entries showing Sonarr and Radarr as pre-connected (`fullSync`) internal modules.
    * External *arr instances (if a user still runs an external Lidarr or Readarr container during migration) can still point to Replacearr's Torznab endpoint (`/{id}/api?t=caps|search|tvsearch|movie|music|book`).
-   * Compat mounts are optional: `AppConfig.compatModules.{sonarr,radarr,prowlarr}` toggles `/sonarr/`, `/radarr/`, `/prowlarr/`, and root `/api/v3/` (Sonarr). Native `/api/v1/*` always stays mounted.
-   * Outbound HTTP uses `internal/httpclient` with `AppConfig.proxy` and `PluginTypeNetworkProxy` layers (HTTP/SOCKS + OpenVPN local bridge). Cover art is cached as WebP under `{config}/media/covers` and served via `/api/v1/mediacover/...` and compat `/MediaCover/...`.
+   * Compat mounts are optional built-in plugins (`builtin-compat-sonarr`, `builtin-compat-radarr`, `builtin-compat-prowlarr`, type `compat`). Disable them in the Plugins UI to 404 `/sonarr/`, `/radarr/`, `/prowlarr/`, and root `/api/v3/` (Sonarr) without restart. Native `/api/v1/*` always stays mounted.
+   * Outbound HTTP uses `internal/httpclient` with `AppConfig.proxy` and `PluginTypeNetworkProxy` layers (HTTP/SOCKS + OpenVPN local bridge). Cover art is cached under `{config}/media/covers/{tv|movie}/{imdb-…|tvdb-…|tmdb-…}/poster.webp` (stable external id; falls back to internal id). The on-disk payload keeps the remote jpeg/png/webp bytes when possible (otherwise JPEG); responses sniff Content-Type. Only `coverType=poster` is fetched (never banner/fanart). HTTP URLs stay `/api/v1/mediacover/{tv|movie}/{internalId}/poster.webp` and compat `/MediaCover/{internalId}/…`. The SPA prefers local `images[].url` over `remoteUrl`.
+   * Adding a series (native or Sonarr compat) fetches the SkyHook official show and persists the episode guide into `episodes`. `GET /api/v1/episodes?seriesId=` (and Sonarr `GET /episode`) lazy-syncs from SkyHook when the table is empty for that series.
    * First-run wizard (`setupComplete=false`) collects root folders and optional download client; root folders and download clients are **not** auto-seeded.
+   * **Notifications** are `NotificationPlugin` channels only. Core emits stable `pluginsdk.Event*` values (`download.started`, `download.complete`, `download.stalled`, `download.moved`, `jellyfin.picked_up`) via `pluginhost.Manager.NotifyAll`. `builtin-browser-notifications` bridges to the SPA over `GET /api/v1/notifications/stream` (SSE); external channels (webhook example today; Telegram/Signal later) are separate plugins configured on the Plugins tab—not Settings → Connect. The Plugins configure modal exposes **Test** (`POST /api/v1/plugins/{id}/test`), which sends `notification.test` to that channel (always delivered; ignores per-event toggles) using the current form settings without saving.

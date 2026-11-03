@@ -17,12 +17,11 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({
   onNotify,
 }) => {
   const [step, setStep] = useState(0);
-  const [tvPath, setTvPath] = useState('');
-  const [moviesPath, setMoviesPath] = useState('');
+  const [tvPath, setTvPath] = useState('/data/TV');
+  const [moviesPath, setMoviesPath] = useState('/data/Movies');
   const [addClient, setAddClient] = useState(false);
   const [clientName, setClientName] = useState('qBittorrent');
-  const [clientHost, setClientHost] = useState('localhost');
-  const [clientPort, setClientPort] = useState(8080);
+  const [clientBaseUrl, setClientBaseUrl] = useState('http://localhost:8080');
   const [downloadPathNote, setDownloadPathNote] = useState('/data/downloads');
   const [busy, setBusy] = useState(false);
 
@@ -45,9 +44,7 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({
           protocol: 'torrent',
           enable: true,
           priority: 1,
-          host: clientHost.trim() || 'localhost',
-          port: clientPort || 8080,
-          useSsl: false,
+          baseUrl: clientBaseUrl.trim() || 'http://localhost:8080',
           username: '',
           category: 'replacearr',
           removeCompletedDownloads: true,
@@ -96,7 +93,7 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({
           <div className="p-5 border-b border-slate-800">
             <h1 className="text-lg font-bold text-white">First-run wizard</h1>
             <p className="text-xs text-slate-400 mt-1">
-              Configure library roots before using Replacearr. No default media paths are assumed.
+              Configure library roots before using Replacearr.
             </p>
             <div className="mt-4 flex gap-2">
               {steps.map((label, i) => (
@@ -125,12 +122,11 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({
                   type="text"
                   value={tvPath}
                   onChange={(e) => setTvPath(e.target.value)}
-                  placeholder="/media/tv"
+                  placeholder="/data/TV"
                   className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-lg text-sm text-white font-mono placeholder-slate-500 focus:outline-none focus:border-indigo-500"
                 />
                 <p className="text-xs text-slate-500">
-                  Absolute path where TV series folders will live. Leave empty until you know the path —
-                  then enter it here.
+                  Absolute path where TV series folders will live.
                 </p>
               </div>
             )}
@@ -145,7 +141,7 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({
                   type="text"
                   value={moviesPath}
                   onChange={(e) => setMoviesPath(e.target.value)}
-                  placeholder="/media/movies"
+                  placeholder="/data/Movies"
                   className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-lg text-sm text-white font-mono placeholder-slate-500 focus:outline-none focus:border-emerald-500"
                 />
               </div>
@@ -170,7 +166,7 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({
                 </label>
                 {addClient && (
                   <div className="space-y-3 pl-1">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="space-y-3">
                       <div>
                         <label className="block text-[11px] text-slate-400 mb-1">Name</label>
                         <input
@@ -181,22 +177,17 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({
                         />
                       </div>
                       <div>
-                        <label className="block text-[11px] text-slate-400 mb-1">Host</label>
+                        <label className="block text-[11px] text-slate-400 mb-1">Base URL</label>
                         <input
-                          type="text"
-                          value={clientHost}
-                          onChange={(e) => setClientHost(e.target.value)}
+                          type="url"
+                          value={clientBaseUrl}
+                          onChange={(e) => setClientBaseUrl(e.target.value)}
+                          placeholder="http://localhost:8080"
                           className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white font-mono"
                         />
-                      </div>
-                      <div>
-                        <label className="block text-[11px] text-slate-400 mb-1">Port</label>
-                        <input
-                          type="number"
-                          value={clientPort}
-                          onChange={(e) => setClientPort(Number(e.target.value))}
-                          className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white"
-                        />
+                        <p className="mt-1 text-[11px] text-slate-500">
+                          Include http/https, port, and any reverse-proxy path.
+                        </p>
                       </div>
                       <div>
                         <label className="block text-[11px] text-slate-400 mb-1">

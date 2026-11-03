@@ -2,9 +2,9 @@
 
 ## 1. Overview & Routing Prefix
 
-Upstream **Prowlarr** uses API v1 (`[V1ApiController]` in `.tmp/Prowlarr/src/Prowlarr.Http/V1ApiControllerAttribute.cs`) mounted at `/api/v1/[controller]`, plus top-level Torznab/Newznab feed routes (`/{id:int}/api` and `/api/v1/indexer/{id:int}/newznab`).
+Upstream **Prowlarr** uses API v1 (`[V1ApiController]` in `Prowlarr/src/Prowlarr.Http/V1ApiControllerAttribute.cs`) mounted at `/api/v1/[controller]`, plus top-level Torznab/Newznab feed routes (`/{id:int}/api` and `/api/v1/indexer/{id:int}/newznab`).
 
-Replacearr exposes Prowlarr v1 compatibility at (when `compatModules.prowlarr` is enabled):
+Replacearr exposes Prowlarr v1 compatibility at (when the built-in `builtin-compat-prowlarr` plugin is enabled):
 * `/prowlarr/api/v1/*` (dedicated Prowlarr v1 mount)
 * Torznab under `/prowlarr/{id}/api` (`t=caps|search|tvsearch|movie`) — season/ep query params are forwarded into the unified search engine
 * Native Replacearr owns `/api/v1/*` (do not remount Prowlarr over the native router)
@@ -15,7 +15,7 @@ Authentication accepts `?apikey=<key>`, `X-Api-Key: <key>`, or `Authorization: B
 
 ## 2. Required Prowlarr v1 REST Endpoints & Upstream Mapping
 
-| Endpoint Path | Methods | Upstream Controller (`.tmp/Prowlarr/src/Prowlarr.Api.V1/`) | Purpose & Ecosystem Consumers |
+| Endpoint Path | Methods | Upstream Controller (`Prowlarr/src/Prowlarr.Api.V1/`) | Purpose & Ecosystem Consumers |
 | :--- | :--- | :--- | :--- |
 | `/api/v1/system/status` | `GET` | `System/SystemController.cs` (`SystemResource.cs`) | nzb360, Homepage, Prowlarr UI/health checks (`"appName": "Prowlarr"`, `"version": "1.24.2.4771"`) |
 | `/api/v1/indexer` | `GET`, `POST`, `PUT`, `DELETE` | `Indexers/IndexerController.cs` (`IndexerResource.cs`) | Manage Torznab, Newznab, Cardigann, and Plugin indexers |
@@ -34,7 +34,7 @@ Authentication accepts `?apikey=<key>`, `X-Api-Key: <key>`, or `Authorization: B
 ## 3. Prowlarr v1 JSON Payload Shapes
 
 ### 3.1 `/api/v1/indexer` (`IndexerResource.cs`)
-Upstream reference: `.tmp/Prowlarr/src/Prowlarr.Api.V1/Indexers/IndexerResource.cs`
+Upstream reference: `Prowlarr/src/Prowlarr.Api.V1/Indexers/IndexerResource.cs`
 ```json
 {
   "id": 1,
@@ -93,7 +93,7 @@ Upstream reference: `.tmp/Prowlarr/src/Prowlarr.Api.V1/Indexers/IndexerResource.
 ```
 
 ### 3.2 `/api/v1/indexerstatus` (`IndexerStatusResource.cs`)
-Upstream reference: `.tmp/Prowlarr/src/Prowlarr.Api.V1/Indexers/IndexerStatusResource.cs`
+Upstream reference: `Prowlarr/src/Prowlarr.Api.V1/Indexers/IndexerStatusResource.cs`
 ```json
 [
   {
@@ -147,7 +147,7 @@ Upstream reference: `.tmp/Prowlarr/src/Prowlarr.Api.V1/Indexers/IndexerStatusRes
 ```
 
 ### 3.4 `/api/v1/applications` (`ApplicationController.cs` & `ApplicationResource.cs`)
-Upstream reference: `.tmp/Prowlarr/src/Prowlarr.Api.V1/Applications/ApplicationResource.cs`
+Upstream reference: `Prowlarr/src/Prowlarr.Api.V1/Applications/ApplicationResource.cs`
 * Supports `syncLevel`: `"disabled"`, `"addOnly"`, `"fullSync"`.
 * In Replacearr, because Sonarr and Radarr share the unified SQLite `indexers` table directly, `GET /api/v1/applications` returns virtual built-in application entries representing the internal Sonarr and Radarr modules with `"syncLevel": "fullSync"` so monitoring dashboards and users see that TV and Movie modules are natively synchronized.
 
@@ -156,10 +156,10 @@ Upstream reference: `.tmp/Prowlarr/src/Prowlarr.Api.V1/Applications/ApplicationR
 ## 4. Torznab & Newznab Protocol (`/{id}/api` & `/api/v1/indexer/{id}/newznab`)
 
 Upstream reference:
-* `.tmp/Prowlarr/src/Prowlarr.Api.V1/Indexers/NewznabController.cs`
-* `.tmp/Prowlarr/src/NzbDrone.Core/Indexers/IndexerCapabilities.cs`
-* `.tmp/Prowlarr/src/NzbDrone.Core/IndexerSearch/NewznabResults.cs`
-* `.tmp/Prowlarr/src/NzbDrone.Core/Indexers/NewznabStandardCategory.cs`
+* `Prowlarr/src/Prowlarr.Api.V1/Indexers/NewznabController.cs`
+* `Prowlarr/src/NzbDrone.Core/Indexers/IndexerCapabilities.cs`
+* `Prowlarr/src/NzbDrone.Core/IndexerSearch/NewznabResults.cs`
+* `Prowlarr/src/NzbDrone.Core/Indexers/NewznabStandardCategory.cs`
 
 ### 4.1 Request Parameters (`NewznabRequest.cs`)
 * `t` (**required**):
@@ -237,12 +237,14 @@ Content-Type: `application/rss+xml` (with `xmlns:torznab="http://torznab.com/sch
 
 ---
 
-## 5. Cardigann YAML Definition Format (`.tmp/ProwlarrIndexers/definitions/v11/*.yml`)
+## 5. Cardigann YAML Definition Format
 
-Upstream references:
-* `.tmp/ProwlarrIndexers/definitions/v11/schema.json` (578 `.yml` definitions in `v11/`, plus `v12/`)
-* `.tmp/Prowlarr/src/NzbDrone.Core/Indexers/Definitions/Cardigann/CardigannDefinition.cs`
-* `.tmp/Prowlarr/src/NzbDrone.Core/Indexers/Definitions/Cardigann/CardigannBase.cs`
+Replacearr ships an owned Cardigann catalog under repo `definitions/` (~580 `.yml` files, Cardigann v11 schema). Entrypoints seed missing files into `$REPLACEARR_CONFIG_DIR/definitions` (or `REPLACEARR_DEFINITIONS_DIR`) without overwriting local edits. Built-in Go metadata fallbacks apply only when that directory stays empty. Refresh the bundled catalog with `make sync-definitions`.
+
+Upstream references (source of the initial catalog):
+* `Prowlarr/Indexers/definitions/v11/schema.json` (~580 `.yml` definitions in `v11/`, plus `v12/`)
+* `Prowlarr/src/NzbDrone.Core/Indexers/Definitions/Cardigann/CardigannDefinition.cs`
+* `Prowlarr/src/NzbDrone.Core/Indexers/Definitions/Cardigann/CardigannBase.cs`
 
 ### 5.1 Structure of a Cardigann v11 YAML File
 Inspected examples (`yts.yml`, `thepiratebay.yml`, `torrentleech.yml`) conform to `definitions/v11/schema.json`:
@@ -278,5 +280,6 @@ Inspected examples (`yts.yml`, `thepiratebay.yml`, `torrentleech.yml`) conform t
 
 ### 5.2 How Replacearr Loads Cardigann YAML Definitions Alongside Native Go Plugins
 In Replacearr:
-1. **Cardigann Loader (`config.DefinitionsDir`)**: On startup, Replacearr scans `REPLACEARR_DEFINITIONS_DIR` (falling back to `.tmp/ProwlarrIndexers/definitions/v11` in development, as configured in `internal/config/config.go`). Because Cardigann was originally invented in Go (`text/template`, Go regexes, Go date layouts), Replacearr parses `.yml` files directly into Go structs and evaluates templates natively without C#'s regex-based Go-template emulation layer.
-2. **Native Go Indexer Plugins (`pkg/pluginsdk`)**: Developers can also register compiled or dynamic Go `IndexerPlugin` implementations (`Implementation: "Plugin"`, `PluginID: "..."` in the `indexers` table) for complex APIs, GraphQL trackers, or custom debrid/usenet indexers. Both Cardigann definitions and Go `IndexerPlugin` instances are unified into the same `indexers` table and exposed identically over `/api/v1/indexer`, `/api/v1/search`, and `/{id}/api` Torznab endpoints.
+1. **Cardigann Loader (`config.DefinitionsDir`)**: On startup, Replacearr scans `REPLACEARR_DEFINITIONS_DIR` (default `$REPLACEARR_CONFIG_DIR/definitions`), which is seeded from the bundled `definitions/` catalog. Built-in fallbacks apply only when that directory is empty. Definition metadata is listed for the UI with no artificial cap; enabled `Implementation: Cardigann` rows are executed at search time via `github.com/Kcchouette/cardigann-go` (`internal/indexers/cardigann.Search`).
+2. **Search path**: `GET /api/v1/search` merges Go `IndexerPlugin` results with enabled Cardigann DB indexers. Cloudflare-protected public sites (e.g. 1337x) need an enabled FlareSolverr indexer proxy — Cardigann HTTP uses `flaresolverr.SolvingTransport` when a host is configured.
+3. **Native Go Indexer Plugins (`pkg/pluginsdk`)**: Developers can also register compiled Go `IndexerPlugin` implementations (`Implementation: "Plugin"`). Cardigann definitions and Go plugins share the `indexers` table and Torznab surface.

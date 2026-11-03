@@ -1,33 +1,29 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Tv,
   Plus,
   Search,
-  Trash2,
-  ListVideo,
-  CheckCircle2,
-  Clock,
   Folder,
   X,
-  Radio,
   Sparkles,
-  Calendar,
-  Magnet,
 } from 'lucide-react';
-import type { AppConfig, Episode, QualityProfile, RootFolder, Series } from '../types';
+import type { AppConfig, Episode, QualityProfile, ReleaseSearchRequest, RootFolder, Series } from '../types';
 import { api } from '../api';
-import { formatAppDate } from '../uiPrefs';
 import { useRovingFocus } from '../htpc/useRovingFocus';
 import { ManualTorrentForm, type ManualTorrentTarget } from './ManualTorrentForm';
+import { SeriesDetailPanel } from './SeriesDetailPanel';
 
 interface SeriesTabProps {
   series: Series[];
   profiles: QualityProfile[];
   rootFolders: RootFolder[];
   onRefresh: () => Promise<void>;
-  onSearchReleases: (query: string, type: string) => void;
+  onSearchReleases: (req: ReleaseSearchRequest) => void;
   onNotify: (msg: string, isError?: boolean) => void;
   appUi?: AppConfig['ui'] | null;
+  openAddPanel?: boolean;
+  openAddNonce?: number;
+  onAddPanelOpened?: () => void;
 }
 
 export const SeriesTab: React.FC<SeriesTabProps> = ({
@@ -38,6 +34,9 @@ export const SeriesTab: React.FC<SeriesTabProps> = ({
   onSearchReleases,
   onNotify,
   appUi,
+  openAddPanel = false,
+  openAddNonce = 0,
+  onAddPanelOpened,
 }) => {
   const tvRoots = rootFolders.filter((r) => r.mediaType === 'tv');
   const availableRoots = tvRoots.length > 0 ? tvRoots : rootFolders;
@@ -63,10 +62,28 @@ export const SeriesTab: React.FC<SeriesTabProps> = ({
       (s.network || '').toLowerCase().includes(filterText.toLowerCase())
   );
 
+  const openSeriesDetail = async (s: Series) => {
+    setActiveSeries(s);
+    setEpisodes([]);
+    setEpisodesLoading(true);
+    try {
+      const eps = await api.getEpisodes(s.id);
+      setEpisodes(eps);
+    } catch (err) {
+      onNotify(err instanceof Error ? err.message : 'Failed to load episodes', true);
+    } finally {
+      setEpisodesLoading(false);
+    }
+  };
+
   const gridFocus = useRovingFocus({
     itemCount: filteredSeries.length,
     orientation: 'grid',
     columns: 3,
+    onActivate: (index) => {
+      const s = filteredSeries[index];
+      if (s) void openSeriesDetail(s);
+    },
   });
 
   const handleLookup = async (e?: React.FormEvent, customTerm?: string) => {
@@ -118,32 +135,54 @@ export const SeriesTab: React.FC<SeriesTabProps> = ({
     }
   };
 
-  const openEpisodesDrawer = async (s: Series) => {
-    setActiveSeries(s);
-    setEpisodesLoading(true);
-    try {
-      const eps = await api.getEpisodes(s.id);
-      setEpisodes(eps);
-    } catch (err) {
-      onNotify(err instanceof Error ? err.message : 'Failed to load episodes', true);
-    } finally {
-      setEpisodesLoading(false);
-    }
-  };
-
   const getPosterUrl = (s: Series): string | null => {
     const poster = s.images?.find((img) => img.coverType === 'poster') || s.images?.[0];
-    return poster?.remoteUrl || poster?.url || null;
+    return poster?.url || poster?.remoteUrl || null;
   };
 
-  const openAddPanel = () => {
+  const startAddPanel = () => {
     setShowAddPanel(true);
     setSelectedRootFolder(availableRoots[0]?.path || '');
-    if (lookupResults.length === 0) {
-      setLookupTerm('Severance');
-      void handleLookup(undefined, 'Severance');
-    }
+    setLookupTerm('');
+    setLookupResults([]);
   };
+
+  useEffect(() => {
+    if (openAddPanel) {
+      startAddPanel();
+      onAddPanelOpened?.();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openAddNonce]);
+
+  if (activeSeries) {
+    return (
+      <>
+        <SeriesDetailPanel
+          series={activeSeries}
+          episodes={episodes}
+          loading={episodesLoading}
+          appUi={appUi}
+          posterUrl={getPosterUrl(activeSeries)}
+          onBack={() => {
+            setActiveSeries(null);
+            setEpisodes([]);
+          }}
+          onDelete={() => void handleDeleteSeries(activeSeries)}
+          onSearchReleases={onSearchReleases}
+          onManualTorrent={setManualTarget}
+        />
+        {manualTarget && (
+          <ManualTorrentForm
+            target={manualTarget}
+            onClose={() => setManualTarget(null)}
+            onNotify={onNotify}
+            onSuccess={onRefresh}
+          />
+        )}
+      </>
+    );
+  }
 
   if (showAddPanel) {
     return (
@@ -154,7 +193,7 @@ export const SeriesTab: React.FC<SeriesTabProps> = ({
             <div>
               <h3 className="text-base font-bold text-white">Add TV Series</h3>
               <p className="text-xs text-slate-400">
-                Lookup metadata and add to your library
+                Lookup on TVDB / TMDB / IMDb — not torrent search
               </p>
             </div>
           </div>
@@ -172,7 +211,7 @@ export const SeriesTab: React.FC<SeriesTabProps> = ({
               type="text"
               value={lookupTerm}
               onChange={(e) => setLookupTerm(e.target.value)}
-              placeholder="Enter series title or TVDB ID..."
+              placeholder="Series title, tvdb:12345, or imdb:tt…"
               className="flex-1 px-3.5 py-2.5 bg-slate-900 border border-slate-800 rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
               autoFocus
             />
@@ -181,7 +220,7 @@ export const SeriesTab: React.FC<SeriesTabProps> = ({
               disabled={lookupLoading}
               className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-xl transition"
             >
-              {lookupLoading ? 'Searching...' : 'Lookup'}
+              {lookupLoading ? 'Looking up…' : 'Lookup'}
             </button>
           </form>
 
@@ -272,10 +311,9 @@ export const SeriesTab: React.FC<SeriesTabProps> = ({
             <Tv className="w-5 h-5" />
           </div>
           <div>
-            <h2 className="text-lg font-bold text-white">TV Series Library</h2>
-            <p className="text-xs text-slate-400">
-              {series.length} series monitored • Automatic season & episode tracking
-            </p>
+            <h2 className="text-lg font-bold text-white">
+              TV Library - {series.length} series
+            </h2>
           </div>
         </div>
 
@@ -291,7 +329,7 @@ export const SeriesTab: React.FC<SeriesTabProps> = ({
             />
           </div>
           <button
-            onClick={openAddPanel}
+            onClick={startAddPanel}
             className="inline-flex items-center justify-center gap-2 px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-lg shadow-lg shadow-indigo-600/20 transition shrink-0"
           >
             <Plus className="w-4 h-4" />
@@ -308,7 +346,7 @@ export const SeriesTab: React.FC<SeriesTabProps> = ({
             Look up a series by title or TVDB ID to start monitoring episodes.
           </p>
           <button
-            onClick={openAddPanel}
+            onClick={startAddPanel}
             className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-lg transition"
           >
             <Plus className="w-4 h-4" />
@@ -323,10 +361,12 @@ export const SeriesTab: React.FC<SeriesTabProps> = ({
               <div
                 key={s.id}
                 {...gridFocus.itemProps(index)}
-                className="group bg-slate-900/90 border border-slate-800 hover:border-indigo-500/40 rounded-xl overflow-hidden flex flex-col justify-between transition shadow-lg outline-none"
+                role="button"
+                onClick={() => void openSeriesDetail(s)}
+                className="group bg-slate-900/90 border border-slate-800 hover:border-indigo-500/40 rounded-xl overflow-hidden flex flex-col justify-between transition shadow-lg outline-none cursor-pointer"
               >
-                <div className="p-4 flex flex-col sm:flex-row gap-4">
-                  <div className="w-28 h-40 sm:w-24 sm:h-36 mx-auto sm:mx-0 rounded-lg bg-gradient-to-br from-indigo-900/60 via-slate-900 to-slate-950 border border-slate-800 shrink-0 overflow-hidden flex items-center justify-center relative">
+                <div className="p-4 flex flex-row gap-3 sm:gap-4">
+                  <div className="w-20 h-28 sm:w-24 sm:h-36 rounded-lg bg-gradient-to-br from-indigo-900/60 via-slate-900 to-slate-950 border border-slate-800 shrink-0 overflow-hidden flex items-center justify-center relative">
                     {posterUrl ? (
                       <img
                         src={posterUrl}
@@ -345,10 +385,10 @@ export const SeriesTab: React.FC<SeriesTabProps> = ({
                   </div>
 
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-start justify-between gap-2">
-                      <h3 className="text-base font-bold text-white truncate">{s.title}</h3>
+                    <h3 className="text-base font-bold text-white truncate">{s.title}</h3>
+                    <div className="mt-1">
                       <span
-                        className={`text-[10px] font-mono uppercase px-2 py-0.5 rounded-full shrink-0 ${
+                        className={`inline-flex text-[10px] font-mono uppercase px-2 py-0.5 rounded-full ${
                           s.status === 'continuing'
                             ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30'
                             : 'bg-slate-800 text-slate-300'
@@ -379,192 +419,10 @@ export const SeriesTab: React.FC<SeriesTabProps> = ({
                   </div>
                 </div>
 
-                <div className="px-4 py-3 bg-slate-950/70 border-t border-slate-800/80 flex items-center justify-between gap-2">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <button
-                      onClick={() => void openEpisodesDrawer(s)}
-                      className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-800 text-xs font-medium transition"
-                    >
-                      <ListVideo className="w-3.5 h-3.5 text-indigo-400" />
-                      <span>Episodes</span>
-                    </button>
-                    <button
-                      onClick={() => onSearchReleases(s.title, 'tvsearch')}
-                      className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-indigo-500/15 hover:bg-indigo-500/25 text-indigo-300 border border-indigo-500/30 text-xs font-medium transition"
-                    >
-                      <Radio className="w-3.5 h-3.5" />
-                      <span>Search</span>
-                    </button>
-                    <button
-                      onClick={() =>
-                        setManualTarget({
-                          title: s.title,
-                          mediaType: 'tv',
-                          seriesId: s.id,
-                        })
-                      }
-                      className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 text-xs font-medium transition"
-                    >
-                      <Magnet className="w-3.5 h-3.5" />
-                      <span>Add torrent</span>
-                    </button>
-                  </div>
-
-                  <button
-                    onClick={() => void handleDeleteSeries(s)}
-                    title="Delete series"
-                    className="p-1.5 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </div>
               </div>
             );
           })}
         </div>
-      )}
-
-      {activeSeries && (
-        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex justify-end">
-          <div className="w-full max-w-2xl bg-slate-900 border-l border-slate-800 h-full flex flex-col justify-between shadow-2xl">
-            <div className="p-4 sm:p-5 border-b border-slate-800 flex items-start justify-between gap-3 shrink-0">
-              <div className="min-w-0">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-xs font-mono uppercase px-2 py-0.5 rounded bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 shrink-0">
-                    TVDB #{activeSeries.tvdbId || activeSeries.id}
-                  </span>
-                  <h3 className="text-lg font-bold text-white break-words">{activeSeries.title}</h3>
-                </div>
-                <p className="text-xs text-slate-400 mt-0.5 break-all">
-                  Path: <code className="font-mono text-slate-300">{activeSeries.path}</code>
-                </p>
-              </div>
-              <button
-                onClick={() => setActiveSeries(null)}
-                className="p-2 rounded-lg bg-slate-800 text-slate-400 hover:text-white"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <div className="flex-1 overflow-y-auto p-5 space-y-3">
-              {episodesLoading ? (
-                <div className="py-12 text-center text-sm text-slate-400">
-                  Loading episode guide...
-                </div>
-              ) : episodes.length === 0 ? (
-                <div className="py-12 text-center text-sm text-slate-400">
-                  No episodes recorded for this series yet.
-                </div>
-              ) : (
-                episodes.map((ep) => (
-                  <div
-                    key={ep.id}
-                    className="p-3.5 rounded-xl bg-slate-950/90 border border-slate-800 flex items-center justify-between gap-4"
-                  >
-                    <div className="min-w-0">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="text-xs font-mono font-semibold px-2 py-0.5 rounded bg-indigo-500/15 text-indigo-300 border border-indigo-500/30">
-                          S{String(ep.seasonNumber).padStart(2, '0')}E
-                          {String(ep.episodeNumber).padStart(2, '0')}
-                        </span>
-                        <span className="text-sm font-medium text-white truncate">
-                          {ep.title}
-                        </span>
-                        {ep.hasFile ? (
-                          <span className="inline-flex items-center gap-1 text-[11px] text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded">
-                            <CheckCircle2 className="w-3 h-3" /> Downloaded
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 text-[11px] text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded">
-                            <Clock className="w-3 h-3" /> Missing / Monitored
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-xs text-slate-400 mt-1 truncate">
-                        {ep.overview ||
-                          `Air Date: ${ep.airDate ? formatAppDate(ep.airDate, appUi) : 'TBA'}`}
-                      </p>
-                    </div>
-
-                    <div className="flex items-center gap-2 shrink-0">
-                      <span className="text-xs font-mono text-slate-500 hidden sm:inline-flex items-center gap-1">
-                        <Calendar className="w-3 h-3" />
-                        {ep.airDate ? formatAppDate(ep.airDate, appUi) : 'TBA'}
-                      </span>
-                      <button
-                        onClick={() => {
-                          const code = `S${String(ep.seasonNumber).padStart(2, '0')}E${String(
-                            ep.episodeNumber
-                          ).padStart(2, '0')}`;
-                          setActiveSeries(null);
-                          onSearchReleases(`${activeSeries.title} ${code}`, 'tvsearch');
-                        }}
-                        className="px-2.5 py-1.5 rounded-lg bg-indigo-600/20 hover:bg-indigo-600 text-indigo-300 hover:text-white border border-indigo-500/30 text-xs font-medium transition"
-                      >
-                        Search
-                      </button>
-                      <button
-                        onClick={() =>
-                          setManualTarget({
-                            title: `${activeSeries.title} S${String(ep.seasonNumber).padStart(2, '0')}E${String(ep.episodeNumber).padStart(2, '0')}`,
-                            mediaType: 'tv',
-                            seriesId: activeSeries.id,
-                            episodeId: ep.id,
-                            seasonNumber: ep.seasonNumber,
-                          })
-                        }
-                        className="px-2.5 py-1.5 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 text-xs font-medium transition"
-                        title="Add torrent"
-                      >
-                        <Magnet className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-
-            <div className="p-4 border-t border-slate-800 bg-slate-950 flex items-center justify-between gap-2">
-              <span className="text-xs text-slate-400">
-                {episodes.length} episodes tracked in SQLite
-              </span>
-              <div className="flex gap-2">
-                <button
-                  onClick={() =>
-                    setManualTarget({
-                      title: activeSeries.title,
-                      mediaType: 'tv',
-                      seriesId: activeSeries.id,
-                    })
-                  }
-                  className="px-3 py-2 rounded-lg bg-amber-500/15 text-amber-300 border border-amber-500/30 text-xs font-semibold transition"
-                >
-                  Add torrent
-                </button>
-                <button
-                  onClick={() => {
-                    const title = activeSeries.title;
-                    setActiveSeries(null);
-                    onSearchReleases(title, 'tvsearch');
-                  }}
-                  className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold transition"
-                >
-                  Search Full Series Pack
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {manualTarget && (
-        <ManualTorrentForm
-          target={manualTarget}
-          onClose={() => setManualTarget(null)}
-          onNotify={onNotify}
-          onSuccess={onRefresh}
-        />
       )}
     </div>
   );

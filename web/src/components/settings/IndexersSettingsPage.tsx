@@ -1,22 +1,28 @@
 import React, { useEffect, useState } from 'react';
-import type { AppConfig, CardigannDefinition, Indexer, IndexerProxy } from '../../types';
+import type { AppConfig, CardigannDefinition, DiscoveredPlugin, Indexer, IndexerProxy } from '../../types';
 import { api } from '../../api';
 import {
-  Checkbox,
+  blankIndexerForm,
+  IndexerForm,
+  IndexerModal,
+  indexerToForm,
+} from '../modals/IndexerModal';
+import {
+  blankIndexerProxyForm,
+  IndexerProxyForm,
+  IndexerProxyModal,
+  indexerProxyToForm,
+} from '../modals/IndexerProxyModal';
+import {
   dangerButtonClass,
   errorText,
   FieldRow,
-  Modal,
   NumberInput,
   PageIntro,
-  parseNumberList,
-  PasswordInput,
   primaryButtonClass,
   quietButtonClass,
   SaveBar,
   Section,
-  Select,
-  TextInput,
   useDraftState,
 } from './fields';
 
@@ -24,98 +30,18 @@ interface IndexersSettingsPageProps {
   config: AppConfig;
   indexers: Indexer[];
   definitions: CardigannDefinition[];
+  plugins?: DiscoveredPlugin[];
   onSave: (next: AppConfig) => Promise<AppConfig>;
   onDirtyChange: (dirty: boolean) => void;
   onRefresh: () => Promise<void>;
   onNotify: (msg: string, isError?: boolean) => void;
 }
 
-interface IndexerForm {
-  id: number | null;
-  name: string;
-  implementation: string;
-  protocol: string;
-  privacy: string;
-  enable: boolean;
-  enableRss: boolean;
-  enableAutomaticSearch: boolean;
-  enableInteractiveSearch: boolean;
-  priority: number;
-  baseUrl: string;
-  apiKey: string;
-  definitionFile: string;
-  categories: string;
-  pluginId: string;
-}
-
-interface ProxyForm {
-  id: number | null;
-  name: string;
-  implementation: string;
-  host: string;
-  requestTimeout: number;
-  sessionTtlMinutes: number;
-  disableMedia: boolean;
-  enable: boolean;
-}
-
-function blankIndexer(): IndexerForm {
-  return {
-    id: null,
-    name: '',
-    implementation: 'Torznab',
-    protocol: 'torrent',
-    privacy: 'public',
-    enable: true,
-    enableRss: true,
-    enableAutomaticSearch: true,
-    enableInteractiveSearch: true,
-    priority: 25,
-    baseUrl: '',
-    apiKey: '',
-    definitionFile: '',
-    categories: '',
-    pluginId: '',
-  };
-}
-
-function indexerToForm(indexer: Indexer): IndexerForm {
-  return {
-    id: indexer.id,
-    name: indexer.name,
-    implementation: indexer.implementation,
-    protocol: indexer.protocol,
-    privacy: indexer.privacy,
-    enable: indexer.enable,
-    enableRss: indexer.enableRss,
-    enableAutomaticSearch: indexer.enableAutomaticSearch,
-    enableInteractiveSearch: indexer.enableInteractiveSearch,
-    priority: indexer.priority,
-    baseUrl: indexer.baseUrl,
-    apiKey: indexer.apiKey ?? '',
-    definitionFile: indexer.definitionFile ?? '',
-    categories: indexer.categories.join(', '),
-    pluginId: indexer.pluginId ?? '',
-  };
-}
-
-function blankProxy(): ProxyForm {
-  return {
-    id: null,
-    name: '',
-    implementation: 'FlareSolverr',
-    host: 'http://localhost:8191/',
-    requestTimeout: 60,
-    sessionTtlMinutes: 15,
-    disableMedia: false,
-    enable: true,
-  };
-}
-
 export const IndexersSettingsPage: React.FC<IndexersSettingsPageProps> = ({
   config,
   indexers,
   definitions,
+  plugins = [],
   onSave,
   onDirtyChange,
   onRefresh,
@@ -128,9 +54,7 @@ export const IndexersSettingsPage: React.FC<IndexersSettingsPageProps> = ({
   const [proxies, setProxies] = useState<IndexerProxy[]>([]);
   const [clearanceCount, setClearanceCount] = useState(0);
   const [indexerForm, setIndexerForm] = useState<IndexerForm | null>(null);
-  const [proxyForm, setProxyForm] = useState<ProxyForm | null>(null);
-  const [proxyTest, setProxyTest] = useState('');
-  const [busy, setBusy] = useState(false);
+  const [proxyForm, setProxyForm] = useState<IndexerProxyForm | null>(null);
 
   const loadProxies = async () => {
     const [rows, clearances] = await Promise.all([api.getIndexerProxies(), api.getClearances()]);
@@ -166,45 +90,6 @@ export const IndexersSettingsPage: React.FC<IndexersSettingsPageProps> = ({
     }
   };
 
-  const saveIndexer = async (event: React.FormEvent) => {
-    event.preventDefault();
-    if (!indexerForm) return;
-    const payload: Partial<Indexer> = {
-      name: indexerForm.name,
-      implementation: indexerForm.implementation,
-      implementationName: indexerForm.implementation,
-      configContract: `${indexerForm.implementation}Settings`,
-      protocol: indexerForm.protocol,
-      privacy: indexerForm.privacy,
-      enable: indexerForm.enable,
-      enableRss: indexerForm.enableRss,
-      enableAutomaticSearch: indexerForm.enableAutomaticSearch,
-      enableInteractiveSearch: indexerForm.enableInteractiveSearch,
-      priority: indexerForm.priority,
-      baseUrl: indexerForm.baseUrl,
-      apiKey: indexerForm.apiKey,
-      definitionFile: indexerForm.definitionFile,
-      categories: parseNumberList(indexerForm.categories),
-      pluginId: indexerForm.pluginId,
-    };
-    setBusy(true);
-    try {
-      if (indexerForm.id == null) {
-        const created = await api.addIndexer(payload);
-        onNotify(`Added indexer "${created.name}"`);
-      } else {
-        const updated = await api.updateIndexer(indexerForm.id, payload);
-        onNotify(`Updated indexer "${updated.name}"`);
-      }
-      setIndexerForm(null);
-      await onRefresh();
-    } catch (err) {
-      onNotify(errorText(err, 'Failed to save indexer'), true);
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const deleteIndexer = async (indexer: Indexer) => {
     if (!window.confirm(`Delete indexer "${indexer.name}"?`)) return;
     try {
@@ -216,39 +101,6 @@ export const IndexersSettingsPage: React.FC<IndexersSettingsPageProps> = ({
     }
   };
 
-  const saveProxy = async (event: React.FormEvent) => {
-    event.preventDefault();
-    if (!proxyForm) return;
-    const payload: Partial<IndexerProxy> = {
-      name: proxyForm.name,
-      implementation: proxyForm.implementation,
-      implementationName: proxyForm.implementation,
-      configContract: `${proxyForm.implementation}Settings`,
-      host: proxyForm.host,
-      requestTimeout: proxyForm.requestTimeout,
-      sessionTtlMinutes: proxyForm.sessionTtlMinutes,
-      disableMedia: proxyForm.disableMedia,
-      enable: proxyForm.enable,
-    };
-    setBusy(true);
-    try {
-      if (proxyForm.id == null) {
-        const created = await api.addIndexerProxy(payload);
-        onNotify(`Added indexer proxy "${created.name}"`);
-      } else {
-        const updated = await api.updateIndexerProxy(proxyForm.id, payload);
-        onNotify(`Updated indexer proxy "${updated.name}"`);
-      }
-      setProxyForm(null);
-      setProxyTest('');
-      await loadProxies();
-    } catch (err) {
-      onNotify(errorText(err, 'Failed to save indexer proxy'), true);
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const deleteProxy = async (proxy: IndexerProxy) => {
     if (!window.confirm(`Delete indexer proxy "${proxy.name}"?`)) return;
     try {
@@ -257,19 +109,6 @@ export const IndexersSettingsPage: React.FC<IndexersSettingsPageProps> = ({
       await loadProxies();
     } catch (err) {
       onNotify(errorText(err, 'Failed to delete indexer proxy'), true);
-    }
-  };
-
-  const testProxy = async () => {
-    if (!proxyForm) return;
-    setProxyTest('');
-    try {
-      const health = await api.testIndexerProxy(proxyForm.host);
-      setProxyTest(health.message || (health.healthy ? 'OK' : 'Unreachable'));
-    } catch (err) {
-      const message = errorText(err, 'Proxy test failed');
-      setProxyTest(message);
-      onNotify(message, true);
     }
   };
 
@@ -298,7 +137,7 @@ export const IndexersSettingsPage: React.FC<IndexersSettingsPageProps> = ({
 
       <Section title="Indexers">
         <div className="flex justify-end py-3">
-          <button type="button" className={primaryButtonClass} onClick={() => setIndexerForm(blankIndexer())}>
+          <button type="button" className={primaryButtonClass} onClick={() => setIndexerForm(blankIndexerForm())}>
             Add Indexer
           </button>
         </div>
@@ -343,10 +182,7 @@ export const IndexersSettingsPage: React.FC<IndexersSettingsPageProps> = ({
           <button
             type="button"
             className={primaryButtonClass}
-            onClick={() => {
-              setProxyTest('');
-              setProxyForm(blankProxy());
-            }}
+            onClick={() => setProxyForm(blankIndexerProxyForm())}
           >
             Add Proxy
           </button>
@@ -370,19 +206,7 @@ export const IndexersSettingsPage: React.FC<IndexersSettingsPageProps> = ({
                   <button
                     type="button"
                     className={quietButtonClass}
-                    onClick={() => {
-                      setProxyTest('');
-                      setProxyForm({
-                        id: proxy.id,
-                        name: proxy.name,
-                        implementation: proxy.implementation,
-                        host: proxy.host,
-                        requestTimeout: proxy.requestTimeout,
-                        sessionTtlMinutes: proxy.sessionTtlMinutes,
-                        disableMedia: proxy.disableMedia,
-                        enable: proxy.enable,
-                      });
-                    }}
+                    onClick={() => setProxyForm(indexerProxyToForm(proxy))}
                   >
                     Edit
                   </button>
@@ -416,171 +240,23 @@ export const IndexersSettingsPage: React.FC<IndexersSettingsPageProps> = ({
       <SaveBar disabled={!isDirty} saving={saving} onSave={() => void saveOptions()} />
 
       {indexerForm ? (
-        <Modal title={indexerForm.id == null ? 'Add Indexer' : 'Edit Indexer'} onClose={() => setIndexerForm(null)}>
-          <form onSubmit={(event) => void saveIndexer(event)}>
-            <FieldRow label="Name">
-              <TextInput value={indexerForm.name} onChange={(value) => setIndexerForm({ ...indexerForm, name: value })} />
-            </FieldRow>
-            <FieldRow label="Implementation">
-              <Select
-                value={indexerForm.implementation}
-                onChange={(value) => setIndexerForm({ ...indexerForm, implementation: value })}
-                options={[
-                  { value: 'Torznab', label: 'Torznab' },
-                  { value: 'Newznab', label: 'Newznab' },
-                  { value: 'Cardigann', label: 'Cardigann' },
-                  { value: 'Plugin', label: 'Plugin' },
-                ]}
-              />
-            </FieldRow>
-            <FieldRow label="Protocol">
-              <Select
-                value={indexerForm.protocol}
-                onChange={(value) => setIndexerForm({ ...indexerForm, protocol: value })}
-                options={[
-                  { value: 'torrent', label: 'Torrent' },
-                  { value: 'usenet', label: 'Usenet' },
-                ]}
-              />
-            </FieldRow>
-            <FieldRow label="Privacy">
-              <Select
-                value={indexerForm.privacy}
-                onChange={(value) => setIndexerForm({ ...indexerForm, privacy: value })}
-                options={[
-                  { value: 'public', label: 'Public' },
-                  { value: 'semiPrivate', label: 'Semi Private' },
-                  { value: 'private', label: 'Private' },
-                ]}
-              />
-            </FieldRow>
-            <FieldRow label="Enable">
-              <Checkbox checked={indexerForm.enable} onChange={(value) => setIndexerForm({ ...indexerForm, enable: value })} />
-            </FieldRow>
-            <FieldRow label="Enable RSS">
-              <Checkbox
-                checked={indexerForm.enableRss}
-                onChange={(value) => setIndexerForm({ ...indexerForm, enableRss: value })}
-              />
-            </FieldRow>
-            <FieldRow label="Enable Automatic Search">
-              <Checkbox
-                checked={indexerForm.enableAutomaticSearch}
-                onChange={(value) => setIndexerForm({ ...indexerForm, enableAutomaticSearch: value })}
-              />
-            </FieldRow>
-            <FieldRow label="Enable Interactive Search">
-              <Checkbox
-                checked={indexerForm.enableInteractiveSearch}
-                onChange={(value) => setIndexerForm({ ...indexerForm, enableInteractiveSearch: value })}
-              />
-            </FieldRow>
-            <FieldRow label="Priority">
-              <NumberInput
-                value={indexerForm.priority}
-                onChange={(value) => setIndexerForm({ ...indexerForm, priority: value })}
-              />
-            </FieldRow>
-            <FieldRow label="Base URL">
-              <TextInput
-                value={indexerForm.baseUrl}
-                onChange={(value) => setIndexerForm({ ...indexerForm, baseUrl: value })}
-              />
-            </FieldRow>
-            <FieldRow label="API Key">
-              <PasswordInput
-                value={indexerForm.apiKey}
-                onChange={(value) => setIndexerForm({ ...indexerForm, apiKey: value })}
-              />
-            </FieldRow>
-            <FieldRow label="Definition File">
-              <Select
-                value={indexerForm.definitionFile}
-                onChange={(value) => setIndexerForm({ ...indexerForm, definitionFile: value })}
-                options={[
-                  { value: '', label: 'None' },
-                  ...definitions.map((definition) => ({
-                    value: definition.fileName || definition.id,
-                    label: definition.name,
-                  })),
-                ]}
-              />
-            </FieldRow>
-            <FieldRow label="Categories">
-              <TextInput
-                value={indexerForm.categories}
-                onChange={(value) => setIndexerForm({ ...indexerForm, categories: value })}
-                placeholder="2000, 5000"
-              />
-            </FieldRow>
-            <FieldRow label="Plugin ID">
-              <TextInput
-                value={indexerForm.pluginId}
-                onChange={(value) => setIndexerForm({ ...indexerForm, pluginId: value })}
-              />
-            </FieldRow>
-            <div className="pt-3 flex justify-end">
-              <button type="submit" disabled={busy} className={primaryButtonClass}>
-                Save
-              </button>
-            </div>
-          </form>
-        </Modal>
+        <IndexerModal
+          initial={indexerForm}
+          definitions={definitions}
+          plugins={plugins}
+          onClose={() => setIndexerForm(null)}
+          onSaved={onRefresh}
+          onNotify={onNotify}
+        />
       ) : null}
 
       {proxyForm ? (
-        <Modal title={proxyForm.id == null ? 'Add Proxy' : 'Edit Proxy'} onClose={() => setProxyForm(null)}>
-          <form onSubmit={(event) => void saveProxy(event)}>
-            <FieldRow label="Name">
-              <TextInput value={proxyForm.name} onChange={(value) => setProxyForm({ ...proxyForm, name: value })} />
-            </FieldRow>
-            <FieldRow label="Implementation">
-              <Select
-                value={proxyForm.implementation}
-                onChange={(value) => setProxyForm({ ...proxyForm, implementation: value })}
-                options={[
-                  { value: 'FlareSolverr', label: 'FlareSolverr' },
-                  { value: 'Http', label: 'Http' },
-                  { value: 'Socks4', label: 'Socks4' },
-                  { value: 'Socks5', label: 'Socks5' },
-                ]}
-              />
-            </FieldRow>
-            <FieldRow label="Host">
-              <TextInput value={proxyForm.host} onChange={(value) => setProxyForm({ ...proxyForm, host: value })} />
-            </FieldRow>
-            <FieldRow label="Request Timeout">
-              <NumberInput
-                value={proxyForm.requestTimeout}
-                onChange={(value) => setProxyForm({ ...proxyForm, requestTimeout: value })}
-              />
-            </FieldRow>
-            <FieldRow label="Session TTL Minutes">
-              <NumberInput
-                value={proxyForm.sessionTtlMinutes}
-                onChange={(value) => setProxyForm({ ...proxyForm, sessionTtlMinutes: value })}
-              />
-            </FieldRow>
-            <FieldRow label="Disable Media">
-              <Checkbox
-                checked={proxyForm.disableMedia}
-                onChange={(value) => setProxyForm({ ...proxyForm, disableMedia: value })}
-              />
-            </FieldRow>
-            <FieldRow label="Enable">
-              <Checkbox checked={proxyForm.enable} onChange={(value) => setProxyForm({ ...proxyForm, enable: value })} />
-            </FieldRow>
-            {proxyTest ? <p className="text-xs text-slate-300 mt-3">{proxyTest}</p> : null}
-            <div className="pt-3 flex justify-end gap-2">
-              <button type="button" className={quietButtonClass} onClick={() => void testProxy()}>
-                Test
-              </button>
-              <button type="submit" disabled={busy} className={primaryButtonClass}>
-                Save
-              </button>
-            </div>
-          </form>
-        </Modal>
+        <IndexerProxyModal
+          initial={proxyForm}
+          onClose={() => setProxyForm(null)}
+          onSaved={loadProxies}
+          onNotify={onNotify}
+        />
       ) : null}
     </div>
   );

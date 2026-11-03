@@ -1,4 +1,4 @@
-// Package mediacover fetches remote posters and caches them as WebP on disk.
+// Package mediacover fetches remote posters and caches them on disk.
 package mediacover
 
 import (
@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"image"
 	_ "image/gif"
-	_ "image/jpeg"
+	"image/jpeg"
 	_ "image/png"
 	"io"
 	"net"
@@ -14,10 +14,13 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
-	"github.com/eringen/gowebper"
+	_ "golang.org/x/image/webp"
+
+	"github.com/replacearr/replacearr/internal/domain"
 )
 
 // Store caches media cover art under configDir/media/covers.
@@ -36,23 +39,95 @@ func NewStore(configDir string, client *http.Client) *Store {
 	return &Store{Root: root, Client: client}
 }
 
-// LocalURL returns the native API path for a cached poster.
+// LocalURL returns the native API path for a cached poster (keyed by internal entity id).
 func LocalURL(mediaType string, id int64) string {
 	mt := normalizeMediaType(mediaType)
 	return fmt.Sprintf("/api/v1/mediacover/%s/%d/poster.webp", mt, id)
 }
 
-// Path returns the on-disk path for a poster.
-func (s *Store) Path(mediaType string, id int64) string {
-	return filepath.Join(s.Root, normalizeMediaType(mediaType), fmt.Sprintf("%d", id), "poster.webp")
+// CacheKeyTV builds a stable on-disk key for a series (IMDb, else TVDB, else internal id).
+func CacheKeyTV(imdbID string, tvdbID int, fallbackID int64) string {
+	if id := strings.TrimSpace(imdbID); id != "" {
+		return "imdb-" + sanitizeKey(id)
+	}
+	if tvdbID > 0 {
+		return "tvdb-" + strconv.Itoa(tvdbID)
+	}
+	if fallbackID > 0 {
+		return strconv.FormatInt(fallbackID, 10)
+	}
+	return ""
 }
 
-// Ensure fetches remoteURL if needed and writes a webp cache file.
-func (s *Store) Ensure(mediaType string, id int64, remoteURL string) (string, error) {
-	dest := s.Path(mediaType, id)
-	if st, err := os.Stat(dest); err == nil && st.Size() > 0 {
-		return LocalURL(mediaType, id), nil
+// CacheKeyMovie builds a stable on-disk key for a movie (IMDb, else TMDB, else internal id).
+func CacheKeyMovie(imdbID string, tmdbID int, fallbackID int64) string {
+	if id := strings.TrimSpace(imdbID); id != "" {
+		return "imdb-" + sanitizeKey(id)
 	}
+	if tmdbID > 0 {
+		return "tmdb-" + strconv.Itoa(tmdbID)
+	}
+	if fallbackID > 0 {
+		return strconv.FormatInt(fallbackID, 10)
+	}
+	return ""
+}
+
+// PosterRemoteURL returns the remote URL for coverType=poster only.
+func PosterRemoteURL(images []domain.MediaImage) string {
+	for _, img := range images {
+		if !strings.EqualFold(strings.TrimSpace(img.CoverType), "poster") {
+			continue
+		}
+		if u := strings.TrimSpace(img.RemoteURL); u != "" {
+			return u
+		}
+	}
+	return ""
+}
+
+// Path returns the on-disk path for a poster under a stable cache key.
+// The filename stays poster.webp for path stability; payload may be jpeg/png/webp.
+func (s *Store) Path(mediaType, cacheKey string) string {
+	key := sanitizeKey(cacheKey)
+	if key == "" {
+		key = "unknown"
+	}
+	return filepath.Join(s.Root, normalizeMediaType(mediaType), key, "poster.webp")
+}
+
+// Ensure fetches remoteURL if needed and writes a cache file under cacheKey.
+// entityID is used only for the returned LocalURL (API path). legacyID, when > 0,
+// migrates or removes a legacy {legacyID}/poster.webp file.
+func (s *Store) Ensure(mediaType, cacheKey string, entityID int64, remoteURL string, legacyID int64) (string, error) {
+	mt := normalizeMediaType(mediaType)
+	key := sanitizeKey(cacheKey)
+	if key == "" {
+		return "", fmt.Errorf("empty cover cache key")
+	}
+	dest := s.Path(mt, key)
+	if s.validPosterFile(dest) {
+		return LocalURL(mt, entityID), nil
+	}
+	_ = os.Remove(dest)
+
+	// Migrate a good legacy file; drop a poisoned banner/empty file.
+	if legacyID > 0 {
+		legacy := s.Path(mt, strconv.FormatInt(legacyID, 10))
+		if legacy != dest {
+			if s.validPosterFile(legacy) {
+				if err := os.MkdirAll(filepath.Dir(dest), 0o755); err == nil {
+					if err := os.Rename(legacy, dest); err == nil {
+						_ = os.Remove(filepath.Dir(legacy))
+						return LocalURL(mt, entityID), nil
+					}
+				}
+			} else {
+				_ = os.Remove(legacy)
+			}
+		}
+	}
+
 	if strings.TrimSpace(remoteURL) == "" {
 		return "", fmt.Errorf("no remote cover url")
 	}
@@ -77,28 +152,141 @@ func (s *Store) Ensure(mediaType string, id int64, remoteURL string) (string, er
 	if err != nil {
 		return "", err
 	}
-	img, _, err := image.Decode(bytes.NewReader(raw))
+	img, format, err := image.Decode(bytes.NewReader(raw))
 	if err != nil {
 		return "", fmt.Errorf("decode cover: %w", err)
 	}
-	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
-		return "", err
+	if !isPosterAspect(img.Bounds().Dx(), img.Bounds().Dy()) {
+		return "", fmt.Errorf("remote cover is not poster aspect")
 	}
-	f, err := os.Create(dest)
+
+	payload, err := cachePayload(raw, format, img)
 	if err != nil {
 		return "", err
 	}
-	defer f.Close()
-	if err := gowebper.Encode(f, img, &gowebper.Options{Level: gowebper.LevelDefault}); err != nil {
-		_ = os.Remove(dest)
+
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 		return "", err
 	}
-	return LocalURL(mediaType, id), nil
+	tmp := dest + ".tmp"
+	if err := os.WriteFile(tmp, payload, 0o644); err != nil {
+		return "", err
+	}
+	if !s.validPosterFile(tmp) {
+		_ = os.Remove(tmp)
+		return "", fmt.Errorf("cached cover failed validation")
+	}
+	if err := os.Rename(tmp, dest); err != nil {
+		_ = os.Remove(tmp)
+		return "", err
+	}
+	return LocalURL(mt, entityID), nil
 }
 
-// Open returns a reader for a cached poster if present.
-func (s *Store) Open(mediaType string, id int64) (*os.File, error) {
-	return os.Open(s.Path(mediaType, id))
+// cachePayload keeps jpeg/png/webp bytes as-is; other formats are re-encoded as JPEG.
+func cachePayload(raw []byte, format string, img image.Image) ([]byte, error) {
+	switch strings.ToLower(format) {
+	case "jpeg", "png", "webp":
+		return raw, nil
+	default:
+		var buf bytes.Buffer
+		if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 85}); err != nil {
+			return nil, err
+		}
+		return buf.Bytes(), nil
+	}
+}
+
+// Open returns a reader and content type for a valid cached poster.
+func (s *Store) Open(mediaType, cacheKey string) (*os.File, string, error) {
+	dest := s.Path(mediaType, cacheKey)
+	if !s.validPosterFile(dest) {
+		_ = os.Remove(dest)
+		return nil, "", os.ErrNotExist
+	}
+	f, err := os.Open(dest)
+	if err != nil {
+		return nil, "", err
+	}
+	ct, err := sniffFileContentType(f)
+	if err != nil {
+		_ = f.Close()
+		return nil, "", err
+	}
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		_ = f.Close()
+		return nil, "", err
+	}
+	return f, ct, nil
+}
+
+func sniffFileContentType(f *os.File) (string, error) {
+	var hdr [512]byte
+	n, err := f.Read(hdr[:])
+	if err != nil && err != io.EOF {
+		return "", err
+	}
+	return sniffImageContentType(hdr[:n]), nil
+}
+
+func sniffImageContentType(b []byte) string {
+	switch {
+	case len(b) >= 3 && b[0] == 0xff && b[1] == 0xd8 && b[2] == 0xff:
+		return "image/jpeg"
+	case len(b) >= 8 && bytes.Equal(b[:8], []byte("\x89PNG\r\n\x1a\n")):
+		return "image/png"
+	case len(b) >= 12 && string(b[0:4]) == "RIFF" && string(b[8:12]) == "WEBP":
+		return "image/webp"
+	case len(b) >= 6 && (string(b[0:6]) == "GIF87a" || string(b[0:6]) == "GIF89a"):
+		return "image/gif"
+	default:
+		return "application/octet-stream"
+	}
+}
+
+func (s *Store) validPosterFile(path string) bool {
+	st, err := os.Stat(path)
+	if err != nil || st.Size() <= 0 {
+		return false
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	img, _, err := image.Decode(f)
+	if err != nil {
+		return false
+	}
+	b := img.Bounds()
+	return isPosterAspect(b.Dx(), b.Dy())
+}
+
+// isPosterAspect rejects wide banners (e.g. 758x140) that were previously cached as posters.
+func isPosterAspect(w, h int) bool {
+	if w <= 0 || h <= 0 {
+		return false
+	}
+	// Posters are portrait or near-square; banners are much wider than tall.
+	return float64(w) <= float64(h)*1.2
+}
+
+func sanitizeKey(key string) string {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return ""
+	}
+	var b strings.Builder
+	b.Grow(len(key))
+	for _, r := range key {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('_')
+		}
+	}
+	return b.String()
 }
 
 func normalizeMediaType(mediaType string) string {
@@ -109,6 +297,9 @@ func normalizeMediaType(mediaType string) string {
 		return "tv"
 	}
 }
+
+// allowPrivateCoverHosts is set by tests to exercise Ensure against httptest.
+var allowPrivateCoverHosts bool
 
 func (s *Store) validateURL(raw string) error {
 	u, err := url.Parse(raw)
@@ -121,6 +312,9 @@ func (s *Store) validateURL(raw string) error {
 	host := u.Hostname()
 	if host == "" {
 		return fmt.Errorf("empty cover host")
+	}
+	if allowPrivateCoverHosts {
+		return nil
 	}
 	ips, err := net.LookupIP(host)
 	if err != nil {

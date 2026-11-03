@@ -18,7 +18,54 @@ import (
 	"github.com/replacearr/replacearr/internal/config"
 	"github.com/replacearr/replacearr/internal/db"
 	"github.com/replacearr/replacearr/internal/domain"
+	"github.com/replacearr/replacearr/internal/metadata"
 )
+
+func testMetadataService(t *testing.T) *metadata.Service {
+	t.Helper()
+	seriesJSON := `{
+		"tvdbId":371980,"title":"Severance","overview":"Mark leads a team.",
+		"slug":"severance","firstAired":"2022-02-18","imdbId":"tt11280740",
+		"status":"Continuing","runtime":50,"network":"Apple TV+","genres":["Drama"]
+	}`
+	sky := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.HasPrefix(r.URL.Path, "/search"):
+			_, _ = w.Write([]byte("[" + seriesJSON + "]"))
+		case strings.Contains(r.URL.Path, "/shows/"):
+			_, _ = w.Write([]byte(seriesJSON))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(sky.Close)
+
+	dune := `{
+		"TmdbId":693134,"ImdbId":"tt15239678","Title":"Dune: Part Two",
+		"Overview":"Paul.","Year":2024,"Runtime":166,"Status":"released","Studio":"Legendary"
+	}`
+	rad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/movie/693134":
+			_, _ = w.Write([]byte(dune))
+		case strings.HasPrefix(r.URL.Path, "/movie/imdb/"):
+			_, _ = w.Write([]byte("[" + dune + "]"))
+		case r.URL.Path == "/search":
+			_, _ = w.Write([]byte("[" + dune + "]"))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(rad.Close)
+
+	return metadata.New(
+		metadata.WithSkyHookBase(sky.URL),
+		metadata.WithRadarrBase(rad.URL),
+		metadata.WithHTTPClient(http.DefaultClient),
+	)
+}
 
 func setupTestEnv(t *testing.T) (*db.Store, *config.Config, sonarr.SearchFunc) {
 	t.Helper()
@@ -83,7 +130,9 @@ func setupTestEnv(t *testing.T) (*db.Store, *config.Config, sonarr.SearchFunc) {
 
 func TestSonarrV3Compat(t *testing.T) {
 	store, cfg, searchFn := setupTestEnv(t)
-	ts := httptest.NewServer(sonarr.NewHandler(store, cfg, searchFn))
+	h := sonarr.NewHandler(store, cfg, searchFn)
+	h.SetMetadata(testMetadataService(t))
+	ts := httptest.NewServer(h)
 	defer ts.Close()
 
 	// 1. GET /api/v3/system/status (and /sonarr/api/v3/system/status)
@@ -131,7 +180,7 @@ func TestSonarrV3Compat(t *testing.T) {
 		"tvdbId":           371980,
 		"year":             2022,
 		"qualityProfileId": 1,
-		"rootFolderPath":   "/data/tv",
+		"rootFolderPath":   "/data/TV",
 		"monitored":        true,
 	})
 	resp, err = http.Post(ts.URL+"/api/v3/series", "application/json", bytes.NewReader(createBody))
@@ -178,7 +227,16 @@ func TestSonarrV3Compat(t *testing.T) {
 		t.Fatalf("unexpected command record: %+v", cmdRec)
 	}
 
-	// 5. POST /api/v3/release & GET /api/v3/queue
+	// 5. POST /api/v3/release & GET /api/v3/queue (requires an enabled download client)
+	if _, err := store.CreateDownloadClient(domain.DownloadClient{
+		Name:           "Test qBittorrent",
+		Implementation: "qBittorrent",
+		Protocol:       "torrent",
+		Enable:         true,
+		BaseURL:        "http://127.0.0.1:8080",
+	}); err != nil {
+		t.Fatalf("seed download client: %v", err)
+	}
 	grabBody, _ := json.Marshal(map[string]any{
 		"guid":     "guid-1-severance",
 		"title":    "Severance.S01E01.2160p.WEB-DL",
@@ -215,7 +273,9 @@ func TestSonarrV3Compat(t *testing.T) {
 
 func TestRadarrV3Compat(t *testing.T) {
 	store, cfg, searchFn := setupTestEnv(t)
-	ts := httptest.NewServer(radarr.NewHandler(store, cfg, searchFn))
+	h := radarr.NewHandler(store, cfg, searchFn)
+	h.SetMetadata(testMetadataService(t))
+	ts := httptest.NewServer(h)
 	defer ts.Close()
 
 	// 1. GET /api/v3/system/status
@@ -256,7 +316,7 @@ func TestRadarrV3Compat(t *testing.T) {
 		"tmdbId":           693134,
 		"year":             2024,
 		"qualityProfileId": 1,
-		"rootFolderPath":   "/data/movies",
+		"rootFolderPath":   "/data/Movies",
 		"monitored":        true,
 	})
 	resp, err = http.Post(ts.URL+"/api/v3/movie", "application/json", bytes.NewReader(createBody))

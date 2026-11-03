@@ -8,7 +8,7 @@ While Replacearr Phase 1 unifies **Sonarr** (TV), **Radarr** (Movies), and **Pro
 3. **Bazarr** (Subtitles: Subtitle Providers, Language Profiles, Embedded Track Extraction & Sync)
 4. **Whisparr** (Adult Video: Studios, Scenes, SceneFiles)
 
-As evidenced in `.tmp/Prowlarr/src/NzbDrone.Core/Applications/` (`Lidarr/`, `Readarr/`, `Whisparr/`) and `.tmp/Prowlarr/src/NzbDrone.Core/Indexers/NewznabStandardCategory.cs` (categories `3000 Audio`, `6000 XXX`, `7000 Books`), Replacearr's indexer, decision, and download client engine already speaks the Torznab/Newznab search modes (`music-search`, `book-search`, `tv-search`, `movie-search`) required by all of these applications.
+As evidenced in `Prowlarr/src/NzbDrone.Core/Applications/` (`Lidarr/`, `Readarr/`, `Whisparr/`) and `Prowlarr/src/NzbDrone.Core/Indexers/NewznabStandardCategory.cs` (categories `3000 Audio`, `6000 XXX`, `7000 Books`), Replacearr's indexer, decision, and download client engine already speaks the Torznab/Newznab search modes (`music-search`, `book-search`, `tv-search`, `movie-search`) required by all of these applications.
 
 This document provides the architectural blueprint for adding **Lidarr**, **Readarr**, **Bazarr**, and **Whisparr** into Replacearr—either as native domain modules or via Replacearr's `MediaModulePlugin` interface in `pkg/pluginsdk`.
 
@@ -17,7 +17,7 @@ This document provides the architectural blueprint for adding **Lidarr**, **Read
 ## 2. Domain & Compatibility Blueprints per Application
 
 ### 2.1 Lidarr (Music Automation — `/lidarr/api/v1`)
-* **Upstream Prowlarr Reference**: `.tmp/Prowlarr/src/NzbDrone.Core/Applications/Lidarr/Lidarr.cs`, `LidarrV1Proxy.cs`, `LidarrSettings.cs`
+* **Upstream Prowlarr Reference**: `Prowlarr/src/NzbDrone.Core/Applications/Lidarr/Lidarr.cs`, `LidarrV1Proxy.cs`, `LidarrSettings.cs`
 * **API Version & Prefix**: Lidarr uses **`/api/v1`** (mounted in Replacearr at `/lidarr/api/v1/*`).
 * **Entity Hierarchy**:
   ```
@@ -44,7 +44,7 @@ This document provides the architectural blueprint for adding **Lidarr**, **Read
 ---
 
 ### 2.2 Readarr (Books & Audiobooks — `/readarr/api/v1`)
-* **Upstream Prowlarr Reference**: `.tmp/Prowlarr/src/NzbDrone.Core/Applications/Readarr/Readarr.cs`, `ReadarrV1Proxy.cs`, `ReadarrSettings.cs`
+* **Upstream Prowlarr Reference**: `Prowlarr/src/NzbDrone.Core/Applications/Readarr/Readarr.cs`, `ReadarrV1Proxy.cs`, `ReadarrSettings.cs`
 * **API Version & Prefix**: Readarr uses **`/api/v1`** (mounted in Replacearr at `/readarr/api/v1/*`).
 * **Entity Hierarchy**:
   ```
@@ -74,7 +74,7 @@ This document provides the architectural blueprint for adding **Lidarr**, **Read
 * **Architectural Role**: Unlike Lidarr/Readarr (which are forks of `NzbDrone.Core`), **Bazarr** is a Python companion daemon that polls Sonarr (`/api/v3/series`, `/api/v3/episode`, `/api/v3/episodefile`) and Radarr (`/api/v3/movie`, `/api/v3/moviefile`) to discover video files on disk, inspect their embedded audio/subtitle streams, and download missing `.srt`/`.ass` subtitles from external subtitle providers.
 * **Why Native Integration in Replacearr is Transformative**:
   * In a traditional stack, Bazarr must poll Sonarr and Radarr over HTTP or wait for SignalR events to learn when an `EpisodeFile` or `MovieFile` is imported.
-  * Inside Replacearr, the Subtitle Module subscribes directly to the internal `EpisodeImported` and `MovieImported` domain events! The moment `CompletedDownloadService` imports a file into `/data/tv` or `/data/movies`, Replacearr's subtitle pipeline already knows the exact `path`, `sceneName`, `releaseGroup`, `imdbId`, `tvdbId`, `tmdbId`, and `mediaInfo` audio/subtitle tracks.
+  * Inside Replacearr, the Subtitle Module subscribes directly to the internal `EpisodeImported` and `MovieImported` domain events! The moment `CompletedDownloadService` imports a file into `/data/TV` or `/data/Movies`, Replacearr's subtitle pipeline already knows the exact `path`, `sceneName`, `releaseGroup`, `imdbId`, `tvdbId`, `tmdbId`, and `mediaInfo` audio/subtitle tracks.
 * **Core Subsystems Required**:
   1. **Language Profiles (`subtitle_profiles`)**: Target subtitle languages (`en`, `es`, `fr`, etc.), `forced` vs. `normal` vs. `hi` (Hearing Impaired) preferences, and minimum match score thresholds.
   2. **Embedded Track Extraction & Inspection**: `ffprobe` / MKV header parser (`matroska`) to detect existing embedded text (`subrip`, `ass`, `webvtt`) and bitmap (`hdmv_pgs_subtitle`, `dvd_subtitle`) tracks, optionally extracting embedded subtitles to sidecar `.srt` files.
@@ -86,7 +86,7 @@ This document provides the architectural blueprint for adding **Lidarr**, **Read
 ---
 
 ### 2.4 Whisparr (Adult Video Automation — `/whisparr/api/v3`)
-* **Upstream Prowlarr Reference**: `.tmp/Prowlarr/src/NzbDrone.Core/Applications/Whisparr/Whisparr.cs`, `WhisparrV3Proxy.cs`, `WhisparrSettings.cs`
+* **Upstream Prowlarr Reference**: `Prowlarr/src/NzbDrone.Core/Applications/Whisparr/Whisparr.cs`, `WhisparrV3Proxy.cs`, `WhisparrSettings.cs`
 * **API Version & Prefix**: Whisparr is a direct fork of Sonarr/Radarr v3 and exposes **`/api/v3`** (mounted in Replacearr at `/whisparr/api/v3/*`).
 * **Entity Hierarchy**:
   * **Whisparr v2 (Sonarr-based)**: `Studio` (mapped as `Series`) -> `Year/Season` -> `Scene/Episode` (`tvdbId` mapped to **ThePornDB (TPDB)** / **StashDB** scene ID).

@@ -46,22 +46,10 @@ settings:
 	if len(defs) != 1 {
 		t.Fatalf("expected 1 definition, got %d", len(defs))
 	}
-	if defs[0].ID != "custom-tracker" || defs[0].Name != "Custom Tracker" || defs[0].Type != "private" {
+	if defs[0].ID != "custom-tracker" || defs[0].FileName != "custom-tracker" || defs[0].Name != "Custom Tracker" || defs[0].Type != "private" {
 		t.Fatalf("unexpected parsed definition: %+v", defs[0])
 	}
 	if len(defs[0].Links) != 1 || defs[0].Links[0] != "https://tracker.example.org/" {
 		t.Fatalf("unexpected links: %+v", defs[0].Links)
-	}
-
-	// 3. Real Prowlarr definitions directory if cloned in .tmp
-	prowlarrDir := "../../../.tmp/ProwlarrIndexers/definitions/v11"
-	if st, err := os.Stat(prowlarrDir); err == nil && st.IsDir() {
-		realDefs, err := LoadDefinitions(prowlarrDir, 25)
-		if err != nil {
-			t.Fatalf("LoadDefinitions from ProwlarrIndexers failed: %v", err)
-		}
-		if len(realDefs) != 25 {
-			t.Fatalf("expected 25 definitions with limit=25, got %d", len(realDefs))
-		}
 	}
 }

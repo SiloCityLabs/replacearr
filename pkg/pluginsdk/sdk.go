@@ -30,6 +30,29 @@ const (
 	PluginTypeNotification   PluginType = "notification"
 	PluginTypeMediaModule    PluginType = "media_module"
 	PluginTypeNetworkProxy   PluginType = "network_proxy"
+	PluginTypeCompat         PluginType = "compat"
+)
+
+// Built-in compatibility shim plugin IDs (in-process; not subprocess binaries).
+const (
+	CompatPluginSonarr   = "builtin-compat-sonarr"
+	CompatPluginRadarr   = "builtin-compat-radarr"
+	CompatPluginProwlarr = "builtin-compat-prowlarr"
+)
+
+// Built-in notification channel that bridges Notify events to the SPA via SSE.
+const BuiltinBrowserNotifications = "builtin-browser-notifications"
+
+// Stable notification event types delivered to NotificationPlugin.Notify.
+const (
+	EventDownloadStarted  = "download.started"
+	EventDownloadComplete = "download.complete"
+	EventDownloadStalled  = "download.stalled"
+	EventDownloadMoved    = "download.moved"
+	EventJellyfinPickedUp = "jellyfin.picked_up"
+	// EventNotificationTest is sent by the Plugins UI "Test" action. Channels should
+	// always deliver it (ignore per-event enable toggles).
+	EventNotificationTest = "notification.test"
 )
 
 // ConfigFieldSchema describes a user-configurable setting exposed in the Replacearr UI.
@@ -51,6 +74,9 @@ type Manifest struct {
 	Description  string              `json:"description"`
 	Types        []PluginType        `json:"types"`
 	ConfigSchema []ConfigFieldSchema `json:"configSchema"`
+	// DisabledByDefault leaves the plugin off on first discovery until the user enables it.
+	// Ignored once a plugin_configs row exists.
+	DisabledByDefault bool `json:"disabledByDefault,omitempty"`
 }
 
 // SearchRequest represents a Newznab/Torznab-compatible query sent to an IndexerPlugin.
@@ -96,10 +122,27 @@ type IndexerPlugin interface {
 	Search(ctx context.Context, req SearchRequest) ([]Release, error)
 }
 
+// DownloadItem is a download currently tracked by a download client plugin.
+type DownloadItem struct {
+	ID          string  `json:"id"`
+	Title       string  `json:"title"`
+	Status      string  `json:"status"` // downloading, completed, paused, error
+	Progress    float64 `json:"progress"`
+	Size        int64   `json:"size"`
+	SizeLeft    int64   `json:"sizeLeft"`
+	OutputPath  string  `json:"outputPath"`
+	ContentPath string  `json:"contentPath"`
+}
+
 // DownloadClientPlugin is an optional capability interface for plugins that enqueue downloads.
 type DownloadClientPlugin interface {
 	Plugin
 	EnqueueDownload(ctx context.Context, title, downloadURL, protocol string) (string, error)
+}
+
+// DownloadLister is an optional capability for download clients that can report active items.
+type DownloadLister interface {
+	ListDownloads(ctx context.Context) ([]DownloadItem, error)
 }
 
 // MetadataPlugin is an optional capability interface for plugins that look up TV/movie metadata.

@@ -2,19 +2,21 @@ import React, { useState } from 'react';
 import type { AppConfig, DownloadClient, DownloadClientOptions, RemotePathMapping } from '../../types';
 import { api } from '../../api';
 import {
+  blankDownloadClientForm,
+  DownloadClientForm,
+  DownloadClientModal,
+  downloadClientToForm,
+} from '../modals/DownloadClientModal';
+import {
   Checkbox,
   dangerButtonClass,
   errorText,
   FieldRow,
-  Modal,
-  NumberInput,
   PageIntro,
-  PasswordInput,
   primaryButtonClass,
   quietButtonClass,
   SaveBar,
   Section,
-  Select,
   TextInput,
   useDraftState,
 } from './fields';
@@ -28,64 +30,9 @@ interface DownloadClientsPageProps {
   onNotify: (msg: string, isError?: boolean) => void;
 }
 
-interface ClientForm {
-  id: number | null;
-  name: string;
-  implementation: string;
-  protocol: string;
-  enable: boolean;
-  priority: number;
-  host: string;
-  port: number;
-  useSsl: boolean;
-  username: string;
-  password: string;
-  category: string;
-  removeCompletedDownloads: boolean;
-  removeFailedDownloads: boolean;
-}
-
 interface HandlingDraft {
   downloadClientOptions: DownloadClientOptions;
   remotePathMappings: RemotePathMapping[];
-}
-
-function blankClient(): ClientForm {
-  return {
-    id: null,
-    name: '',
-    implementation: 'qBittorrent',
-    protocol: 'torrent',
-    enable: true,
-    priority: 1,
-    host: 'localhost',
-    port: 8080,
-    useSsl: false,
-    username: '',
-    password: '',
-    category: '',
-    removeCompletedDownloads: true,
-    removeFailedDownloads: true,
-  };
-}
-
-function clientToForm(client: DownloadClient): ClientForm {
-  return {
-    id: client.id,
-    name: client.name,
-    implementation: client.implementation,
-    protocol: client.protocol,
-    enable: client.enable,
-    priority: client.priority,
-    host: client.host,
-    port: client.port,
-    useSsl: client.useSsl,
-    username: client.username,
-    password: client.password ?? '',
-    category: client.category,
-    removeCompletedDownloads: client.removeCompletedDownloads,
-    removeFailedDownloads: client.removeFailedDownloads,
-  };
 }
 
 export const DownloadClientsPage: React.FC<DownloadClientsPageProps> = ({
@@ -102,9 +49,7 @@ export const DownloadClientsPage: React.FC<DownloadClientsPageProps> = ({
   };
   const { draft, setDraft, isDirty, saving, setSaving, commit } = useDraftState(source, onDirtyChange);
   const [showAdvanced, setShowAdvanced] = useState(false);
-  const [form, setForm] = useState<ClientForm | null>(null);
-  const [testResult, setTestResult] = useState('');
-  const [busy, setBusy] = useState(false);
+  const [form, setForm] = useState<DownloadClientForm | null>(null);
 
   const patchOptions = <K extends keyof DownloadClientOptions>(key: K, value: DownloadClientOptions[K]) => {
     setDraft((current) => ({
@@ -132,45 +77,6 @@ export const DownloadClientsPage: React.FC<DownloadClientsPageProps> = ({
     }
   };
 
-  const saveClient = async (event: React.FormEvent) => {
-    event.preventDefault();
-    if (!form) return;
-    const payload: Partial<DownloadClient> = {
-      name: form.name,
-      implementation: form.implementation,
-      implementationName: form.implementation,
-      configContract: `${form.implementation}Settings`,
-      protocol: form.protocol,
-      enable: form.enable,
-      priority: form.priority,
-      host: form.host,
-      port: form.port,
-      useSsl: form.useSsl,
-      username: form.username,
-      password: form.password,
-      category: form.category,
-      removeCompletedDownloads: form.removeCompletedDownloads,
-      removeFailedDownloads: form.removeFailedDownloads,
-    };
-    setBusy(true);
-    try {
-      if (form.id == null) {
-        const created = await api.addDownloadClient(payload);
-        onNotify(`Added download client "${created.name}"`);
-      } else {
-        const updated = await api.updateDownloadClient(form.id, payload);
-        onNotify(`Updated download client "${updated.name}"`);
-      }
-      setForm(null);
-      setTestResult('');
-      await onRefresh();
-    } catch (err) {
-      onNotify(errorText(err, 'Failed to save download client'), true);
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const deleteClient = async (client: DownloadClient) => {
     if (!window.confirm(`Delete download client "${client.name}"?`)) return;
     try {
@@ -179,23 +85,6 @@ export const DownloadClientsPage: React.FC<DownloadClientsPageProps> = ({
       await onRefresh();
     } catch (err) {
       onNotify(errorText(err, 'Failed to delete download client'), true);
-    }
-  };
-
-  const testClient = async () => {
-    if (!form) return;
-    setTestResult('');
-    try {
-      const result = await api.testDownloadClient({
-        host: form.host,
-        port: form.port,
-        useSsl: form.useSsl,
-      });
-      setTestResult(`${result.ok ? 'OK' : 'Failed'} — ${result.message} (${result.latencyMs} ms)`);
-    } catch (err) {
-      const message = errorText(err, 'Download client test failed');
-      setTestResult(message);
-      onNotify(message, true);
     }
   };
 
@@ -211,10 +100,7 @@ export const DownloadClientsPage: React.FC<DownloadClientsPageProps> = ({
           <button
             type="button"
             className={primaryButtonClass}
-            onClick={() => {
-              setTestResult('');
-              setForm(blankClient());
-            }}
+            onClick={() => setForm(blankDownloadClientForm())}
           >
             Add Download Client
           </button>
@@ -234,18 +120,13 @@ export const DownloadClientsPage: React.FC<DownloadClientsPageProps> = ({
                     {client.implementation} · {client.protocol} · {client.enable ? 'Enabled' : 'Disabled'} · priority{' '}
                     {client.priority}
                   </p>
-                  <p className="text-[11px] font-mono text-slate-500 truncate">
-                    {client.useSsl ? 'https' : 'http'}://{client.host}:{client.port}
-                  </p>
+                  <p className="text-[11px] font-mono text-slate-500 truncate">{client.baseUrl}</p>
                 </div>
                 <div className="flex gap-2 shrink-0">
                   <button
                     type="button"
                     className={quietButtonClass}
-                    onClick={() => {
-                      setTestResult('');
-                      setForm(clientToForm(client));
-                    }}
+                    onClick={() => setForm(downloadClientToForm(client))}
                   >
                     Edit
                   </button>
@@ -368,81 +249,12 @@ export const DownloadClientsPage: React.FC<DownloadClientsPageProps> = ({
       />
 
       {form ? (
-        <Modal title={form.id == null ? 'Add Download Client' : 'Edit Download Client'} onClose={() => setForm(null)}>
-          <form onSubmit={(event) => void saveClient(event)}>
-            <FieldRow label="Name">
-              <TextInput value={form.name} onChange={(value) => setForm({ ...form, name: value })} />
-            </FieldRow>
-            <FieldRow label="Implementation">
-              <Select
-                value={form.implementation}
-                onChange={(value) => setForm({ ...form, implementation: value })}
-                options={[
-                  { value: 'qBittorrent', label: 'qBittorrent' },
-                  { value: 'Transmission', label: 'Transmission' },
-                  { value: 'SABnzbd', label: 'SABnzbd' },
-                  { value: 'NZBGet', label: 'NZBGet' },
-                  { value: 'Plugin', label: 'Plugin' },
-                ]}
-              />
-            </FieldRow>
-            <FieldRow label="Protocol">
-              <Select
-                value={form.protocol}
-                onChange={(value) => setForm({ ...form, protocol: value })}
-                options={[
-                  { value: 'torrent', label: 'Torrent' },
-                  { value: 'usenet', label: 'Usenet' },
-                ]}
-              />
-            </FieldRow>
-            <FieldRow label="Enable">
-              <Checkbox checked={form.enable} onChange={(value) => setForm({ ...form, enable: value })} />
-            </FieldRow>
-            <FieldRow label="Priority">
-              <NumberInput value={form.priority} onChange={(value) => setForm({ ...form, priority: value })} />
-            </FieldRow>
-            <FieldRow label="Host">
-              <TextInput value={form.host} onChange={(value) => setForm({ ...form, host: value })} />
-            </FieldRow>
-            <FieldRow label="Port">
-              <NumberInput value={form.port} onChange={(value) => setForm({ ...form, port: value })} />
-            </FieldRow>
-            <FieldRow label="Use SSL">
-              <Checkbox checked={form.useSsl} onChange={(value) => setForm({ ...form, useSsl: value })} />
-            </FieldRow>
-            <FieldRow label="Username">
-              <TextInput value={form.username} onChange={(value) => setForm({ ...form, username: value })} />
-            </FieldRow>
-            <FieldRow label="Password">
-              <PasswordInput value={form.password} onChange={(value) => setForm({ ...form, password: value })} />
-            </FieldRow>
-            <FieldRow label="Category">
-              <TextInput value={form.category} onChange={(value) => setForm({ ...form, category: value })} />
-            </FieldRow>
-            <FieldRow label="Remove Completed Downloads">
-              <Checkbox
-                checked={form.removeCompletedDownloads}
-                onChange={(value) => setForm({ ...form, removeCompletedDownloads: value })}
-              />
-            </FieldRow>
-            <FieldRow label="Remove Failed Downloads">
-              <Checkbox
-                checked={form.removeFailedDownloads}
-                onChange={(value) => setForm({ ...form, removeFailedDownloads: value })}
-              />
-            </FieldRow>
-            {testResult ? <p className="text-xs text-slate-300 mt-3">{testResult}</p> : null}
-            <div className="pt-3 flex justify-end gap-2">
-              <button type="button" className={quietButtonClass} onClick={() => void testClient()}>
-                Test
-              </button>
-              <button type="submit" disabled={busy} className={primaryButtonClass}>
-                Save
-              </button>
-            </div>
-          </form>
-        </Modal>
+        <DownloadClientModal
+          initial={form}
+          onClose={() => setForm(null)}
+          onSaved={onRefresh}
+          onNotify={onNotify}
+        />
       ) : null}
     </div>
   );

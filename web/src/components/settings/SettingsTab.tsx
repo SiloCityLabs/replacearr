@@ -1,12 +1,11 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
-  Bell,
   Download,
   FolderCog,
   Gauge,
+  Info,
   ListPlus,
   Palette,
-  Puzzle,
   Radio,
   Settings,
   SlidersHorizontal,
@@ -21,13 +20,13 @@ import type {
   DiscoveredPlugin,
   DownloadClient,
   Indexer,
+  OverviewResponse,
   QualityProfile,
   Role,
   RootFolder,
   User,
 } from '../../types';
 import { api } from '../../api';
-import { PluginsTab } from '../PluginsTab';
 import { UsersRbacTab } from '../UsersRbacTab';
 import { GeneralPage } from './GeneralPage';
 import { UiPage } from './UiPage';
@@ -37,13 +36,14 @@ import { QualityPage } from './QualityPage';
 import { IndexersSettingsPage } from './IndexersSettingsPage';
 import { DownloadClientsPage } from './DownloadClientsPage';
 import { ImportListsPage } from './ImportListsPage';
-import { ConnectPage } from './ConnectPage';
 import { MetadataPage } from './MetadataPage';
 import { TagsPage } from './TagsPage';
+import { SystemInfoPage } from './SystemInfoPage';
 import { errorText } from './fields';
 
 export interface SettingsTabProps {
   config: AppConfig | null;
+  overview: OverviewResponse | null;
   indexers: Indexer[];
   definitions: CardigannDefinition[];
   plugins: DiscoveredPlugin[];
@@ -97,12 +97,6 @@ const CATEGORIES = [
     icon: ListPlus,
   },
   {
-    id: 'connect',
-    title: 'Connect',
-    description: 'Notifications and webhooks.',
-    icon: Bell,
-  },
-  {
     id: 'metadata',
     title: 'Metadata',
     description: 'Language and metadata consumers.',
@@ -133,10 +127,10 @@ const CATEGORIES = [
     icon: Users,
   },
   {
-    id: 'plugins',
-    title: 'Plugins',
-    description: 'Installed Go plugins.',
-    icon: Puzzle,
+    id: 'system',
+    title: 'System',
+    description: 'Version, database mode, uptime, and compat endpoints.',
+    icon: Info,
   },
 ] as const;
 
@@ -144,6 +138,7 @@ type SettingsView = 'home' | (typeof CATEGORIES)[number]['id'];
 
 export const SettingsTab: React.FC<SettingsTabProps> = ({
   config,
+  overview,
   indexers,
   definitions,
   plugins,
@@ -291,6 +286,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
                 config={localConfig}
                 indexers={indexers}
                 definitions={definitions}
+                plugins={plugins}
                 onSave={save}
                 onDirtyChange={onDirtyChange}
                 onRefresh={onRefresh}
@@ -316,7 +312,6 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
                 onDirtyChange={onDirtyChange}
               />
             ) : null}
-            {view === 'connect' ? <ConnectPage config={localConfig} onSave={save} onNotify={onNotify} /> : null}
             {view === 'metadata' ? (
               <MetadataPage config={localConfig} onSave={save} onDirtyChange={onDirtyChange} />
             ) : null}
@@ -341,9 +336,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
                 onNotify={onNotify}
               />
             ) : null}
-            {view === 'plugins' ? (
-              <PluginsTab plugins={plugins} onRefresh={onRefresh} onNotify={onNotify} />
-            ) : null}
+            {view === 'system' ? <SystemInfoPage overview={overview} /> : null}
           </div>
         ) : null}
       </div>

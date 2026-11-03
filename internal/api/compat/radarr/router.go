@@ -17,12 +17,14 @@ import (
 	"github.com/replacearr/replacearr/internal/db"
 	"github.com/replacearr/replacearr/internal/domain"
 	"github.com/replacearr/replacearr/internal/mediacover"
+	"github.com/replacearr/replacearr/internal/metadata"
 )
 
 type Handler struct {
 	store    *db.Store
 	cfg      *config.Config
 	searchFn sonarr.SearchFunc
+	meta     *metadata.Service
 	covers   *mediacover.Store
 	start    time.Time
 
@@ -36,6 +38,7 @@ func NewHandler(store *db.Store, cfg *config.Config, searchFn sonarr.SearchFunc)
 		store:    store,
 		cfg:      cfg,
 		searchFn: searchFn,
+		meta:     metadata.New(),
 		start:    time.Now().UTC(),
 		commands: []domain.CommandRecord{},
 		nextCmd:  1,
@@ -45,6 +48,13 @@ func NewHandler(store *db.Store, cfg *config.Config, searchFn sonarr.SearchFunc)
 // SetCoverStore attaches the shared media cover cache used by /MediaCover routes.
 func (h *Handler) SetCoverStore(covers *mediacover.Store) {
 	h.covers = covers
+}
+
+// SetMetadata attaches the shared Radarr-video lookup service.
+func (h *Handler) SetMetadata(meta *metadata.Service) {
+	if meta != nil {
+		h.meta = meta
+	}
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -332,20 +342,20 @@ func (h *Handler) handleCreateMovie(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid json: "+err.Error())
 		return
 	}
-	if mv.Title == "" && mv.TmdbID > 0 {
-		for _, c := range curatedMovieCatalog() {
-			if c.TmdbID == mv.TmdbID {
-				mv.Title = c.Title
-				if mv.Year == 0 {
-					mv.Year = c.Year
-				}
-				if mv.Overview == "" {
-					mv.Overview = c.Overview
-				}
-				if mv.ImdbID == "" {
-					mv.ImdbID = c.ImdbID
-				}
-				break
+	if mv.Title == "" && mv.TmdbID > 0 && h.meta != nil {
+		if looked, err := h.meta.GetMovieByTMDB(r.Context(), mv.TmdbID); err == nil {
+			mv.Title = looked.Title
+			if mv.Year == 0 {
+				mv.Year = looked.Year
+			}
+			if mv.Overview == "" {
+				mv.Overview = looked.Overview
+			}
+			if mv.ImdbID == "" {
+				mv.ImdbID = looked.ImdbID
+			}
+			if len(mv.Images) == 0 {
+				mv.Images = looked.Images
 			}
 		}
 		if mv.Title == "" {
@@ -411,160 +421,20 @@ func (h *Handler) handleDeleteMovie(w http.ResponseWriter, _ *http.Request, id i
 	writeJSON(w, http.StatusOK, map[string]any{})
 }
 
-func curatedMovieCatalog() []domain.Movie {
-	return []domain.Movie{
-		{
-			Title:               "Dune: Part Two",
-			OriginalTitle:       "Dune: Part Two",
-			SortTitle:           "dune part two",
-			CleanTitle:          "duneparttwo",
-			TitleSlug:           "dune-part-two-693134",
-			Status:              "released",
-			Overview:            "Follow the mythic journey of Paul Atreides as he unites with Chani and the Fremen while on a path of revenge against the conspirators who destroyed his family.",
-			Year:                2024,
-			Runtime:             166,
-			TmdbID:              693134,
-			ImdbID:              "tt15239678",
-			Studio:              "Legendary Pictures",
-			QualityProfileID:    1,
-			Monitored:           true,
-			MinimumAvailability: "released",
-			IsAvailable:         true,
-			Genres:              []string{"Science Fiction", "Adventure"},
-			Images: []domain.MediaImage{
-				{CoverType: "poster", RemoteURL: "https://image.tmdb.org/t/p/original/1pdfLvkbY9ohJlCjQH2CZjjYVvJ.jpg"},
-			},
-		},
-		{
-			Title:               "Oppenheimer",
-			OriginalTitle:       "Oppenheimer",
-			SortTitle:           "oppenheimer",
-			CleanTitle:          "oppenheimer",
-			TitleSlug:           "oppenheimer-872585",
-			Status:              "released",
-			Overview:            "The story of J. Robert Oppenheimer's role in the development of the atomic bomb during World War II.",
-			Year:                2023,
-			Runtime:             181,
-			TmdbID:              872585,
-			ImdbID:              "tt15398776",
-			Studio:              "Universal Pictures",
-			QualityProfileID:    1,
-			Monitored:           true,
-			MinimumAvailability: "released",
-			IsAvailable:         true,
-			Genres:              []string{"Drama", "History"},
-			Images: []domain.MediaImage{
-				{CoverType: "poster", RemoteURL: "https://image.tmdb.org/t/p/original/8Gxv8gSFCU0XGDykEGv7zR1n2ua.jpg"},
-			},
-		},
-		{
-			Title:               "Interstellar",
-			OriginalTitle:       "Interstellar",
-			SortTitle:           "interstellar",
-			CleanTitle:          "interstellar",
-			TitleSlug:           "interstellar-157336",
-			Status:              "released",
-			Overview:            "The adventures of a group of explorers who make use of a newly discovered wormhole to surpass the limitations on human space travel.",
-			Year:                2014,
-			Runtime:             169,
-			TmdbID:              157336,
-			ImdbID:              "tt0816692",
-			Studio:              "Paramount Pictures",
-			QualityProfileID:    1,
-			Monitored:           true,
-			MinimumAvailability: "released",
-			IsAvailable:         true,
-			Genres:              []string{"Adventure", "Drama", "Science Fiction"},
-			Images: []domain.MediaImage{
-				{CoverType: "poster", RemoteURL: "https://image.tmdb.org/t/p/original/gEU2QniE6E77NI6lCU6MxlNBvIx.jpg"},
-			},
-		},
-		{
-			Title:               "Blade Runner 2049",
-			OriginalTitle:       "Blade Runner 2049",
-			SortTitle:           "blade runner 2049",
-			CleanTitle:          "bladerunner2049",
-			TitleSlug:           "blade-runner-2049-335984",
-			Status:              "released",
-			Overview:            "Thirty years after the events of the first film, a new blade runner, LAPD Officer K, unearths a long-buried secret that has the potential to plunge what's left of society into chaos.",
-			Year:                2017,
-			Runtime:             164,
-			TmdbID:              335984,
-			ImdbID:              "tt1856101",
-			Studio:              "Warner Bros. Pictures",
-			QualityProfileID:    1,
-			Monitored:           true,
-			MinimumAvailability: "released",
-			IsAvailable:         true,
-			Genres:              []string{"Science Fiction", "Drama"},
-			Images: []domain.MediaImage{
-				{CoverType: "poster", RemoteURL: "https://image.tmdb.org/t/p/original/gajva2L0rPYkEWjzgFlBXCAVBE5.jpg"},
-			},
-		},
-	}
-}
-
 func (h *Handler) handleMovieLookup(w http.ResponseWriter, r *http.Request) {
 	term := strings.TrimSpace(r.URL.Query().Get("term"))
-	catalog := curatedMovieCatalog()
 	if term == "" {
-		writeJSON(w, http.StatusOK, catalog)
+		writeJSON(w, http.StatusOK, []domain.Movie{})
 		return
 	}
-
-	lower := strings.ToLower(term)
-	if strings.HasPrefix(lower, "tmdb:") {
-		idStr := strings.TrimSpace(strings.TrimPrefix(lower, "tmdb:"))
-		if tmdbID, err := strconv.Atoi(idStr); err == nil && tmdbID > 0 {
-			mv := lookupMovieByTMDB(tmdbID)
-			writeJSON(w, http.StatusOK, []domain.Movie{mv})
-			return
-		}
-	}
-	if strings.HasPrefix(lower, "imdb:") {
-		imdbID := strings.TrimSpace(strings.TrimPrefix(lower, "imdb:"))
-		mv := lookupMovieByIMDB(imdbID)
-		writeJSON(w, http.StatusOK, []domain.Movie{mv})
+	results, err := h.meta.SearchMovies(r.Context(), term)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "movie lookup failed: "+err.Error())
 		return
 	}
-
-	var matched []domain.Movie
-	var rest []domain.Movie
-	for _, item := range catalog {
-		if strings.Contains(strings.ToLower(item.Title), lower) ||
-			strings.Contains(strings.ToLower(item.Overview), lower) ||
-			strings.Contains(item.CleanTitle, lower) {
-			matched = append(matched, item)
-		} else {
-			rest = append(rest, item)
-		}
+	if results == nil {
+		results = []domain.Movie{}
 	}
-
-	if len(matched) == 0 {
-		slug := strings.ToLower(strings.ReplaceAll(term, " ", "-"))
-		clean := strings.ToLower(strings.ReplaceAll(term, " ", ""))
-		matched = append(matched, domain.Movie{
-			Title:               term,
-			OriginalTitle:       term,
-			SortTitle:           strings.ToLower(term),
-			CleanTitle:          clean,
-			TitleSlug:           slug,
-			Status:              "released",
-			Overview:            fmt.Sprintf("%s is a feature film discovered via Replacearr TMDB lookup.", term),
-			Year:                2025,
-			Runtime:             125,
-			TmdbID:              700000 + len(term)*113,
-			ImdbID:              "tt7654321",
-			Studio:              "Replacearr Studios",
-			QualityProfileID:    1,
-			Monitored:           true,
-			MinimumAvailability: "released",
-			IsAvailable:         true,
-			Genres:              []string{"Drama"},
-		})
-	}
-
-	results := append(matched, rest...)
 	writeJSON(w, http.StatusOK, results)
 }
 
@@ -572,73 +442,29 @@ func (h *Handler) handleMovieLookupTMDB(w http.ResponseWriter, r *http.Request) 
 	tmdbStr := strings.TrimSpace(r.URL.Query().Get("tmdbId"))
 	tmdbID, _ := strconv.Atoi(tmdbStr)
 	if tmdbID <= 0 {
-		tmdbID = 693134
+		writeError(w, http.StatusNotFound, "movie not found")
+		return
 	}
-	mv := lookupMovieByTMDB(tmdbID)
+	mv, err := h.meta.GetMovieByTMDB(r.Context(), tmdbID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "movie not found")
+		return
+	}
 	writeJSON(w, http.StatusOK, mv)
 }
 
 func (h *Handler) handleMovieLookupIMDB(w http.ResponseWriter, r *http.Request) {
 	imdbID := strings.TrimSpace(r.URL.Query().Get("imdbId"))
 	if imdbID == "" {
-		imdbID = "tt15239678"
+		writeError(w, http.StatusNotFound, "movie not found")
+		return
 	}
-	mv := lookupMovieByIMDB(imdbID)
+	mv, err := h.meta.GetMovieByIMDB(r.Context(), imdbID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "movie not found")
+		return
+	}
 	writeJSON(w, http.StatusOK, mv)
-}
-
-func lookupMovieByTMDB(tmdbID int) domain.Movie {
-	for _, item := range curatedMovieCatalog() {
-		if item.TmdbID == tmdbID {
-			return item
-		}
-	}
-	return domain.Movie{
-		Title:               fmt.Sprintf("TMDB Movie %d", tmdbID),
-		OriginalTitle:       fmt.Sprintf("TMDB Movie %d", tmdbID),
-		SortTitle:           fmt.Sprintf("tmdb movie %d", tmdbID),
-		CleanTitle:          fmt.Sprintf("tmdbmovie%d", tmdbID),
-		TitleSlug:           fmt.Sprintf("tmdb-movie-%d", tmdbID),
-		Status:              "released",
-		Overview:            fmt.Sprintf("Dynamic TMDB lookup candidate for ID %d", tmdbID),
-		Year:                2024,
-		Runtime:             130,
-		TmdbID:              tmdbID,
-		ImdbID:              fmt.Sprintf("tt%07d", tmdbID),
-		Studio:              "Universal",
-		QualityProfileID:    1,
-		Monitored:           true,
-		MinimumAvailability: "released",
-		IsAvailable:         true,
-		Genres:              []string{"Action", "Drama"},
-	}
-}
-
-func lookupMovieByIMDB(imdbID string) domain.Movie {
-	for _, item := range curatedMovieCatalog() {
-		if strings.EqualFold(item.ImdbID, imdbID) {
-			return item
-		}
-	}
-	return domain.Movie{
-		Title:               fmt.Sprintf("IMDB Movie %s", imdbID),
-		OriginalTitle:       fmt.Sprintf("IMDB Movie %s", imdbID),
-		SortTitle:           fmt.Sprintf("imdb movie %s", strings.ToLower(imdbID)),
-		CleanTitle:          fmt.Sprintf("imdbmovie%s", strings.ToLower(imdbID)),
-		TitleSlug:           fmt.Sprintf("imdb-movie-%s", strings.ToLower(imdbID)),
-		Status:              "released",
-		Overview:            fmt.Sprintf("Dynamic IMDB lookup candidate for %s", imdbID),
-		Year:                2024,
-		Runtime:             128,
-		TmdbID:              654321,
-		ImdbID:              imdbID,
-		Studio:              "Studio",
-		QualityProfileID:    1,
-		Monitored:           true,
-		MinimumAvailability: "released",
-		IsAvailable:         true,
-		Genres:              []string{"Drama"},
-	}
 }
 
 func (h *Handler) handleCalendar(w http.ResponseWriter, _ *http.Request) {
@@ -782,11 +608,20 @@ func (h *Handler) handleGrabRelease(w http.ResponseWriter, r *http.Request) {
 	if payload.Protocol == "" {
 		payload.Protocol = "torrent"
 	}
-	if payload.Size <= 0 {
-		payload.Size = 4831838208
-	}
 	if payload.Indexer == "" {
-		payload.Indexer = "Replacearr Indexer"
+		payload.Indexer = "unknown"
+	}
+	clients, _ := h.store.ListDownloadClients()
+	clientName := ""
+	for _, c := range clients {
+		if c.Enable {
+			clientName = c.Name
+			break
+		}
+	}
+	if clientName == "" {
+		writeError(w, http.StatusUnprocessableEntity, "no enabled download client configured")
+		return
 	}
 	if payload.DownloadID == "" {
 		payload.DownloadID = fmt.Sprintf("radarr-%d", time.Now().UnixNano())
@@ -796,18 +631,17 @@ func (h *Handler) handleGrabRelease(w http.ResponseWriter, r *http.Request) {
 		MediaType:             "movie",
 		MovieID:               payload.MovieID,
 		Title:                 payload.Title,
-		Status:                "downloading",
+		Status:                "queued",
 		TrackedDownloadStatus: "ok",
 		TrackedDownloadState:  "downloading",
 		Size:                  payload.Size,
-		Sizeleft:              payload.Size / 2,
-		Timeleft:              "00:07:15",
-		EstimatedCompletion:   time.Now().UTC().Add(7 * time.Minute),
+		Sizeleft:              payload.Size,
+		Timeleft:              "",
 		Protocol:              payload.Protocol,
-		DownloadClient:        "Replacearr Internal",
+		DownloadClient:        clientName,
 		DownloadID:            payload.DownloadID,
 		Indexer:               payload.Indexer,
-		OutputPath:            "/data/movies",
+		OutputPath:            "",
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -1029,28 +863,23 @@ func (h *Handler) cacheCoverAsync(created *domain.Movie) {
 	if h.covers == nil || created == nil {
 		return
 	}
-	remote := ""
-	for _, img := range created.Images {
-		if strings.TrimSpace(img.RemoteURL) != "" {
-			remote = img.RemoteURL
-			break
-		}
-	}
+	remote := mediacover.PosterRemoteURL(created.Images)
 	if remote == "" {
 		return
 	}
 	go func(id int64, remoteURL string) {
-		local, err := h.covers.Ensure("movie", id, remoteURL)
-		if err != nil || local == "" {
-			return
-		}
 		mv, err := h.store.GetMovieByID(id)
 		if err != nil || mv == nil {
 			return
 		}
+		cacheKey := mediacover.CacheKeyMovie(mv.ImdbID, mv.TmdbID, mv.ID)
+		local, err := h.covers.Ensure("movie", cacheKey, id, remoteURL, id)
+		if err != nil || local == "" {
+			return
+		}
 		updated := false
 		for i := range mv.Images {
-			if mv.Images[i].CoverType == "" || strings.EqualFold(mv.Images[i].CoverType, "poster") {
+			if strings.EqualFold(mv.Images[i].CoverType, "poster") {
 				mv.Images[i].CoverType = "poster"
 				mv.Images[i].URL = local
 				if mv.Images[i].RemoteURL == "" {
@@ -1079,13 +908,28 @@ func (h *Handler) handleMediaCover(w http.ResponseWriter, _ *http.Request, path 
 		writeError(w, http.StatusNotFound, "media cover not found")
 		return
 	}
-	f, err := h.covers.Open("movie", id)
+	mv, gerr := h.store.GetMovieByID(id)
+	if gerr != nil || mv == nil {
+		writeError(w, http.StatusNotFound, "media cover not found")
+		return
+	}
+	cacheKey := mediacover.CacheKeyMovie(mv.ImdbID, mv.TmdbID, mv.ID)
+	remote := mediacover.PosterRemoteURL(mv.Images)
+	f, ct, err := h.covers.Open("movie", cacheKey)
+	if err != nil && remote != "" {
+		if _, eerr := h.covers.Ensure("movie", cacheKey, id, remote, id); eerr == nil {
+			f, ct, err = h.covers.Open("movie", cacheKey)
+		}
+	}
 	if err != nil {
 		writeError(w, http.StatusNotFound, "media cover not found")
 		return
 	}
 	defer f.Close()
-	w.Header().Set("Content-Type", "image/webp")
+	if ct == "" {
+		ct = "application/octet-stream"
+	}
+	w.Header().Set("Content-Type", ct)
 	w.Header().Set("Cache-Control", "public, max-age=86400")
 	_, _ = io.Copy(w, f)
 }

@@ -4,19 +4,19 @@
 
 External ecosystem tools (**Overseerr**, **Jellyseerr**, **Bazarr**, **nzb360**, **Homepage**, **Prowlarr**, **Recyclarr**, **Maintainerr**) interact with Sonarr using its v3 REST API.
 
-In upstream Sonarr (`.tmp/Sonarr/src/Sonarr.Http/V3ApiControllerAttribute.cs`), every v3 controller is decorated with `[V3ApiController]`, which mounts routes at `/api/v3/[controller]`. Replacearr mounts the full Sonarr v3 compatibility surface at both (when `compatModules.sonarr` is enabled):
+In upstream Sonarr (`Sonarr/src/Sonarr.Http/V3ApiControllerAttribute.cs`), every v3 controller is decorated with `[V3ApiController]`, which mounts routes at `/api/v3/[controller]`. Replacearr mounts the full Sonarr v3 compatibility surface at both (when the built-in `builtin-compat-sonarr` plugin is enabled):
 * `/api/v3/*` (default root mount for drop-in Sonarr replacement)
 * `/sonarr/api/v3/*` (virtual URL-base mount when sharing a single host/port with Radarr and Prowlarr clients)
 
-Release search accepts `season` / `episode` (or `ep`) and prefers season-pack tokens for aired/ended series. Manual grabs accept `downloadUrl` (magnet or torrent URL). Posters are served from `/MediaCover/{id}/poster.jpg` as cached WebP when available.
+Release search accepts `season` / `episode` (or `ep`) and prefers season-pack tokens for aired/ended series. Manual grabs accept `downloadUrl` (magnet or torrent URL). Posters are served from `/MediaCover/{id}/poster.jpg` as cached WebP when available (disk key uses IMDb/TVDB; only poster coverType is cached). `POST /series` and empty `GET /episode?seriesId=` sync the episode guide from SkyHook (`shows/{lang}/{tvdbId}/official`).
 
 ---
 
 ## 2. Authentication Expectations
 
 Upstream reference:
-* `.tmp/Sonarr/src/Sonarr.Http/Authentication/ApiKeyAuthenticationHandler.cs`
-* `.tmp/Sonarr/src/Sonarr.Http/Authentication/AuthenticationBuilderExtensions.cs`
+* `Sonarr/src/Sonarr.Http/Authentication/ApiKeyAuthenticationHandler.cs`
+* `Sonarr/src/Sonarr.Http/Authentication/AuthenticationBuilderExtensions.cs`
 
 Sonarr's `ApiKeyAuthenticationHandler.ParseApiKey()` resolves the API key in the following exact precedence order:
 1. **Query Parameter**: `?apikey=<key>` (`Options.QueryName = "apikey"`, or `?access_token=<key>` for SignalR hubs).
@@ -29,7 +29,7 @@ If the key is missing or invalid, upstream returns `401 Unauthorized` (`Response
 
 ## 3. Required Endpoints & Upstream Controller Mapping
 
-| Endpoint Path | Methods | Upstream Controller (`.tmp/Sonarr/src/Sonarr.Api.V3/`) | Primary Ecosystem Consumers |
+| Endpoint Path | Methods | Upstream Controller (`Sonarr/src/Sonarr.Api.V3/`) | Primary Ecosystem Consumers |
 | :--- | :--- | :--- | :--- |
 | `/api/v3/system/status` | `GET` | `System/SystemController.cs` (`SystemResource.cs`) | Overseerr, Jellyseerr, Bazarr, nzb360, Homepage, Prowlarr |
 | `/api/v3/series` | `GET`, `POST` | `Series/SeriesController.cs` (`SeriesResource.cs`) | Overseerr, Jellyseerr, Bazarr, nzb360, Homepage |
@@ -100,7 +100,7 @@ If the key is missing or invalid, upstream returns `401 Unauthorized` (`Response
 * **Upstream Source**: `Series/SeriesController.cs`, `Series/SeriesLookupController.cs`, `Series/SeriesResource.cs`
 * **Query Parameters**:
   * `GET /api/v3/series?tvdbId={tvdbId}&includeSeasonImages={bool}`
-  * `GET /api/v3/series/lookup?term={term}` (supports `tvdb:12345` or free-text title query)
+  * `GET /api/v3/series/lookup?term={term}` (supports `tvdb:12345`, `imdb:tt…`, or free-text title query). Replacearr backs this with Sonarr’s SkyHook client (`https://skyhook.sonarr.tv/v2/tvdb/…`) via `internal/metadata` — not a curated stub catalog.
   * `DELETE /api/v3/series/{id}?deleteFiles={bool}&addImportListExclusion={bool}`
 * **POST Request / GET Response Shape (`SeriesResource`)**:
   * When Overseerr/Jellyseerr adds a series via `POST /api/v3/series`, it sends `title`, `tvdbId`, `qualityProfileId`, `languageProfileId`, `rootFolderPath`, `seasonFolder`, `monitored`, `seriesType` (`standard`, `daily`, `anime`), `seasons`, `tags`, and `addOptions`:
@@ -135,7 +135,7 @@ If the key is missing or invalid, upstream returns `401 Unauthorized` (`Response
     }
   ],
   "year": 2022,
-  "path": "/data/tv/Severance",
+  "path": "/data/TV/Severance",
   "qualityProfileId": 1,
   "languageProfileId": 1,
   "seasonFolder": true,
@@ -149,7 +149,7 @@ If the key is missing or invalid, upstream returns `401 Unauthorized` (`Response
   "tmdbId": 95396,
   "imdbId": "tt11280740",
   "titleSlug": "severance",
-  "rootFolderPath": "/data/tv",
+  "rootFolderPath": "/data/TV",
   "seriesType": "standard",
   "cleanTitle": "severance",
   "genres": ["Drama", "Mystery", "Science Fiction"],
@@ -174,6 +174,7 @@ If the key is missing or invalid, upstream returns `401 Unauthorized` (`Response
 
 ### 4.3 `/api/v3/episode` and `/api/v3/episodefile`
 * **Upstream Source**: `Episodes/EpisodeController.cs`, `Episodes/EpisodeResource.cs`, `EpisodeFiles/EpisodeFileController.cs`, `EpisodeFiles/EpisodeFileResource.cs`
+* **Replacearr behavior**: Episode rows are populated from SkyHook on series create and on first `GET /episode?seriesId=` when the DB has none. `hasFile` is preserved across re-sync. `episodefile` remains an empty list until a dedicated episode-file table exists.
 * **Query Parameters**:
   * `GET /api/v3/episode?seriesId={id}&seasonNumber={num}&episodeIds={ids}&episodeFileId={fileId}&includeSeries={bool}&includeEpisodeFile={bool}&includeImages={bool}`
   * `PUT /api/v3/episode/monitor` with body `{"episodeIds": [1, 2, 3], "monitored": true}`
@@ -205,7 +206,7 @@ If the key is missing or invalid, upstream returns `401 Unauthorized` (`Response
   "seriesId": 1,
   "seasonNumber": 1,
   "relativePath": "Season 01/Severance - S01E01 - Good News About Hell WEBDL-1080p.mkv",
-  "path": "/data/tv/Severance/Season 01/Severance - S01E01 - Good News About Hell WEBDL-1080p.mkv",
+  "path": "/data/TV/Severance/Season 01/Severance - S01E01 - Good News About Hell WEBDL-1080p.mkv",
   "size": 2147483648,
   "dateAdded": "2026-10-23T12:15:00Z",
   "sceneName": "Severance.S01E01.Good.News.About.Hell.1080p.ATVP.WEB-DL.DDP5.1.Atmos.H.264-FLUX",

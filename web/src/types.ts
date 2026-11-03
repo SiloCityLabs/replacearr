@@ -2,26 +2,30 @@ export type NavTab =
   | 'dashboard'
   | 'series'
   | 'movies'
-  | 'search'
   | 'indexers'
   | 'queue'
   | 'plugins'
   | 'users'
-  | 'settings'
-  | 'compatibility';
+  | 'settings';
 
-export interface CompatModulesConfig {
-  sonarr: boolean;
-  radarr: boolean;
-  prowlarr: boolean;
+/** Interactive Search payload — must target a library series or movie. */
+export interface ReleaseSearchRequest {
+  query: string;
+  type?: string;
+  seriesId?: number;
+  movieId?: number;
+  episodeId?: number;
+  tvdbId?: number;
+  tmdbId?: number;
+  season?: number;
+  episode?: number;
+  contextLabel?: string;
 }
 
-export interface BrowserNotificationsConfig {
-  enabled: boolean;
-  onGrab: boolean;
-  onDownload: boolean;
-  onImport: boolean;
-  onHealthIssue: boolean;
+export interface BrowserNotificationEvent {
+  eventType: string;
+  payload: Record<string, unknown>;
+  sentAt: string;
 }
 
 export interface Role {
@@ -241,9 +245,7 @@ export interface DownloadClient {
   protocol: 'torrent' | 'usenet' | string;
   enable: boolean;
   priority: number;
-  host: string;
-  port: number;
-  useSsl: boolean;
+  baseUrl: string;
   username: string;
   password?: string;
   category: string;
@@ -647,8 +649,6 @@ export interface RemotePathMapping {
 
 export interface AppConfig {
   setupComplete: boolean;
-  compatModules: CompatModulesConfig;
-  browserNotifications: BrowserNotificationsConfig;
   host: HostConfig;
   security: SecurityConfig;
   proxy: ProxyConfig;
