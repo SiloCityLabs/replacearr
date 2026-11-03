@@ -162,3 +162,6 @@ Replacearr stores all shared and media-specific state in a single WAL-mode SQLit
    * Querying `GET /sonarr/api/v3/indexer` or `GET /radarr/api/v3/indexer` reads directly from the unified `indexers` table, formatting each row as a `Torznab`/`Newznab` resource so third-party tools inspecting Sonarr/Radarr see all active indexers immediately.
    * Querying `GET /prowlarr/api/v1/applications` returns virtualized self-loopback application entries showing Sonarr and Radarr as pre-connected (`fullSync`) internal modules.
    * External *arr instances (if a user still runs an external Lidarr or Readarr container during migration) can still point to Replacearr's Torznab endpoint (`/{id}/api?t=caps|search|tvsearch|movie|music|book`).
+   * Compat mounts are optional: `AppConfig.compatModules.{sonarr,radarr,prowlarr}` toggles `/sonarr/`, `/radarr/`, `/prowlarr/`, and root `/api/v3/` (Sonarr). Native `/api/v1/*` always stays mounted.
+   * Outbound HTTP uses `internal/httpclient` with `AppConfig.proxy` and `PluginTypeNetworkProxy` layers (HTTP/SOCKS + OpenVPN local bridge). Cover art is cached as WebP under `{config}/media/covers` and served via `/api/v1/mediacover/...` and compat `/MediaCover/...`.
+   * First-run wizard (`setupComplete=false`) collects root folders and optional download client; root folders and download clients are **not** auto-seeded.

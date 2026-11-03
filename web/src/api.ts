@@ -263,8 +263,18 @@ export const api = {
     await request('/api/v1/flaresolverr/clearances', { method: 'DELETE' });
   },
 
-  async searchReleases(query: string, type = 'search'): Promise<ReleaseResult[]> {
+  async searchReleases(
+    query: string,
+    type = 'search',
+    opts?: { season?: number; episode?: number }
+  ): Promise<ReleaseResult[]> {
     const params = new URLSearchParams({ q: query, type });
+    if (opts?.season != null && opts.season >= 0) {
+      params.set('season', String(opts.season));
+    }
+    if (opts?.episode != null && opts.episode >= 0) {
+      params.set('ep', String(opts.episode));
+    }
     const res = await request<unknown>(`/api/v1/search?${params.toString()}`);
     return unwrapArray<ReleaseResult>(res, 'results');
   },
@@ -280,6 +290,22 @@ export const api = {
     movieId?: number;
   }): Promise<QueueItem> {
     return request<QueueItem>('/api/v1/releases/grab', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async manualRelease(payload: {
+    title?: string;
+    magnetUrl?: string;
+    torrentBase64?: string;
+    mediaType?: string;
+    seriesId?: number;
+    episodeId?: number;
+    movieId?: number;
+    seasonNumber?: number;
+  }): Promise<QueueItem> {
+    return request<QueueItem>('/api/v1/releases/manual', {
       method: 'POST',
       body: JSON.stringify(payload),
     });

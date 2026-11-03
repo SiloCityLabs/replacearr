@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Layers, Lock, User as UserIcon, AlertCircle } from 'lucide-react';
+import { Lock, User as UserIcon, AlertCircle } from 'lucide-react';
 
 interface LoginViewProps {
   onLogin: (username: string, password: string) => Promise<void>;
@@ -28,8 +28,14 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLogin }) => {
     <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-4 sm:p-6 overflow-y-auto">
       <div className="w-full max-w-sm bg-slate-900 border border-slate-800 rounded-2xl shadow-xl p-5 sm:p-8 my-4">
         <div className="flex flex-col items-center mb-6">
-          <div className="w-11 h-11 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-center mb-3">
-            <Layers className="w-6 h-6 text-indigo-400" />
+          <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-indigo-500 via-emerald-500 to-amber-500 p-[1px] mb-3">
+            <div className="w-full h-full rounded-[11px] bg-slate-950 flex items-center justify-center overflow-hidden">
+              <img
+                src="/icon-192.png"
+                alt="Replacearr"
+                className="w-8 h-8 object-contain"
+              />
+            </div>
           </div>
           <h1 className="text-lg font-semibold text-white">Replacearr</h1>
         </div>

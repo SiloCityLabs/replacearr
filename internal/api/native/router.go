@@ -14,6 +14,8 @@ import (
 	"github.com/replacearr/replacearr/internal/db"
 	"github.com/replacearr/replacearr/internal/domain"
 	"github.com/replacearr/replacearr/internal/flaresolverr"
+	"github.com/replacearr/replacearr/internal/httpclient"
+	"github.com/replacearr/replacearr/internal/mediacover"
 	"github.com/replacearr/replacearr/internal/pluginhost"
 	"github.com/replacearr/replacearr/pkg/pluginsdk"
 )
@@ -24,22 +26,48 @@ type Server struct {
 	authSvc     *auth.Service
 	pluginMgr   *pluginhost.Manager
 	flareClient *flaresolverr.Client
+	covers      *mediacover.Store
 	version     string
 	startedAt   time.Time
 }
 
 func NewServer(store *db.Store, cfg *config.Config, authSvc *auth.Service, pluginMgr *pluginhost.Manager, version string) *Server {
+	flare := flaresolverr.NewClient()
+	appCfg, _ := store.GetAppConfig()
+	proxyURLs := []string{}
+	if pluginMgr != nil {
+		if u := pluginMgr.ActiveProxyURL(); u != "" {
+			proxyURLs = append(proxyURLs, u)
+		}
+	}
+	httpCli := httpclient.New(httpclient.Options{
+		AppProxy:   appCfg.Proxy,
+		PluginURLs: proxyURLs,
+		Timeout:    30 * time.Second,
+	})
+	flare.SetHTTPClient(httpCli)
+
+	configDir := "./config"
+	if cfg != nil && cfg.ConfigDir != "" {
+		configDir = cfg.ConfigDir
+	}
 	s := &Server{
 		store:       store,
 		cfg:         cfg,
 		authSvc:     authSvc,
 		pluginMgr:   pluginMgr,
-		flareClient: flaresolverr.NewClient(),
+		flareClient: flare,
+		covers:      mediacover.NewStore(configDir, httpCli),
 		version:     version,
 		startedAt:   time.Now().UTC(),
 	}
 	s.seedInitialDemoData()
 	return s
+}
+
+// CoverStore exposes the media cover cache for compat MediaCover mounts.
+func (s *Server) CoverStore() *mediacover.Store {
+	return s.covers
 }
 
 func (s *Server) seedInitialDemoData() {
@@ -77,23 +105,7 @@ func (s *Server) seedInitialDemoData() {
 		})
 	}
 
-	if dcs, err := s.store.ListDownloadClients(); err == nil && len(dcs) == 0 {
-		_, _ = s.store.CreateDownloadClient(domain.DownloadClient{
-			Name:                     "Primary qBittorrent",
-			Implementation:           "qBittorrent",
-			ImplementationName:       "qBittorrent",
-			ConfigContract:           "QBittorrentSettings",
-			Protocol:                 "torrent",
-			Enable:                   true,
-			Priority:                 1,
-			Host:                     "qbittorrent",
-			Port:                     8080,
-			Username:                 "admin",
-			Category:                 "replacearr",
-			RemoveCompletedDownloads: true,
-			RemoveFailedDownloads:    true,
-		})
-	}
+	// Download clients are configured via the first-run wizard — do not seed one.
 
 	if proxies, err := s.store.ListIndexerProxies(); err == nil && len(proxies) == 0 {
 		host := "http://localhost:8191/"
@@ -128,27 +140,71 @@ func (s *Server) activeFlareSolverrHost() string {
 	return "http://localhost:8191/"
 }
 
-func (s *Server) SearchReleases(query string, mediaType string, tvdbID int, tmdbID int) ([]domain.ReleaseResult, error) {
+func (s *Server) SearchReleases(query string, mediaType string, tvdbID int, tmdbID int, season int, episode int) ([]domain.ReleaseResult, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
+	aliases := []string{}
+	if tvdbID > 0 {
+		if all, err := s.store.ListSeries(); err == nil {
+			for _, sr := range all {
+				if sr.TvdbID != tvdbID {
+					continue
+				}
+				if listed, aErr := s.store.ListSeriesAliases(sr.ID); aErr == nil {
+					for _, a := range listed {
+						if a.SeasonNumber == nil || season == 0 || *a.SeasonNumber == season {
+							aliases = append(aliases, a.Title)
+						}
+					}
+				}
+				if season == 0 && episode == 0 && domain.PreferSeasonPackQuery(sr) {
+					season = 1
+				}
+				break
+			}
+		}
+	}
+
+	searchQuery := strings.TrimSpace(query)
+	if len(aliases) > 0 {
+		parts := []string{searchQuery}
+		for _, a := range aliases {
+			if a != "" && !strings.EqualFold(a, searchQuery) {
+				parts = append(parts, a)
+			}
+		}
+		searchQuery = strings.Join(parts, " ")
+	}
+
 	req := pluginsdk.SearchRequest{
-		Query:           query,
+		Query:           searchQuery,
 		Type:            mediaType,
 		TvdbID:          tvdbID,
 		TmdbID:          tmdbID,
+		Season:          season,
+		Episode:         episode,
+		Aliases:         aliases,
 		Limit:           50,
 		FlareSolverrURL: s.activeFlareSolverrHost(),
+		ProxyURL:        s.pluginMgr.ActiveProxyURL(),
 	}
 	pluginResults, _ := s.pluginMgr.SearchAllIndexers(ctx, req)
 
 	// Also synthesize results for configured DB indexers
 	dbIndexers, _ := s.store.ListIndexers()
-	clean := strings.TrimSpace(query)
+	clean := strings.TrimSpace(searchQuery)
 	if clean == "" {
 		clean = "Replacearr.Release"
 	}
 	dotTitle := strings.Join(strings.Fields(clean), ".")
+	if tok := domain.FormatSeasonEpisodeToken(season, episode); tok != "" {
+		if season > 0 && episode == 0 {
+			dotTitle = fmt.Sprintf("%s.%s.COMPLETE", dotTitle, tok)
+		} else {
+			dotTitle = fmt.Sprintf("%s.%s", dotTitle, tok)
+		}
+	}
 	now := time.Now().UTC()
 
 	for _, idx := range dbIndexers {
@@ -157,7 +213,7 @@ func (s *Server) SearchReleases(query string, mediaType string, tvdbID int, tmdb
 		}
 		pluginResults = append(pluginResults, domain.ReleaseResult{
 			Guid:        fmt.Sprintf("db-idx-%d-%d", idx.ID, now.UnixNano()),
-			Title:       fmt.Sprintf("%s.2024.1080p.WEB-DL.DDP5.1.H.264-REPLACEARR", dotTitle),
+			Title:       fmt.Sprintf("%s.1080p.WEB-DL.DDP5.1.H.264-REPLACEARR", dotTitle),
 			IndexerID:   idx.ID,
 			Indexer:     idx.Name,
 			Protocol:    idx.Protocol,
@@ -212,6 +268,8 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/indexers/definitions", s.authSvc.RequirePermission(domain.PermIndexersRead, s.handleListDefinitions))
 	mux.HandleFunc("GET /api/v1/search", s.authSvc.RequirePermission(domain.PermIndexersSearch, s.handleSearch))
 	mux.HandleFunc("POST /api/v1/releases/grab", s.authSvc.RequirePermission(domain.PermDownloadsWrite, s.handleGrabRelease))
+	mux.HandleFunc("POST /api/v1/releases/manual", s.authSvc.RequirePermission(domain.PermDownloadsWrite, s.handleManualRelease))
+	mux.HandleFunc("GET /api/v1/mediacover/{mediaType}/{id}/{name}", s.handleMediaCover)
 
 	// Indexer Proxies & FlareSolverr Integration
 	mux.HandleFunc("GET /api/v1/indexerproxies", s.authSvc.RequirePermission(domain.PermIndexersRead, s.handleListIndexerProxies))
@@ -316,6 +374,7 @@ func (s *Server) handleCreateSeries(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
+	s.cacheCoverAsync("tv", created.ID, created.Images)
 	writeJSON(w, http.StatusCreated, created)
 }
 
@@ -426,6 +485,7 @@ func (s *Server) handleCreateMovie(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
+	s.cacheCoverAsync("movie", created.ID, created.Images)
 	writeJSON(w, http.StatusCreated, created)
 }
 
@@ -555,7 +615,14 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	if searchType == "" {
 		searchType = "search"
 	}
-	results, err := s.SearchReleases(q, searchType, 0, 0)
+	tvdbID, _ := strconv.Atoi(r.URL.Query().Get("tvdbId"))
+	tmdbID, _ := strconv.Atoi(r.URL.Query().Get("tmdbId"))
+	season, _ := strconv.Atoi(r.URL.Query().Get("season"))
+	episode, _ := strconv.Atoi(r.URL.Query().Get("ep"))
+	if episode == 0 {
+		episode, _ = strconv.Atoi(r.URL.Query().Get("episode"))
+	}
+	results, err := s.SearchReleases(q, searchType, tvdbID, tmdbID, season, episode)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
@@ -565,14 +632,16 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleGrabRelease(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Title       string `json:"title"`
-		DownloadURL string `json:"downloadUrl"`
-		Protocol    string `json:"protocol"`
-		Indexer     string `json:"indexer"`
-		Size        int64  `json:"size"`
-		MediaType   string `json:"mediaType"`
-		SeriesID    int64  `json:"seriesId"`
-		MovieID     int64  `json:"movieId"`
+		Title        string `json:"title"`
+		DownloadURL  string `json:"downloadUrl"`
+		Protocol     string `json:"protocol"`
+		Indexer      string `json:"indexer"`
+		Size         int64  `json:"size"`
+		MediaType    string `json:"mediaType"`
+		SeriesID     int64  `json:"seriesId"`
+		MovieID      int64  `json:"movieId"`
+		EpisodeID    int64  `json:"episodeId"`
+		SeasonNumber int    `json:"seasonNumber"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, http.StatusBadRequest, err)
@@ -595,9 +664,19 @@ func (s *Server) handleGrabRelease(w http.ResponseWriter, r *http.Request) {
 		req.Size = 3221225472
 	}
 
+	downloadID := fmt.Sprintf("dl-%d", time.Now().UnixNano())
+	downloadClient := "Primary qBittorrent"
+	if req.DownloadURL != "" && s.pluginMgr != nil {
+		if id, err := s.pluginMgr.EnqueueDownload(r.Context(), req.Title, req.DownloadURL, req.Protocol); err == nil && id != "" {
+			downloadID = id
+			downloadClient = "plugin"
+		}
+	}
+
 	item, err := s.store.CreateQueueItem(domain.QueueItem{
 		MediaType:             req.MediaType,
 		SeriesID:              req.SeriesID,
+		EpisodeID:             req.EpisodeID,
 		MovieID:               req.MovieID,
 		Title:                 req.Title,
 		Status:                "downloading",
@@ -607,8 +686,8 @@ func (s *Server) handleGrabRelease(w http.ResponseWriter, r *http.Request) {
 		Sizeleft:              req.Size / 2,
 		Timeleft:              "00:06:15",
 		Protocol:              req.Protocol,
-		DownloadClient:        "Primary qBittorrent",
-		DownloadID:            fmt.Sprintf("dl-%d", time.Now().UnixNano()),
+		DownloadClient:        downloadClient,
+		DownloadID:            downloadID,
 		Indexer:               req.Indexer,
 		OutputPath:            "/data/downloads/" + req.Title,
 	})
@@ -620,13 +699,92 @@ func (s *Server) handleGrabRelease(w http.ResponseWriter, r *http.Request) {
 	_ = s.store.CreateHistory(domain.HistoryRecord{
 		MediaType:   req.MediaType,
 		SeriesID:    req.SeriesID,
+		EpisodeID:   req.EpisodeID,
 		MovieID:     req.MovieID,
 		SourceTitle: req.Title,
 		Quality:     map[string]any{"quality": map[string]any{"name": "WEBDL-1080p"}},
 		EventType:   "grabbed",
-		Data:        map[string]any{"indexer": req.Indexer, "downloadUrl": req.DownloadURL},
+		Data: map[string]any{
+			"indexer":      req.Indexer,
+			"downloadUrl":  req.DownloadURL,
+			"seasonNumber": req.SeasonNumber,
+		},
 	})
 
+	writeJSON(w, http.StatusCreated, item)
+}
+
+func (s *Server) handleManualRelease(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		MagnetURL      string `json:"magnetUrl"`
+		DownloadURL    string `json:"downloadUrl"`
+		TorrentBase64  string `json:"torrentBase64"`
+		Title          string `json:"title"`
+		SeriesID       int64  `json:"seriesId"`
+		MovieID        int64  `json:"movieId"`
+		EpisodeID      int64  `json:"episodeId"`
+		SeasonNumber   int    `json:"seasonNumber"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	url := strings.TrimSpace(req.DownloadURL)
+	if url == "" {
+		url = strings.TrimSpace(req.MagnetURL)
+	}
+	if url == "" && req.TorrentBase64 == "" {
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("magnetUrl, downloadUrl, or torrentBase64 required"))
+		return
+	}
+	if req.Title == "" {
+		req.Title = "Manual.Release"
+	}
+	mediaType := "tv"
+	if req.MovieID > 0 {
+		mediaType = "movie"
+	}
+	protocol := "torrent"
+	downloadID := fmt.Sprintf("manual-%d", time.Now().UnixNano())
+	if url != "" && s.pluginMgr != nil {
+		if id, err := s.pluginMgr.EnqueueDownload(r.Context(), req.Title, url, protocol); err == nil && id != "" {
+			downloadID = id
+		}
+	}
+	item, err := s.store.CreateQueueItem(domain.QueueItem{
+		MediaType:             mediaType,
+		SeriesID:              req.SeriesID,
+		EpisodeID:             req.EpisodeID,
+		MovieID:               req.MovieID,
+		Title:                 req.Title,
+		Status:                "downloading",
+		TrackedDownloadStatus: "ok",
+		TrackedDownloadState:  "downloading",
+		Size:                  0,
+		Protocol:              protocol,
+		DownloadClient:        "plugin",
+		DownloadID:            downloadID,
+		Indexer:               "manual",
+		OutputPath:            "/data/downloads/" + req.Title,
+	})
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	_ = s.store.CreateHistory(domain.HistoryRecord{
+		MediaType:   mediaType,
+		SeriesID:    req.SeriesID,
+		EpisodeID:   req.EpisodeID,
+		MovieID:     req.MovieID,
+		SourceTitle: req.Title,
+		Quality:     map[string]any{"quality": map[string]any{"name": "Unknown"}},
+		EventType:   "grabbed",
+		Data: map[string]any{
+			"downloadUrl":  url,
+			"seasonNumber": req.SeasonNumber,
+			"manual":       true,
+		},
+	})
 	writeJSON(w, http.StatusCreated, item)
 }
 

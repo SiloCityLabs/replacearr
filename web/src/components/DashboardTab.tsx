@@ -6,14 +6,11 @@ import {
   DownloadCloud,
   Puzzle,
   Search,
-  CheckCircle2,
   Activity,
-  Database,
   ArrowUpRight,
   Clock,
   FolderGit2,
   Sparkles,
-  Server,
   HardDrive,
 } from 'lucide-react';
 import type { AppConfig, NavTab, OverviewResponse, QualityProfile, RootFolder } from '../types';
@@ -71,9 +68,12 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
             <h2 className="text-2xl font-bold text-white tracking-tight">
               Welcome to Replacearr
             </h2>
-            <p className="text-sm text-slate-400 max-w-2xl">
-              Single-binary Go replacement for Sonarr, Radarr, and Prowlarr. Search across all
-              Torznab, Newznab, Cardigann YAML definitions, and Go JSON-RPC plugins in real time.
+            <p className="text-sm text-slate-400 max-w-2xl hidden md:block">
+              Unified TV, movies, and indexer search. Query Torznab, Newznab, Cardigann YAML
+              definitions, and Go JSON-RPC plugins in real time.
+            </p>
+            <p className="text-sm text-slate-400 md:hidden">
+              Search releases across your library and indexers.
             </p>
           </div>
 
@@ -117,7 +117,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
           className="text-left group bg-slate-900/90 hover:bg-slate-900 border border-slate-800 hover:border-indigo-500/40 rounded-xl p-4 transition"
         >
           <div className="flex items-center justify-between mb-3">
-            <span className="text-xs font-medium text-slate-400">TV Series (Sonarr)</span>
+            <span className="text-xs font-medium text-slate-400">TV Series</span>
             <div className="p-2 rounded-lg bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 group-hover:scale-105 transition">
               <Tv className="w-4 h-4" />
             </div>
@@ -134,7 +134,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
           className="text-left group bg-slate-900/90 hover:bg-slate-900 border border-slate-800 hover:border-emerald-500/40 rounded-xl p-4 transition"
         >
           <div className="flex items-center justify-between mb-3">
-            <span className="text-xs font-medium text-slate-400">Movies (Radarr)</span>
+            <span className="text-xs font-medium text-slate-400">Movies</span>
             <div className="p-2 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 group-hover:scale-105 transition">
               <Film className="w-4 h-4" />
             </div>
@@ -151,7 +151,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
           className="text-left group bg-slate-900/90 hover:bg-slate-900 border border-slate-800 hover:border-amber-500/40 rounded-xl p-4 transition"
         >
           <div className="flex items-center justify-between mb-3">
-            <span className="text-xs font-medium text-slate-400">Indexers (Prowlarr)</span>
+            <span className="text-xs font-medium text-slate-400">Indexers</span>
             <div className="p-2 rounded-lg bg-amber-500/10 text-amber-400 border border-amber-500/20 group-hover:scale-105 transition">
               <Radio className="w-4 h-4" />
             </div>
@@ -196,55 +196,6 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
             <ArrowUpRight className="w-3.5 h-3.5 text-purple-400 opacity-0 group-hover:opacity-100 transition" />
           </div>
         </button>
-      </div>
-
-      {/* *arr Compatibility Status Badges Strip */}
-      <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-4">
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div className="flex items-center gap-2.5">
-            <Server className="w-4 h-4 text-emerald-400" />
-            <span className="text-xs font-semibold uppercase tracking-wider text-slate-300">
-              *arr Ecosystem Compatibility Endpoints
-            </span>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2.5">
-            <button
-              onClick={() => onNavigate('compatibility')}
-              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-indigo-500/10 border border-indigo-500/30 text-xs text-indigo-300 hover:bg-indigo-500/20 transition"
-            >
-              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-              <span className="font-semibold">Sonarr v3</span>
-              <code className="text-[11px] font-mono text-indigo-200">/sonarr/api/v3</code>
-            </button>
-
-            <button
-              onClick={() => onNavigate('compatibility')}
-              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-xs text-emerald-300 hover:bg-emerald-500/20 transition"
-            >
-              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-              <span className="font-semibold">Radarr v3</span>
-              <code className="text-[11px] font-mono text-emerald-200">/radarr/api/v3</code>
-            </button>
-
-            <button
-              onClick={() => onNavigate('compatibility')}
-              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-amber-500/10 border border-amber-500/30 text-xs text-amber-300 hover:bg-amber-500/20 transition"
-            >
-              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-              <span className="font-semibold">Prowlarr v1 + Torznab</span>
-              <code className="text-[11px] font-mono text-amber-200">/prowlarr/api/v1</code>
-            </button>
-
-            <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-400">
-              <Database className="w-3.5 h-3.5 text-sky-400" />
-              <span>SQLite WAL:</span>
-              <span className="text-emerald-400 font-medium">
-                {overview?.system?.sqliteWal !== false ? 'Enabled' : 'Standard'}
-              </span>
-            </div>
-          </div>
-        </div>
       </div>
 
       {/* Active Queue Preview + Recent History */}
@@ -412,7 +363,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
               onClick={() => onNavigate('compatibility')}
               className="text-indigo-400 hover:text-indigo-300 font-medium"
             >
-              View API Keys & *arr URLs →
+              View Compatibility Hub →
             </button>
           </div>
         </div>

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -15,12 +16,14 @@ import (
 	"github.com/replacearr/replacearr/internal/config"
 	"github.com/replacearr/replacearr/internal/db"
 	"github.com/replacearr/replacearr/internal/domain"
+	"github.com/replacearr/replacearr/internal/mediacover"
 )
 
 type Handler struct {
 	store    *db.Store
 	cfg      *config.Config
 	searchFn sonarr.SearchFunc
+	covers   *mediacover.Store
 	start    time.Time
 
 	cmdMu    sync.RWMutex
@@ -28,7 +31,7 @@ type Handler struct {
 	nextCmd  int64
 }
 
-func NewHandler(store *db.Store, cfg *config.Config, searchFn sonarr.SearchFunc) http.Handler {
+func NewHandler(store *db.Store, cfg *config.Config, searchFn sonarr.SearchFunc) *Handler {
 	return &Handler{
 		store:    store,
 		cfg:      cfg,
@@ -37,6 +40,11 @@ func NewHandler(store *db.Store, cfg *config.Config, searchFn sonarr.SearchFunc)
 		commands: []domain.CommandRecord{},
 		nextCmd:  1,
 	}
+}
+
+// SetCoverStore attaches the shared media cover cache used by /MediaCover routes.
+func (h *Handler) SetCoverStore(covers *mediacover.Store) {
+	h.covers = covers
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -48,6 +56,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	case path == "/health" && r.Method == http.MethodGet:
 		writeJSON(w, http.StatusOK, []any{})
+
+	case strings.HasPrefix(path, "/MediaCover/") && r.Method == http.MethodGet:
+		h.handleMediaCover(w, r, path)
 
 	case path == "/movie/lookup" && r.Method == http.MethodGet:
 		h.handleMovieLookup(w, r)
@@ -346,6 +357,7 @@ func (h *Handler) handleCreateMovie(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	h.cacheCoverAsync(created)
 	writeJSON(w, http.StatusCreated, created)
 }
 
@@ -733,27 +745,28 @@ func (h *Handler) handleSearchReleases(w http.ResponseWriter, r *http.Request) {
 
 	var results []domain.ReleaseResult
 	if h.searchFn != nil {
-		res, err := h.searchFn(term, "movie", 0, tmdbID)
+		res, err := h.searchFn(term, "movie", 0, tmdbID, 0, 0)
 		if err == nil {
 			results = res
 		}
 	}
 	if results == nil {
-		results = sonarr.DefaultSearchReleases(term, "movie", 0, tmdbID)
+		results = sonarr.DefaultSearchReleases(term, "movie", 0, tmdbID, 0, 0)
 	}
 	writeJSON(w, http.StatusOK, results)
 }
 
 func (h *Handler) handleGrabRelease(w http.ResponseWriter, r *http.Request) {
 	var payload struct {
-		Guid       string `json:"guid"`
-		Title      string `json:"title"`
-		IndexerID  int64  `json:"indexerId"`
-		Indexer    string `json:"indexer"`
-		Size       int64  `json:"size"`
-		Protocol   string `json:"protocol"`
-		MovieID    int64  `json:"movieId"`
-		DownloadID string `json:"downloadId"`
+		Guid        string `json:"guid"`
+		Title       string `json:"title"`
+		IndexerID   int64  `json:"indexerId"`
+		Indexer     string `json:"indexer"`
+		Size        int64  `json:"size"`
+		Protocol    string `json:"protocol"`
+		MovieID     int64  `json:"movieId"`
+		DownloadID  string `json:"downloadId"`
+		DownloadURL string `json:"downloadUrl"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid release payload")
@@ -1010,6 +1023,71 @@ func (h *Handler) handleGetHistory(w http.ResponseWriter, _ *http.Request) {
 		"totalRecords":  len(records),
 		"records":       records,
 	})
+}
+
+func (h *Handler) cacheCoverAsync(created *domain.Movie) {
+	if h.covers == nil || created == nil {
+		return
+	}
+	remote := ""
+	for _, img := range created.Images {
+		if strings.TrimSpace(img.RemoteURL) != "" {
+			remote = img.RemoteURL
+			break
+		}
+	}
+	if remote == "" {
+		return
+	}
+	go func(id int64, remoteURL string) {
+		local, err := h.covers.Ensure("movie", id, remoteURL)
+		if err != nil || local == "" {
+			return
+		}
+		mv, err := h.store.GetMovieByID(id)
+		if err != nil || mv == nil {
+			return
+		}
+		updated := false
+		for i := range mv.Images {
+			if mv.Images[i].CoverType == "" || strings.EqualFold(mv.Images[i].CoverType, "poster") {
+				mv.Images[i].CoverType = "poster"
+				mv.Images[i].URL = local
+				if mv.Images[i].RemoteURL == "" {
+					mv.Images[i].RemoteURL = remoteURL
+				}
+				updated = true
+				break
+			}
+		}
+		if !updated {
+			mv.Images = append(mv.Images, domain.MediaImage{CoverType: "poster", URL: local, RemoteURL: remoteURL})
+		}
+		_, _ = h.store.UpdateMovie(*mv)
+	}(created.ID, remote)
+}
+
+func (h *Handler) handleMediaCover(w http.ResponseWriter, _ *http.Request, path string) {
+	rest := strings.TrimPrefix(path, "/MediaCover/")
+	parts := strings.Split(rest, "/")
+	if len(parts) < 1 {
+		writeError(w, http.StatusNotFound, "media cover not found")
+		return
+	}
+	id, err := strconv.ParseInt(parts[0], 10, 64)
+	if err != nil || id <= 0 || h.covers == nil {
+		writeError(w, http.StatusNotFound, "media cover not found")
+		return
+	}
+	f, err := h.covers.Open("movie", id)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "media cover not found")
+		return
+	}
+	defer f.Close()
+	w.Header().Set("Content-Type", "image/webp")
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	_, _ = io.Copy(w, f)
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

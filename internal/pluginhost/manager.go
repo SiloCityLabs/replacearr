@@ -9,10 +9,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -67,8 +69,82 @@ func NewManager(store *db.Store, pluginDir string, definitionsDir string) *Manag
 	m.registerBuiltin(&builtinFlareSolverrPlugin{})
 	m.registerBuiltin(&builtinMetadataPlugin{})
 	m.registerBuiltin(&builtinDownloadClientPlugin{})
+	m.registerBuiltin(&builtinHTTPProxyPlugin{})
+	m.registerBuiltin(&builtinOpenVPNProxyPlugin{})
 
 	return m
+}
+
+// ActiveProxyURL returns the first enabled network proxy plugin URL, if any.
+func (m *Manager) ActiveProxyURL() string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, id := range m.order {
+		entry, ok := m.entries[id]
+		if !ok || !entry.info.Enabled {
+			continue
+		}
+		if !hasPluginType(entry.info.Manifest.Types, pluginsdk.PluginTypeNetworkProxy) {
+			continue
+		}
+		if entry.builtin != nil {
+			if np, ok := entry.builtin.(pluginsdk.NetworkProxyPlugin); ok {
+				if u := strings.TrimSpace(np.ProxyURL()); u != "" {
+					return u
+				}
+			}
+		} else if entry.proc != nil {
+			var out map[string]string
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			err := entry.proc.call(ctx, "proxy_url", nil, &out)
+			cancel()
+			if err == nil {
+				if u := strings.TrimSpace(out["proxyUrl"]); u != "" {
+					return u
+				}
+			}
+		}
+	}
+	return ""
+}
+
+// EnqueueDownload sends a download to the first enabled download client plugin.
+func (m *Manager) EnqueueDownload(ctx context.Context, title, downloadURL, protocol string) (string, error) {
+	m.mu.RLock()
+	targets := make([]*managedEntry, 0)
+	for _, id := range m.order {
+		entry, ok := m.entries[id]
+		if !ok || !entry.info.Enabled {
+			continue
+		}
+		if hasPluginType(entry.info.Manifest.Types, pluginsdk.PluginTypeDownloadClient) {
+			targets = append(targets, entry)
+		}
+	}
+	m.mu.RUnlock()
+
+	if len(targets) == 0 {
+		return "", errors.New("no enabled download client plugin")
+	}
+	entry := targets[0]
+	if entry.builtin != nil {
+		if dl, ok := entry.builtin.(pluginsdk.DownloadClientPlugin); ok {
+			return dl.EnqueueDownload(ctx, title, downloadURL, protocol)
+		}
+	}
+	if entry.proc != nil {
+		var out map[string]string
+		params := map[string]string{
+			"title":       title,
+			"downloadUrl": downloadURL,
+			"protocol":    protocol,
+		}
+		if err := entry.proc.call(ctx, "enqueue_download", params, &out); err != nil {
+			return "", err
+		}
+		return out["downloadId"], nil
+	}
+	return "", errors.New("download client plugin unavailable")
 }
 
 func (m *Manager) registerBuiltin(p pluginsdk.Plugin) {
@@ -701,12 +777,17 @@ func (b *builtinTorznabIndexerPlugin) Configure(settings map[string]any) error {
 
 func (b *builtinTorznabIndexerPlugin) Search(_ context.Context, req pluginsdk.SearchRequest) ([]pluginsdk.Release, error) {
 	query := strings.TrimSpace(req.Query)
+	if query == "" && len(req.Aliases) > 0 {
+		query = req.Aliases[0]
+	}
 	if query == "" {
 		query = "Replacearr.Featured"
 	}
 	clean := strings.Join(strings.Fields(query), ".")
 	if req.Season > 0 && req.Episode > 0 {
 		clean = fmt.Sprintf("%s.S%02dE%02d", clean, req.Season, req.Episode)
+	} else if req.Season > 0 {
+		clean = fmt.Sprintf("%s.S%02d", clean, req.Season)
 	}
 	slug := strings.ToLower(strings.ReplaceAll(clean, ".", "-"))
 	now := time.Now().UTC()
@@ -877,6 +958,127 @@ func (b *builtinFlareSolverrPlugin) Configure(settings map[string]any) error {
 func (b *builtinFlareSolverrPlugin) Search(_ context.Context, _ pluginsdk.SearchRequest) ([]pluginsdk.Release, error) {
 	// Acts as proxy middleware for protected trackers rather than a standalone release feed.
 	return nil, nil
+}
+
+type builtinHTTPProxyPlugin struct {
+	mu       sync.RWMutex
+	settings map[string]any
+}
+
+func (b *builtinHTTPProxyPlugin) Manifest() pluginsdk.Manifest {
+	return pluginsdk.Manifest{
+		ID:          "builtin-http-proxy",
+		Name:        "HTTP / HTTPS / SOCKS Proxy",
+		Version:     "1.0.0",
+		Author:      "Replacearr Core",
+		Description: "Routes outbound indexer and metadata HTTP through a standard proxy.",
+		Types:       []pluginsdk.PluginType{pluginsdk.PluginTypeNetworkProxy},
+		ConfigSchema: []pluginsdk.ConfigFieldSchema{
+			{Name: "enabled", Label: "Enabled", Type: "checkbox", Default: false, Required: false},
+			{Name: "type", Label: "Proxy Type", Type: "select", Default: "http", Required: false, HelpText: "http, https, or socks5"},
+			{Name: "hostname", Label: "Hostname", Type: "text", Default: "127.0.0.1", Required: false},
+			{Name: "port", Label: "Port", Type: "number", Default: 8080, Required: false},
+			{Name: "username", Label: "Username", Type: "text", Default: "", Required: false},
+			{Name: "password", Label: "Password", Type: "password", Default: "", Required: false},
+		},
+	}
+}
+
+func (b *builtinHTTPProxyPlugin) Configure(settings map[string]any) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.settings = settings
+	return nil
+}
+
+func (b *builtinHTTPProxyPlugin) ProxyURL() string {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	if b.settings == nil {
+		return ""
+	}
+	enabled, _ := b.settings["enabled"].(bool)
+	if !enabled {
+		if s, ok := b.settings["enabled"].(string); !ok || !strings.EqualFold(s, "true") {
+			if n, ok := b.settings["enabled"].(float64); !ok || n == 0 {
+				if !enabled {
+					return ""
+				}
+			}
+		}
+	}
+	host, _ := b.settings["hostname"].(string)
+	if host == "" {
+		return ""
+	}
+	scheme, _ := b.settings["type"].(string)
+	if scheme == "" {
+		scheme = "http"
+	}
+	port := 8080
+	switch v := b.settings["port"].(type) {
+	case float64:
+		port = int(v)
+	case int:
+		port = v
+	case string:
+		if p, err := strconv.Atoi(v); err == nil {
+			port = p
+		}
+	}
+	user, _ := b.settings["username"].(string)
+	pass, _ := b.settings["password"].(string)
+	auth := ""
+	if user != "" {
+		if pass != "" {
+			auth = url.UserPassword(user, pass).String() + "@"
+		} else {
+			auth = url.User(user).String() + "@"
+		}
+	}
+	return fmt.Sprintf("%s://%s%s:%d", scheme, auth, host, port)
+}
+
+type builtinOpenVPNProxyPlugin struct {
+	mu       sync.RWMutex
+	settings map[string]any
+}
+
+func (b *builtinOpenVPNProxyPlugin) Manifest() pluginsdk.Manifest {
+	return pluginsdk.Manifest{
+		ID:          "builtin-openvpn-proxy",
+		Name:        "OpenVPN Local SOCKS Bridge",
+		Version:     "1.0.0",
+		Author:      "Replacearr Core",
+		Description: "Exposes a local SOCKS/HTTP proxy URL typically fronted by OpenVPN (see examples/plugins/openvpn-proxy).",
+		Types:       []pluginsdk.PluginType{pluginsdk.PluginTypeNetworkProxy},
+		ConfigSchema: []pluginsdk.ConfigFieldSchema{
+			{Name: "enabled", Label: "Enabled", Type: "checkbox", Default: false, Required: false},
+			{Name: "proxyUrl", Label: "Local Proxy URL", Type: "text", Default: "socks5://127.0.0.1:1080", Required: false,
+				HelpText: "SOCKS/HTTP URL exposed by your OpenVPN sidecar or openvpn-proxy plugin."},
+		},
+	}
+}
+
+func (b *builtinOpenVPNProxyPlugin) Configure(settings map[string]any) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.settings = settings
+	return nil
+}
+
+func (b *builtinOpenVPNProxyPlugin) ProxyURL() string {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	if b.settings == nil {
+		return ""
+	}
+	enabled, _ := b.settings["enabled"].(bool)
+	if !enabled {
+		return ""
+	}
+	u, _ := b.settings["proxyUrl"].(string)
+	return strings.TrimSpace(u)
 }
 
 // --- Helpers ---

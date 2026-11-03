@@ -3,6 +3,7 @@ package compat_test
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -39,15 +40,25 @@ func setupTestEnv(t *testing.T) (*db.Store, *config.Config, sonarr.SearchFunc) {
 		Environment:  "test",
 	}
 
-	searchFn := func(query string, mediaType string, tvdbID int, tmdbID int) ([]domain.ReleaseResult, error) {
+	searchFn := func(query string, mediaType string, tvdbID int, tmdbID int, season int, episode int) ([]domain.ReleaseResult, error) {
 		q := query
 		if q == "" {
 			q = "Replacearr"
 		}
+		ep := ".S01E01"
+		if season > 0 && episode > 0 {
+			ep = fmt.Sprintf(".S%02dE%02d", season, episode)
+		} else if season > 0 {
+			ep = fmt.Sprintf(".S%02d", season)
+		}
+		title := q + ep + ".2160p.WEB-DL.DDP5.1.Atmos.DV.H.265-GRP"
+		if mediaType == "movie" {
+			title = q + ".2024.2160p.WEB-DL.DDP5.1.Atmos.DV.H.265-GRP"
+		}
 		return []domain.ReleaseResult{
 			{
 				Guid:        "guid-1-" + strings.ToLower(strings.ReplaceAll(q, " ", "-")),
-				Title:       q + ".S01E01.2160p.WEB-DL.DDP5.1.Atmos.DV.H.265-GRP",
+				Title:       title,
 				IndexerID:   1,
 				Indexer:     "TestIndexer",
 				Protocol:    "torrent",

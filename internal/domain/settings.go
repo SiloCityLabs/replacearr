@@ -2,6 +2,9 @@ package domain
 
 // AppConfig is the single settings document stored under the "app" key.
 type AppConfig struct {
+	SetupComplete         bool                  `json:"setupComplete"`
+	CompatModules         CompatModulesConfig   `json:"compatModules"`
+	BrowserNotifications  BrowserNotificationConfig `json:"browserNotifications"`
 	Host                  HostConfig            `json:"host"`
 	Security              SecurityConfig        `json:"security"`
 	Proxy                 ProxyConfig           `json:"proxy"`
@@ -22,6 +25,22 @@ type AppConfig struct {
 	Metadata              MetadataConfig        `json:"metadata"`
 	MetadataConsumers     []MetadataConsumer    `json:"metadataConsumers"`
 	RemotePathMappings    []RemotePathMapping   `json:"remotePathMappings"`
+}
+
+// CompatModulesConfig toggles optional Sonarr/Radarr/Prowlarr compatibility mounts.
+type CompatModulesConfig struct {
+	Sonarr   bool `json:"sonarr"`
+	Radarr   bool `json:"radarr"`
+	Prowlarr bool `json:"prowlarr"`
+}
+
+// BrowserNotificationConfig controls in-browser Notification API events.
+type BrowserNotificationConfig struct {
+	Enabled     bool `json:"enabled"`
+	OnGrab      bool `json:"onGrab"`
+	OnDownload  bool `json:"onDownload"`
+	OnImport    bool `json:"onImport"`
+	OnHealth    bool `json:"onHealthIssue"`
 }
 
 type HostConfig struct {
@@ -265,6 +284,19 @@ const standardEpisodeFormat = "{Series Title} - S{season:00}E{episode:00} - {Epi
 // DefaultAppConfig returns the settings document used when nothing is stored.
 func DefaultAppConfig() AppConfig {
 	return AppConfig{
+		SetupComplete: false,
+		CompatModules: CompatModulesConfig{
+			Sonarr:   true,
+			Radarr:   true,
+			Prowlarr: true,
+		},
+		BrowserNotifications: BrowserNotificationConfig{
+			Enabled:    false,
+			OnGrab:     true,
+			OnDownload: true,
+			OnImport:   true,
+			OnHealth:   true,
+		},
 		Host: HostConfig{
 			BindAddress:  "0.0.0.0",
 			Port:         8989,

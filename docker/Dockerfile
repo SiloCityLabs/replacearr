@@ -8,7 +8,7 @@
 # ------------------------------------------------------------------------------
 # Stage 1: Web UI Builder
 # ------------------------------------------------------------------------------
-FROM node:20-alpine AS web-builder
+FROM node:24-alpine AS web-builder
 
 WORKDIR /app/web
 COPY web/package*.json ./

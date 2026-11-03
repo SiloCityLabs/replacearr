@@ -44,8 +44,12 @@ func TestStoreOpenAndCRUD(t *testing.T) {
 	}
 
 	eps, err := store.ListEpisodes(sr.ID)
-	if err != nil || len(eps) == 0 {
-		t.Fatalf("expected seeded episodes for series, got %d (err: %v)", len(eps), err)
+	if err != nil {
+		t.Fatalf("list episodes: %v", err)
+	}
+	// CreateSeries no longer invents placeholder episodes; import/metadata fills them later.
+	if len(eps) != 0 {
+		t.Fatalf("expected no auto-seeded episodes, got %d", len(eps))
 	}
 
 	mv, err := store.CreateMovie(domain.Movie{

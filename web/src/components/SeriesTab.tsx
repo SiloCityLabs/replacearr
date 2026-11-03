@@ -12,10 +12,13 @@ import {
   Radio,
   Sparkles,
   Calendar,
+  Magnet,
 } from 'lucide-react';
 import type { AppConfig, Episode, QualityProfile, RootFolder, Series } from '../types';
 import { api } from '../api';
 import { formatAppDate } from '../uiPrefs';
+import { useRovingFocus } from '../htpc/useRovingFocus';
+import { ManualTorrentForm, type ManualTorrentTarget } from './ManualTorrentForm';
 
 interface SeriesTabProps {
   series: Series[];
@@ -36,26 +39,35 @@ export const SeriesTab: React.FC<SeriesTabProps> = ({
   onNotify,
   appUi,
 }) => {
+  const tvRoots = rootFolders.filter((r) => r.mediaType === 'tv');
+  const availableRoots = tvRoots.length > 0 ? tvRoots : rootFolders;
+
   const [filterText, setFilterText] = useState('');
-  const [showAddModal, setShowAddModal] = useState(false);
+  const [showAddPanel, setShowAddPanel] = useState(false);
   const [lookupTerm, setLookupTerm] = useState('');
   const [lookupResults, setLookupResults] = useState<Series[]>([]);
   const [lookupLoading, setLookupLoading] = useState(false);
   const [selectedProfileId, setSelectedProfileId] = useState<number>(profiles[0]?.id || 1);
   const [selectedRootFolder, setSelectedRootFolder] = useState<string>(
-    rootFolders.find((r) => r.mediaType === 'tv')?.path || rootFolders[0]?.path || '/data/tv'
+    availableRoots[0]?.path || ''
   );
 
-  // Episode Drawer State
   const [activeSeries, setActiveSeries] = useState<Series | null>(null);
   const [episodes, setEpisodes] = useState<Episode[]>([]);
   const [episodesLoading, setEpisodesLoading] = useState(false);
+  const [manualTarget, setManualTarget] = useState<ManualTorrentTarget | null>(null);
 
   const filteredSeries = series.filter(
     (s) =>
       s.title.toLowerCase().includes(filterText.toLowerCase()) ||
       (s.network || '').toLowerCase().includes(filterText.toLowerCase())
   );
+
+  const gridFocus = useRovingFocus({
+    itemCount: filteredSeries.length,
+    orientation: 'grid',
+    columns: 3,
+  });
 
   const handleLookup = async (e?: React.FormEvent, customTerm?: string) => {
     if (e) e.preventDefault();
@@ -73,16 +85,20 @@ export const SeriesTab: React.FC<SeriesTabProps> = ({
   };
 
   const handleAddSeries = async (candidate: Partial<Series>) => {
+    if (!selectedRootFolder) {
+      onNotify('Add a TV root folder in setup or settings first', true);
+      return;
+    }
     try {
       const created = await api.addSeries({
         ...candidate,
         qualityProfileId: selectedProfileId || 1,
-        rootFolderPath: selectedRootFolder || '/data/tv',
+        rootFolderPath: selectedRootFolder,
         monitored: true,
         seasonFolder: true,
       });
       onNotify(`Added "${created.title}" to TV Series library`);
-      setShowAddModal(false);
+      setShowAddPanel(false);
       await onRefresh();
     } catch (err) {
       onNotify(err instanceof Error ? err.message : 'Failed to add series', true);
@@ -120,21 +136,143 @@ export const SeriesTab: React.FC<SeriesTabProps> = ({
     return poster?.remoteUrl || poster?.url || null;
   };
 
+  const openAddPanel = () => {
+    setShowAddPanel(true);
+    setSelectedRootFolder(availableRoots[0]?.path || '');
+    if (lookupResults.length === 0) {
+      setLookupTerm('Severance');
+      void handleLookup(undefined, 'Severance');
+    }
+  };
+
+  if (showAddPanel) {
+    return (
+      <div className="min-h-[70vh] flex flex-col bg-slate-900/90 border border-slate-800 rounded-xl overflow-hidden">
+        <div className="p-5 border-b border-slate-800 flex items-center justify-between shrink-0">
+          <div className="flex items-center gap-2.5">
+            <Sparkles className="w-5 h-5 text-indigo-400" />
+            <div>
+              <h3 className="text-base font-bold text-white">Add TV Series</h3>
+              <p className="text-xs text-slate-400">
+                Lookup metadata and add to your library
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => setShowAddPanel(false)}
+            className="p-1.5 rounded-lg bg-slate-800 text-slate-400 hover:text-white"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="p-5 border-b border-slate-800 space-y-4 bg-slate-950/50 shrink-0">
+          <form onSubmit={(e) => void handleLookup(e)} className="flex gap-2">
+            <input
+              type="text"
+              value={lookupTerm}
+              onChange={(e) => setLookupTerm(e.target.value)}
+              placeholder="Enter series title or TVDB ID..."
+              className="flex-1 px-3.5 py-2.5 bg-slate-900 border border-slate-800 rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+              autoFocus
+            />
+            <button
+              type="submit"
+              disabled={lookupLoading}
+              className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-xl transition"
+            >
+              {lookupLoading ? 'Searching...' : 'Lookup'}
+            </button>
+          </form>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-[11px] font-medium text-slate-400 mb-1">
+                Root Folder
+              </label>
+              <select
+                value={selectedRootFolder}
+                onChange={(e) => setSelectedRootFolder(e.target.value)}
+                className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-xs text-white"
+              >
+                {availableRoots.length === 0 ? (
+                  <option value="">No root folders configured</option>
+                ) : (
+                  availableRoots.map((rf) => (
+                    <option key={rf.id} value={rf.path}>
+                      {rf.path} ({rf.mediaType})
+                    </option>
+                  ))
+                )}
+              </select>
+            </div>
+            <div>
+              <label className="block text-[11px] font-medium text-slate-400 mb-1">
+                Quality Profile
+              </label>
+              <select
+                value={selectedProfileId}
+                onChange={(e) => setSelectedProfileId(Number(e.target.value))}
+                className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-xs text-white"
+              >
+                {profiles.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-5 space-y-3">
+          {lookupResults.length === 0 && !lookupLoading ? (
+            <p className="text-sm text-slate-400 text-center py-12">
+              Search for a series title to see lookup results.
+            </p>
+          ) : null}
+          {lookupResults.map((item, idx) => (
+            <div
+              key={`${item.tvdbId || idx}-${item.title}`}
+              className="p-4 rounded-xl bg-slate-950 border border-slate-800 flex items-start justify-between gap-4"
+            >
+              <div className="space-y-1 min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h4 className="text-sm font-bold text-white">{item.title}</h4>
+                  <span className="text-xs font-mono text-indigo-400">({item.year})</span>
+                  {item.network && (
+                    <span className="text-[11px] px-2 py-0.5 rounded bg-slate-900 border border-slate-800 text-slate-300">
+                      {item.network}
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-slate-400 line-clamp-2">{item.overview}</p>
+                <div className="text-[11px] font-mono text-slate-500">
+                  TVDB: {item.tvdbId} • Status: {item.status || 'continuing'}
+                </div>
+              </div>
+              <button
+                onClick={() => void handleAddSeries(item)}
+                className="px-3.5 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shrink-0 transition"
+              >
+                + Add Series
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
-      {/* Header & Controls */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-slate-900/90 border border-slate-800 rounded-xl p-4">
         <div className="flex items-center gap-3">
           <div className="p-2.5 rounded-xl bg-indigo-500/15 text-indigo-400 border border-indigo-500/30">
             <Tv className="w-5 h-5" />
           </div>
           <div>
-            <div className="flex flex-wrap items-center gap-2">
-              <h2 className="text-lg font-bold text-white">TV Series Library</h2>
-              <span className="text-xs px-2 py-0.5 rounded-full bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 font-mono">
-                Sonarr v3 Compatible
-              </span>
-            </div>
+            <h2 className="text-lg font-bold text-white">TV Series Library</h2>
             <p className="text-xs text-slate-400">
               {series.length} series monitored • Automatic season & episode tracking
             </p>
@@ -148,18 +286,12 @@ export const SeriesTab: React.FC<SeriesTabProps> = ({
               type="text"
               value={filterText}
               onChange={(e) => setFilterText(e.target.value)}
-              placeholder="Filter library..."
+              placeholder="Search library..."
               className="w-full pl-9 pr-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
             />
           </div>
           <button
-            onClick={() => {
-              setShowAddModal(true);
-              if (lookupResults.length === 0) {
-                setLookupTerm('Severance');
-                void handleLookup(undefined, 'Severance');
-              }
-            }}
+            onClick={openAddPanel}
             className="inline-flex items-center justify-center gap-2 px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-lg shadow-lg shadow-indigo-600/20 transition shrink-0"
           >
             <Plus className="w-4 h-4" />
@@ -168,20 +300,15 @@ export const SeriesTab: React.FC<SeriesTabProps> = ({
         </div>
       </div>
 
-      {/* Series Poster Grid */}
       {filteredSeries.length === 0 ? (
         <div className="bg-slate-900/60 border border-dashed border-slate-800 rounded-2xl p-12 text-center">
           <Tv className="w-10 h-10 text-slate-600 mx-auto mb-3" />
           <h3 className="text-base font-semibold text-slate-200">No TV Series Found</h3>
           <p className="text-xs text-slate-400 mt-1 mb-5">
-            Add your first series using the TVDB/Sonarr lookup modal to begin monitoring episodes.
+            Look up a series by title or TVDB ID to start monitoring episodes.
           </p>
           <button
-            onClick={() => {
-              setShowAddModal(true);
-              setLookupTerm('Severance');
-              void handleLookup(undefined, 'Severance');
-            }}
+            onClick={openAddPanel}
             className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-lg transition"
           >
             <Plus className="w-4 h-4" />
@@ -190,16 +317,16 @@ export const SeriesTab: React.FC<SeriesTabProps> = ({
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
-          {filteredSeries.map((s) => {
+          {filteredSeries.map((s, index) => {
             const posterUrl = getPosterUrl(s);
             return (
               <div
                 key={s.id}
-                className="group bg-slate-900/90 border border-slate-800 hover:border-indigo-500/40 rounded-xl overflow-hidden flex flex-col justify-between transition shadow-lg"
+                {...gridFocus.itemProps(index)}
+                className="group bg-slate-900/90 border border-slate-800 hover:border-indigo-500/40 rounded-xl overflow-hidden flex flex-col justify-between transition shadow-lg outline-none"
               >
-                <div className="p-4 flex gap-4">
-                  {/* Poster Artwork */}
-                  <div className="w-24 h-36 rounded-lg bg-gradient-to-br from-indigo-900/60 via-slate-900 to-slate-950 border border-slate-800 shrink-0 overflow-hidden flex items-center justify-center relative">
+                <div className="p-4 flex flex-col sm:flex-row gap-4">
+                  <div className="w-28 h-40 sm:w-24 sm:h-36 mx-auto sm:mx-0 rounded-lg bg-gradient-to-br from-indigo-900/60 via-slate-900 to-slate-950 border border-slate-800 shrink-0 overflow-hidden flex items-center justify-center relative">
                     {posterUrl ? (
                       <img
                         src={posterUrl}
@@ -217,7 +344,6 @@ export const SeriesTab: React.FC<SeriesTabProps> = ({
                     </span>
                   </div>
 
-                  {/* Metadata */}
                   <div className="flex-1 min-w-0">
                     <div className="flex items-start justify-between gap-2">
                       <h3 className="text-base font-bold text-white truncate">{s.title}</h3>
@@ -242,7 +368,7 @@ export const SeriesTab: React.FC<SeriesTabProps> = ({
                       <span>{s.runtime || 45}m</span>
                     </div>
 
-                    <p className="mt-2 text-xs text-slate-400 line-clamp-3 leading-relaxed">
+                    <p className="mt-2 text-xs text-slate-400 line-clamp-3 leading-relaxed hidden md:block">
                       {s.overview || 'Monitored TV series in Replacearr unified database.'}
                     </p>
 
@@ -253,11 +379,10 @@ export const SeriesTab: React.FC<SeriesTabProps> = ({
                   </div>
                 </div>
 
-                {/* Action Footer */}
                 <div className="px-4 py-3 bg-slate-950/70 border-t border-slate-800/80 flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <button
-                      onClick={() => openEpisodesDrawer(s)}
+                      onClick={() => void openEpisodesDrawer(s)}
                       className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-800 text-xs font-medium transition"
                     >
                       <ListVideo className="w-3.5 h-3.5 text-indigo-400" />
@@ -268,12 +393,25 @@ export const SeriesTab: React.FC<SeriesTabProps> = ({
                       className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-indigo-500/15 hover:bg-indigo-500/25 text-indigo-300 border border-indigo-500/30 text-xs font-medium transition"
                     >
                       <Radio className="w-3.5 h-3.5" />
-                      <span>Search Releases</span>
+                      <span>Search</span>
+                    </button>
+                    <button
+                      onClick={() =>
+                        setManualTarget({
+                          title: s.title,
+                          mediaType: 'tv',
+                          seriesId: s.id,
+                        })
+                      }
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 text-xs font-medium transition"
+                    >
+                      <Magnet className="w-3.5 h-3.5" />
+                      <span>Add torrent</span>
                     </button>
                   </div>
 
                   <button
-                    onClick={() => handleDeleteSeries(s)}
+                    onClick={() => void handleDeleteSeries(s)}
                     title="Delete series"
                     className="p-1.5 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition"
                   >
@@ -286,7 +424,6 @@ export const SeriesTab: React.FC<SeriesTabProps> = ({
         </div>
       )}
 
-      {/* Episode List Drawer / Modal */}
       {activeSeries && (
         <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex justify-end">
           <div className="w-full max-w-2xl bg-slate-900 border-l border-slate-800 h-full flex flex-col justify-between shadow-2xl">
@@ -345,7 +482,8 @@ export const SeriesTab: React.FC<SeriesTabProps> = ({
                         )}
                       </div>
                       <p className="text-xs text-slate-400 mt-1 truncate">
-                        {ep.overview || `Air Date: ${ep.airDate ? formatAppDate(ep.airDate, appUi) : 'TBA'}`}
+                        {ep.overview ||
+                          `Air Date: ${ep.airDate ? formatAppDate(ep.airDate, appUi) : 'TBA'}`}
                       </p>
                     </div>
 
@@ -366,141 +504,67 @@ export const SeriesTab: React.FC<SeriesTabProps> = ({
                       >
                         Search
                       </button>
+                      <button
+                        onClick={() =>
+                          setManualTarget({
+                            title: `${activeSeries.title} S${String(ep.seasonNumber).padStart(2, '0')}E${String(ep.episodeNumber).padStart(2, '0')}`,
+                            mediaType: 'tv',
+                            seriesId: activeSeries.id,
+                            episodeId: ep.id,
+                            seasonNumber: ep.seasonNumber,
+                          })
+                        }
+                        className="px-2.5 py-1.5 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 text-xs font-medium transition"
+                        title="Add torrent"
+                      >
+                        <Magnet className="w-3.5 h-3.5" />
+                      </button>
                     </div>
                   </div>
                 ))
               )}
             </div>
 
-            <div className="p-4 border-t border-slate-800 bg-slate-950 flex items-center justify-between">
+            <div className="p-4 border-t border-slate-800 bg-slate-950 flex items-center justify-between gap-2">
               <span className="text-xs text-slate-400">
                 {episodes.length} episodes tracked in SQLite
               </span>
-              <button
-                onClick={() => {
-                  const title = activeSeries.title;
-                  setActiveSeries(null);
-                  onSearchReleases(title, 'tvsearch');
-                }}
-                className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold transition"
-              >
-                Search Full Series Pack
-              </button>
+              <div className="flex gap-2">
+                <button
+                  onClick={() =>
+                    setManualTarget({
+                      title: activeSeries.title,
+                      mediaType: 'tv',
+                      seriesId: activeSeries.id,
+                    })
+                  }
+                  className="px-3 py-2 rounded-lg bg-amber-500/15 text-amber-300 border border-amber-500/30 text-xs font-semibold transition"
+                >
+                  Add torrent
+                </button>
+                <button
+                  onClick={() => {
+                    const title = activeSeries.title;
+                    setActiveSeries(null);
+                    onSearchReleases(title, 'tvsearch');
+                  }}
+                  className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold transition"
+                >
+                  Search Full Series Pack
+                </button>
+              </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* Add Series Lookup Modal */}
-      {showAddModal && (
-        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm overflow-y-auto flex items-start justify-center p-4">
-          <div className="w-full max-w-3xl bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[calc(100dvh-2rem)] my-auto">
-            <div className="p-5 border-b border-slate-800 flex items-center justify-between">
-              <div className="flex items-center gap-2.5">
-                <Sparkles className="w-5 h-5 text-indigo-400" />
-                <div>
-                  <h3 className="text-base font-bold text-white">
-                    Add TV Series (/api/v1/series/lookup)
-                  </h3>
-                  <p className="text-xs text-slate-400">
-                    Search TV metadata and add directly to Replacearr
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={() => setShowAddModal(false)}
-                className="p-1.5 rounded-lg bg-slate-800 text-slate-400 hover:text-white"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <div className="p-5 border-b border-slate-800 space-y-4 bg-slate-950/50">
-              <form onSubmit={(e) => handleLookup(e)} className="flex gap-2">
-                <input
-                  type="text"
-                  value={lookupTerm}
-                  onChange={(e) => setLookupTerm(e.target.value)}
-                  placeholder="Enter series title or TVDB ID (e.g. Severance, Silo, The Bear, Fallout)..."
-                  className="flex-1 px-3.5 py-2.5 bg-slate-900 border border-slate-800 rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
-                />
-                <button
-                  type="submit"
-                  disabled={lookupLoading}
-                  className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-xl transition"
-                >
-                  {lookupLoading ? 'Searching...' : 'Lookup'}
-                </button>
-              </form>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[11px] font-medium text-slate-400 mb-1">
-                    Root Folder
-                  </label>
-                  <select
-                    value={selectedRootFolder}
-                    onChange={(e) => setSelectedRootFolder(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-xs text-white"
-                  >
-                    {rootFolders.map((rf) => (
-                      <option key={rf.id} value={rf.path}>
-                        {rf.path} ({rf.mediaType})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-[11px] font-medium text-slate-400 mb-1">
-                    Quality Profile
-                  </label>
-                  <select
-                    value={selectedProfileId}
-                    onChange={(e) => setSelectedProfileId(Number(e.target.value))}
-                    className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-xs text-white"
-                  >
-                    {profiles.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-            </div>
-
-            <div className="flex-1 overflow-y-auto p-5 space-y-3">
-              {lookupResults.map((item, idx) => (
-                <div
-                  key={`${item.tvdbId || idx}-${item.title}`}
-                  className="p-4 rounded-xl bg-slate-950 border border-slate-800 flex items-start justify-between gap-4"
-                >
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <h4 className="text-sm font-bold text-white">{item.title}</h4>
-                      <span className="text-xs font-mono text-indigo-400">({item.year})</span>
-                      {item.network && (
-                        <span className="text-[11px] px-2 py-0.5 rounded bg-slate-900 border border-slate-800 text-slate-300">
-                          {item.network}
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-xs text-slate-400 line-clamp-2">{item.overview}</p>
-                    <div className="text-[11px] font-mono text-slate-500">
-                      TVDB: {item.tvdbId} • Status: {item.status || 'continuing'}
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => handleAddSeries(item)}
-                    className="px-3.5 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shrink-0 transition"
-                  >
-                    + Add Series
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
+      {manualTarget && (
+        <ManualTorrentForm
+          target={manualTarget}
+          onClose={() => setManualTarget(null)}
+          onNotify={onNotify}
+          onSuccess={onRefresh}
+        />
       )}
     </div>
   );

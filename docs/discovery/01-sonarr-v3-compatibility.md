@@ -4,9 +4,11 @@
 
 External ecosystem tools (**Overseerr**, **Jellyseerr**, **Bazarr**, **nzb360**, **Homepage**, **Prowlarr**, **Recyclarr**, **Maintainerr**) interact with Sonarr using its v3 REST API.
 
-In upstream Sonarr (`.tmp/Sonarr/src/Sonarr.Http/V3ApiControllerAttribute.cs`), every v3 controller is decorated with `[V3ApiController]`, which mounts routes at `/api/v3/[controller]`. Replacearr mounts the full Sonarr v3 compatibility surface at both:
+In upstream Sonarr (`.tmp/Sonarr/src/Sonarr.Http/V3ApiControllerAttribute.cs`), every v3 controller is decorated with `[V3ApiController]`, which mounts routes at `/api/v3/[controller]`. Replacearr mounts the full Sonarr v3 compatibility surface at both (when `compatModules.sonarr` is enabled):
 * `/api/v3/*` (default root mount for drop-in Sonarr replacement)
 * `/sonarr/api/v3/*` (virtual URL-base mount when sharing a single host/port with Radarr and Prowlarr clients)
+
+Release search accepts `season` / `episode` (or `ep`) and prefers season-pack tokens for aired/ended series. Manual grabs accept `downloadUrl` (magnet or torrent URL). Posters are served from `/MediaCover/{id}/poster.jpg` as cached WebP when available.
 
 ---
 

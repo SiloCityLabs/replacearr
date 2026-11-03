@@ -401,16 +401,21 @@ func (h *Handler) handleSearch(w http.ResponseWriter, r *http.Request) {
 	}
 	tvdbID, _ := strconv.Atoi(q.Get("tvdbId"))
 	tmdbID, _ := strconv.Atoi(q.Get("tmdbId"))
+	season, _ := strconv.Atoi(q.Get("season"))
+	episode, _ := strconv.Atoi(q.Get("ep"))
+	if episode == 0 {
+		episode, _ = strconv.Atoi(q.Get("episode"))
+	}
 
 	var results []domain.ReleaseResult
 	if h.searchFn != nil {
-		res, err := h.searchFn(query, mediaType, tvdbID, tmdbID)
+		res, err := h.searchFn(query, mediaType, tvdbID, tmdbID, season, episode)
 		if err == nil {
 			results = res
 		}
 	}
 	if results == nil {
-		results = sonarr.DefaultSearchReleases(query, mediaType, tvdbID, tmdbID)
+		results = sonarr.DefaultSearchReleases(query, mediaType, tvdbID, tmdbID, season, episode)
 	}
 	writeJSON(w, http.StatusOK, results)
 }
@@ -663,16 +668,21 @@ func (h *Handler) handleTorznab(w http.ResponseWriter, r *http.Request, indexerI
 	}
 	tvdbID, _ := strconv.Atoi(q.Get("tvdbid"))
 	tmdbID, _ := strconv.Atoi(q.Get("tmdbid"))
+	season, _ := strconv.Atoi(q.Get("season"))
+	episode, _ := strconv.Atoi(q.Get("ep"))
+	if episode == 0 {
+		episode, _ = strconv.Atoi(q.Get("episode"))
+	}
 
 	var results []domain.ReleaseResult
 	if h.searchFn != nil {
-		res, err := h.searchFn(query, mediaType, tvdbID, tmdbID)
+		res, err := h.searchFn(query, mediaType, tvdbID, tmdbID, season, episode)
 		if err == nil {
 			results = res
 		}
 	}
 	if results == nil {
-		results = sonarr.DefaultSearchReleases(query, mediaType, tvdbID, tmdbID)
+		results = sonarr.DefaultSearchReleases(query, mediaType, tvdbID, tmdbID, season, episode)
 	}
 
 	if output == "json" {

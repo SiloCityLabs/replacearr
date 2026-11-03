@@ -10,9 +10,12 @@ import {
   X,
   Radio,
   Sparkles,
+  Magnet,
 } from 'lucide-react';
 import type { Movie, QualityProfile, RootFolder } from '../types';
 import { api, formatBytes } from '../api';
+import { useRovingFocus } from '../htpc/useRovingFocus';
+import { ManualTorrentForm, type ManualTorrentTarget } from './ManualTorrentForm';
 
 interface MoviesTabProps {
   movies: Movie[];
@@ -31,22 +34,32 @@ export const MoviesTab: React.FC<MoviesTabProps> = ({
   onSearchReleases,
   onNotify,
 }) => {
+  const movieRoots = rootFolders.filter((r) => r.mediaType === 'movie');
+  const availableRoots = movieRoots.length > 0 ? movieRoots : rootFolders;
+
   const [filterText, setFilterText] = useState('');
-  const [showAddModal, setShowAddModal] = useState(false);
+  const [showAddPanel, setShowAddPanel] = useState(false);
   const [lookupTerm, setLookupTerm] = useState('');
   const [lookupResults, setLookupResults] = useState<Movie[]>([]);
   const [lookupLoading, setLookupLoading] = useState(false);
   const [selectedProfileId, setSelectedProfileId] = useState<number>(profiles[0]?.id || 1);
   const [selectedRootFolder, setSelectedRootFolder] = useState<string>(
-    rootFolders.find((r) => r.mediaType === 'movie')?.path || rootFolders[0]?.path || '/data/movies'
+    availableRoots[0]?.path || ''
   );
   const [minAvailability, setMinAvailability] = useState('released');
+  const [manualTarget, setManualTarget] = useState<ManualTorrentTarget | null>(null);
 
   const filteredMovies = movies.filter(
     (m) =>
       m.title.toLowerCase().includes(filterText.toLowerCase()) ||
       (m.studio || '').toLowerCase().includes(filterText.toLowerCase())
   );
+
+  const gridFocus = useRovingFocus({
+    itemCount: filteredMovies.length,
+    orientation: 'grid',
+    columns: 3,
+  });
 
   const handleLookup = async (e?: React.FormEvent, customTerm?: string) => {
     if (e) e.preventDefault();
@@ -64,16 +77,20 @@ export const MoviesTab: React.FC<MoviesTabProps> = ({
   };
 
   const handleAddMovie = async (candidate: Partial<Movie>) => {
+    if (!selectedRootFolder) {
+      onNotify('Add a movies root folder in setup or settings first', true);
+      return;
+    }
     try {
       const created = await api.addMovie({
         ...candidate,
         qualityProfileId: selectedProfileId || 1,
-        rootFolderPath: selectedRootFolder || '/data/movies',
+        rootFolderPath: selectedRootFolder,
         minimumAvailability: minAvailability,
         monitored: true,
       });
       onNotify(`Added "${created.title}" to Movies library`);
-      setShowAddModal(false);
+      setShowAddPanel(false);
       await onRefresh();
     } catch (err) {
       onNotify(err instanceof Error ? err.message : 'Failed to add movie', true);
@@ -95,21 +112,157 @@ export const MoviesTab: React.FC<MoviesTabProps> = ({
     return poster?.remoteUrl || poster?.url || null;
   };
 
+  const openAddPanel = () => {
+    setShowAddPanel(true);
+    setSelectedRootFolder(availableRoots[0]?.path || '');
+    if (lookupResults.length === 0) {
+      setLookupTerm('Dune');
+      void handleLookup(undefined, 'Dune');
+    }
+  };
+
+  if (showAddPanel) {
+    return (
+      <div className="min-h-[70vh] flex flex-col bg-slate-900/90 border border-slate-800 rounded-xl overflow-hidden">
+        <div className="p-5 border-b border-slate-800 flex items-center justify-between shrink-0">
+          <div className="flex items-center gap-2.5">
+            <Sparkles className="w-5 h-5 text-emerald-400" />
+            <div>
+              <h3 className="text-base font-bold text-white">Add Movie</h3>
+              <p className="text-xs text-slate-400">
+                Lookup metadata and monitor releases automatically
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => setShowAddPanel(false)}
+            className="p-1.5 rounded-lg bg-slate-800 text-slate-400 hover:text-white"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="p-5 border-b border-slate-800 space-y-4 bg-slate-950/50 shrink-0">
+          <form onSubmit={(e) => void handleLookup(e)} className="flex gap-2">
+            <input
+              type="text"
+              value={lookupTerm}
+              onChange={(e) => setLookupTerm(e.target.value)}
+              placeholder="Enter movie title or TMDB/IMDb ID..."
+              className="flex-1 px-3.5 py-2.5 bg-slate-900 border border-slate-800 rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+              autoFocus
+            />
+            <button
+              type="submit"
+              disabled={lookupLoading}
+              className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-xl transition"
+            >
+              {lookupLoading ? 'Searching...' : 'Lookup'}
+            </button>
+          </form>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div>
+              <label className="block text-[11px] font-medium text-slate-400 mb-1">
+                Root Folder
+              </label>
+              <select
+                value={selectedRootFolder}
+                onChange={(e) => setSelectedRootFolder(e.target.value)}
+                className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-xs text-white"
+              >
+                {availableRoots.length === 0 ? (
+                  <option value="">No root folders configured</option>
+                ) : (
+                  availableRoots.map((rf) => (
+                    <option key={rf.id} value={rf.path}>
+                      {rf.path} ({rf.mediaType})
+                    </option>
+                  ))
+                )}
+              </select>
+            </div>
+            <div>
+              <label className="block text-[11px] font-medium text-slate-400 mb-1">
+                Quality Profile
+              </label>
+              <select
+                value={selectedProfileId}
+                onChange={(e) => setSelectedProfileId(Number(e.target.value))}
+                className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-xs text-white"
+              >
+                {profiles.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-[11px] font-medium text-slate-400 mb-1">
+                Minimum Availability
+              </label>
+              <select
+                value={minAvailability}
+                onChange={(e) => setMinAvailability(e.target.value)}
+                className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-xs text-white"
+              >
+                <option value="released">Released</option>
+                <option value="inCinemas">In Cinemas</option>
+                <option value="announced">Announced</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-5 space-y-3">
+          {lookupResults.length === 0 && !lookupLoading ? (
+            <p className="text-sm text-slate-400 text-center py-12">
+              Search for a movie title to see lookup results.
+            </p>
+          ) : null}
+          {lookupResults.map((item, idx) => (
+            <div
+              key={`${item.tmdbId || idx}-${item.title}`}
+              className="p-4 rounded-xl bg-slate-950 border border-slate-800 flex items-start justify-between gap-4"
+            >
+              <div className="space-y-1 min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h4 className="text-sm font-bold text-white">{item.title}</h4>
+                  <span className="text-xs font-mono text-emerald-400">({item.year})</span>
+                  {item.studio && (
+                    <span className="text-[11px] px-2 py-0.5 rounded bg-slate-900 border border-slate-800 text-slate-300">
+                      {item.studio}
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-slate-400 line-clamp-2">{item.overview}</p>
+                <div className="text-[11px] font-mono text-slate-500">
+                  TMDB: {item.tmdbId} • IMDb: {item.imdbId || 'N/A'} • {item.runtime || 120} min
+                </div>
+              </div>
+              <button
+                onClick={() => void handleAddMovie(item)}
+                className="px-3.5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shrink-0 transition"
+              >
+                + Add Movie
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
-      {/* Header & Controls */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-slate-900/90 border border-slate-800 rounded-xl p-4">
         <div className="flex items-center gap-3">
           <div className="p-2.5 rounded-xl bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
             <Film className="w-5 h-5" />
           </div>
           <div>
-            <div className="flex flex-wrap items-center gap-2">
-              <h2 className="text-lg font-bold text-white">Movies Library</h2>
-              <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 font-mono">
-                Radarr v3 Compatible
-              </span>
-            </div>
+            <h2 className="text-lg font-bold text-white">Movies Library</h2>
             <p className="text-xs text-slate-400">
               {movies.length} movies monitored • TMDB & IMDb release automation
             </p>
@@ -123,18 +276,12 @@ export const MoviesTab: React.FC<MoviesTabProps> = ({
               type="text"
               value={filterText}
               onChange={(e) => setFilterText(e.target.value)}
-              placeholder="Filter movies..."
+              placeholder="Search movies..."
               className="w-full pl-9 pr-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
             />
           </div>
           <button
-            onClick={() => {
-              setShowAddModal(true);
-              if (lookupResults.length === 0) {
-                setLookupTerm('Dune');
-                void handleLookup(undefined, 'Dune');
-              }
-            }}
+            onClick={openAddPanel}
             className="inline-flex items-center justify-center gap-2 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-lg shadow-lg shadow-emerald-600/20 transition shrink-0"
           >
             <Plus className="w-4 h-4" />
@@ -143,20 +290,15 @@ export const MoviesTab: React.FC<MoviesTabProps> = ({
         </div>
       </div>
 
-      {/* Movie Grid */}
       {filteredMovies.length === 0 ? (
         <div className="bg-slate-900/60 border border-dashed border-slate-800 rounded-2xl p-12 text-center">
           <Film className="w-10 h-10 text-slate-600 mx-auto mb-3" />
           <h3 className="text-base font-semibold text-slate-200">No Movies in Library</h3>
           <p className="text-xs text-slate-400 mt-1 mb-5">
-            Search TMDB via the Radarr lookup endpoint to add movies to Replacearr.
+            Look up a movie by title or TMDB/IMDb ID to add it to your library.
           </p>
           <button
-            onClick={() => {
-              setShowAddModal(true);
-              setLookupTerm('Dune');
-              void handleLookup(undefined, 'Dune');
-            }}
+            onClick={openAddPanel}
             className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-lg transition"
           >
             <Plus className="w-4 h-4" />
@@ -165,16 +307,16 @@ export const MoviesTab: React.FC<MoviesTabProps> = ({
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
-          {filteredMovies.map((m) => {
+          {filteredMovies.map((m, index) => {
             const posterUrl = getPosterUrl(m);
             return (
               <div
                 key={m.id}
-                className="group bg-slate-900/90 border border-slate-800 hover:border-emerald-500/40 rounded-xl overflow-hidden flex flex-col justify-between transition shadow-lg"
+                {...gridFocus.itemProps(index)}
+                className="group bg-slate-900/90 border border-slate-800 hover:border-emerald-500/40 rounded-xl overflow-hidden flex flex-col justify-between transition shadow-lg outline-none"
               >
-                <div className="p-4 flex gap-4">
-                  {/* Poster */}
-                  <div className="w-24 h-36 rounded-lg bg-gradient-to-br from-emerald-900/60 via-slate-900 to-slate-950 border border-slate-800 shrink-0 overflow-hidden flex items-center justify-center relative">
+                <div className="p-4 flex flex-col sm:flex-row gap-4">
+                  <div className="w-28 h-40 sm:w-24 sm:h-36 mx-auto sm:mx-0 rounded-lg bg-gradient-to-br from-emerald-900/60 via-slate-900 to-slate-950 border border-slate-800 shrink-0 overflow-hidden flex items-center justify-center relative">
                     {posterUrl ? (
                       <img
                         src={posterUrl}
@@ -192,7 +334,6 @@ export const MoviesTab: React.FC<MoviesTabProps> = ({
                     </span>
                   </div>
 
-                  {/* Details */}
                   <div className="flex-1 min-w-0">
                     <div className="flex items-start justify-between gap-2">
                       <h3 className="text-base font-bold text-white truncate">{m.title}</h3>
@@ -221,7 +362,7 @@ export const MoviesTab: React.FC<MoviesTabProps> = ({
                       )}
                     </div>
 
-                    <p className="mt-2 text-xs text-slate-400 line-clamp-3 leading-relaxed">
+                    <p className="mt-2 text-xs text-slate-400 line-clamp-3 leading-relaxed hidden md:block">
                       {m.overview || 'Monitored feature film in Replacearr unified database.'}
                     </p>
 
@@ -232,9 +373,8 @@ export const MoviesTab: React.FC<MoviesTabProps> = ({
                   </div>
                 </div>
 
-                {/* Footer */}
                 <div className="px-4 py-3 bg-slate-950/70 border-t border-slate-800/80 flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <span className="text-[11px] font-mono text-slate-500">
                       TMDB #{m.tmdbId || m.id}
                     </span>
@@ -243,12 +383,25 @@ export const MoviesTab: React.FC<MoviesTabProps> = ({
                       className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/30 text-xs font-medium transition"
                     >
                       <Radio className="w-3.5 h-3.5" />
-                      <span>Search Releases</span>
+                      <span>Search</span>
+                    </button>
+                    <button
+                      onClick={() =>
+                        setManualTarget({
+                          title: m.title,
+                          mediaType: 'movie',
+                          movieId: m.id,
+                        })
+                      }
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 text-xs font-medium transition"
+                    >
+                      <Magnet className="w-3.5 h-3.5" />
+                      <span>Add torrent</span>
                     </button>
                   </div>
 
                   <button
-                    onClick={() => handleDeleteMovie(m)}
+                    onClick={() => void handleDeleteMovie(m)}
                     title="Delete movie"
                     className="p-1.5 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition"
                   >
@@ -261,130 +414,13 @@ export const MoviesTab: React.FC<MoviesTabProps> = ({
         </div>
       )}
 
-      {/* Add Movie Lookup Modal */}
-      {showAddModal && (
-        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm overflow-y-auto flex items-start justify-center p-4">
-          <div className="w-full max-w-3xl bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[calc(100dvh-2rem)] my-auto">
-            <div className="p-5 border-b border-slate-800 flex items-center justify-between">
-              <div className="flex items-center gap-2.5">
-                <Sparkles className="w-5 h-5 text-emerald-400" />
-                <div>
-                  <h3 className="text-base font-bold text-white">
-                    Add Movie (/api/v1/movies/lookup)
-                  </h3>
-                  <p className="text-xs text-slate-400">
-                    Search movie metadata and monitor releases automatically
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={() => setShowAddModal(false)}
-                className="p-1.5 rounded-lg bg-slate-800 text-slate-400 hover:text-white"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <div className="p-5 border-b border-slate-800 space-y-4 bg-slate-950/50">
-              <form onSubmit={(e) => handleLookup(e)} className="flex gap-2">
-                <input
-                  type="text"
-                  value={lookupTerm}
-                  onChange={(e) => setLookupTerm(e.target.value)}
-                  placeholder="Enter movie title or TMDB/IMDb ID (e.g. Dune, Oppenheimer, Interstellar)..."
-                  className="flex-1 px-3.5 py-2.5 bg-slate-900 border border-slate-800 rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
-                />
-                <button
-                  type="submit"
-                  disabled={lookupLoading}
-                  className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-xl transition"
-                >
-                  {lookupLoading ? 'Searching...' : 'Lookup'}
-                </button>
-              </form>
-
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div>
-                  <label className="block text-[11px] font-medium text-slate-400 mb-1">
-                    Root Folder
-                  </label>
-                  <select
-                    value={selectedRootFolder}
-                    onChange={(e) => setSelectedRootFolder(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-xs text-white"
-                  >
-                    {rootFolders.map((rf) => (
-                      <option key={rf.id} value={rf.path}>
-                        {rf.path} ({rf.mediaType})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-[11px] font-medium text-slate-400 mb-1">
-                    Quality Profile
-                  </label>
-                  <select
-                    value={selectedProfileId}
-                    onChange={(e) => setSelectedProfileId(Number(e.target.value))}
-                    className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-xs text-white"
-                  >
-                    {profiles.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-[11px] font-medium text-slate-400 mb-1">
-                    Minimum Availability
-                  </label>
-                  <select
-                    value={minAvailability}
-                    onChange={(e) => setMinAvailability(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-xs text-white"
-                  >
-                    <option value="released">Released</option>
-                    <option value="inCinemas">In Cinemas</option>
-                    <option value="announced">Announced</option>
-                  </select>
-                </div>
-              </div>
-            </div>
-
-            <div className="flex-1 overflow-y-auto p-5 space-y-3">
-              {lookupResults.map((item, idx) => (
-                <div
-                  key={`${item.tmdbId || idx}-${item.title}`}
-                  className="p-4 rounded-xl bg-slate-950 border border-slate-800 flex items-start justify-between gap-4"
-                >
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <h4 className="text-sm font-bold text-white">{item.title}</h4>
-                      <span className="text-xs font-mono text-emerald-400">({item.year})</span>
-                      {item.studio && (
-                        <span className="text-[11px] px-2 py-0.5 rounded bg-slate-900 border border-slate-800 text-slate-300">
-                          {item.studio}
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-xs text-slate-400 line-clamp-2">{item.overview}</p>
-                    <div className="text-[11px] font-mono text-slate-500">
-                      TMDB: {item.tmdbId} • IMDb: {item.imdbId || 'N/A'} • {item.runtime || 120} min
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => handleAddMovie(item)}
-                    className="px-3.5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shrink-0 transition"
-                  >
-                    + Add Movie
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
+      {manualTarget && (
+        <ManualTorrentForm
+          target={manualTarget}
+          onClose={() => setManualTarget(null)}
+          onNotify={onNotify}
+          onSuccess={onRefresh}
+        />
       )}
     </div>
   );

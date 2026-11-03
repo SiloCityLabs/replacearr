@@ -2,12 +2,27 @@ export type NavTab =
   | 'dashboard'
   | 'series'
   | 'movies'
+  | 'search'
   | 'indexers'
   | 'queue'
   | 'plugins'
   | 'users'
   | 'settings'
   | 'compatibility';
+
+export interface CompatModulesConfig {
+  sonarr: boolean;
+  radarr: boolean;
+  prowlarr: boolean;
+}
+
+export interface BrowserNotificationsConfig {
+  enabled: boolean;
+  onGrab: boolean;
+  onDownload: boolean;
+  onImport: boolean;
+  onHealthIssue: boolean;
+}
 
 export interface Role {
   id: number;
@@ -631,6 +646,9 @@ export interface RemotePathMapping {
 }
 
 export interface AppConfig {
+  setupComplete: boolean;
+  compatModules: CompatModulesConfig;
+  browserNotifications: BrowserNotificationsConfig;
   host: HostConfig;
   security: SecurityConfig;
   proxy: ProxyConfig;
