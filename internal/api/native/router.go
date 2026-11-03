@@ -177,6 +177,10 @@ func (s *Server) SearchReleases(query string, mediaType string, tvdbID int, tmdb
 		searchQuery = strings.Join(parts, " ")
 	}
 
+	proxyURL := ""
+	if s.pluginMgr != nil {
+		proxyURL = s.pluginMgr.ActiveProxyURL()
+	}
 	req := pluginsdk.SearchRequest{
 		Query:           searchQuery,
 		Type:            mediaType,
@@ -187,9 +191,12 @@ func (s *Server) SearchReleases(query string, mediaType string, tvdbID int, tmdb
 		Aliases:         aliases,
 		Limit:           50,
 		FlareSolverrURL: s.activeFlareSolverrHost(),
-		ProxyURL:        s.pluginMgr.ActiveProxyURL(),
+		ProxyURL:        proxyURL,
 	}
-	pluginResults, _ := s.pluginMgr.SearchAllIndexers(ctx, req)
+	var pluginResults []domain.ReleaseResult
+	if s.pluginMgr != nil {
+		pluginResults, _ = s.pluginMgr.SearchAllIndexers(ctx, req)
+	}
 
 	// Also synthesize results for configured DB indexers
 	dbIndexers, _ := s.store.ListIndexers()

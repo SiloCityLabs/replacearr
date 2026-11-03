@@ -147,8 +147,24 @@ export const App: React.FC = () => {
       setApiKeys(ak);
       setPermissions(perms);
       if (cfg) {
-        setAppConfig(cfg);
-        applyUiPreferences(cfg.ui);
+        const normalized: AppConfig = {
+          ...cfg,
+          setupComplete: Boolean(cfg.setupComplete),
+          compatModules: {
+            sonarr: cfg.compatModules?.sonarr ?? true,
+            radarr: cfg.compatModules?.radarr ?? true,
+            prowlarr: cfg.compatModules?.prowlarr ?? true,
+          },
+          browserNotifications: {
+            enabled: cfg.browserNotifications?.enabled ?? false,
+            onGrab: cfg.browserNotifications?.onGrab ?? true,
+            onDownload: cfg.browserNotifications?.onDownload ?? true,
+            onImport: cfg.browserNotifications?.onImport ?? true,
+            onHealthIssue: cfg.browserNotifications?.onHealthIssue ?? true,
+          },
+        };
+        setAppConfig(normalized);
+        applyUiPreferences(normalized.ui);
       }
     } finally {
       setRefreshing(false);
