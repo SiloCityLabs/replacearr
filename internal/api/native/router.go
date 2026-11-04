@@ -121,71 +121,105 @@ func (s *Server) SearchReleases(query string, mediaType string, tvdbID int, tmdb
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 
-	aliases := []string{}
+	now := time.Now().UTC()
+	baseTitle := strings.TrimSpace(query)
+	var aliases []domain.SeriesAlias
+	var eps []domain.Episode
+	var series domain.Series
 	if tvdbID > 0 {
 		if all, err := s.store.ListSeries(); err == nil {
 			for _, sr := range all {
 				if sr.TvdbID != tvdbID {
 					continue
 				}
-				if listed, aErr := s.store.ListSeriesAliases(sr.ID); aErr == nil {
-					for _, a := range listed {
-						if a.SeasonNumber == nil || season == 0 || *a.SeasonNumber == season {
-							aliases = append(aliases, a.Title)
-						}
-					}
+				series = sr
+				if baseTitle == "" {
+					baseTitle = sr.Title
 				}
-				if season == 0 && episode == 0 && domain.PreferSeasonPackQuery(sr) {
-					season = 1
+				if listed, aErr := s.store.ListSeriesAliases(sr.ID); aErr == nil {
+					aliases = listed
+				}
+				if listedEps, eErr := s.store.ListEpisodes(sr.ID); eErr == nil {
+					eps = listedEps
 				}
 				break
 			}
 		}
 	}
+	if baseTitle == "" {
+		baseTitle = strings.TrimSpace(query)
+	}
 
-	searchQuery := strings.TrimSpace(query)
-	if len(aliases) > 0 {
-		parts := []string{searchQuery}
-		for _, a := range aliases {
-			if a != "" && !strings.EqualFold(a, searchQuery) {
-				parts = append(parts, a)
-			}
-		}
-		searchQuery = strings.Join(parts, " ")
+	preferPack := false
+	if season > 0 {
+		preferPack = domain.PreferSeasonPackQuery(series, eps, season, now)
+	}
+
+	variants := domain.BuildTVSearchVariants(baseTitle, aliases, eps, season, episode, preferPack, now)
+	if len(variants) == 0 {
+		variants = []domain.TVSearchVariant{{Query: baseTitle, Season: season, Episode: episode}}
 	}
 
 	proxyURL := ""
 	if s.pluginMgr != nil {
 		proxyURL = s.pluginMgr.ActiveProxyURL()
 	}
-	req := pluginsdk.SearchRequest{
-		Query:           searchQuery,
-		Type:            mediaType,
-		TvdbID:          tvdbID,
-		TmdbID:          tmdbID,
-		Season:          season,
-		Episode:         episode,
-		Aliases:         aliases,
-		Limit:           50,
-		FlareSolverrURL: s.activeFlareSolverrHost(),
-		ProxyURL:        proxyURL,
+
+	aliasTitles := make([]string, 0, len(aliases))
+	for _, a := range aliases {
+		if a.Title != "" {
+			aliasTitles = append(aliasTitles, a.Title)
+		}
 	}
 
 	results := []domain.ReleaseResult{}
 	var searchErrs []string
-
-	if s.pluginMgr != nil {
-		pluginResults, err := s.pluginMgr.SearchAllIndexers(ctx, req)
-		if err != nil {
-			searchErrs = append(searchErrs, err.Error())
-		} else if pluginResults != nil {
-			results = append(results, pluginResults...)
+	seen := map[string]struct{}{}
+	addResults := func(batch []domain.ReleaseResult) {
+		for _, r := range batch {
+			key := r.Guid
+			if key == "" {
+				key = r.DownloadURL
+			}
+			if key == "" {
+				key = r.Title + "|" + r.Indexer
+			}
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			results = append(results, r)
 		}
 	}
 
-	cardigannResults, cardigannErrs := s.searchCardigannIndexers(ctx, searchQuery, season, episode, proxyURL)
-	results = append(results, cardigannResults...)
-	searchErrs = append(searchErrs, cardigannErrs...)
+	for _, v := range variants {
+		if ctx.Err() != nil {
+			break
+		}
+		req := pluginsdk.SearchRequest{
+			Query:           v.Query,
+			Type:            mediaType,
+			TvdbID:          tvdbID,
+			TmdbID:          tmdbID,
+			Season:          v.Season,
+			Episode:         v.Episode,
+			Aliases:         aliasTitles,
+			Limit:           50,
+			FlareSolverrURL: s.activeFlareSolverrHost(),
+			ProxyURL:        proxyURL,
+		}
+		if s.pluginMgr != nil {
+			pluginResults, err := s.pluginMgr.SearchAllIndexers(ctx, req)
+			if err != nil {
+				searchErrs = append(searchErrs, err.Error())
+			} else if pluginResults != nil {
+				addResults(pluginResults)
+			}
+		}
+		cardigannResults, cardigannErrs := s.searchCardigannIndexers(ctx, v.Query, v.Season, v.Episode, proxyURL)
+		addResults(cardigannResults)
+		searchErrs = append(searchErrs, cardigannErrs...)
+	}
 
 	if len(results) == 0 && len(searchErrs) > 0 {
 		return results, fmt.Errorf("search failed: %s", strings.Join(searchErrs, "; "))
@@ -466,9 +500,12 @@ func (s *Server) syncSeriesEpisodes(ctx context.Context, sr *domain.Series) erro
 	if s.meta == nil || sr == nil || sr.TvdbID <= 0 || sr.ID <= 0 {
 		return nil
 	}
-	_, eps, err := s.meta.GetSeriesByTVDB(ctx, sr.TvdbID, s.preferredMetadataLanguage())
+	_, eps, aliases, err := s.meta.GetSeriesByTVDB(ctx, sr.TvdbID, s.preferredMetadataLanguage())
 	if err != nil {
 		return err
+	}
+	if len(aliases) > 0 {
+		_ = s.store.ReplaceSeriesAliases(sr.ID, aliases)
 	}
 	if len(eps) == 0 {
 		return nil

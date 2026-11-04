@@ -65,7 +65,8 @@ func TestSearchSeriesByTVDB(t *testing.T) {
 			"runtime": 50,
 			"network": "Apple TV+",
 			"imdbId": "tt11280740",
-			"seasons": [{"seasonNumber": 1}, {"seasonNumber": 2}],
+			"alternativeTitles": [{"title": "Severance (2022)"}],
+			"seasons": [{"seasonNumber": 1}, {"seasonNumber": 2, "title": "Severance Season Two"}],
 			"episodes": [
 				{"tvdbId": 1, "seasonNumber": 1, "episodeNumber": 1, "title": "Good News About Hell", "airDate": "2022-02-18", "airDateUtc": "2022-02-18T12:00:00Z"}
 			]
@@ -81,9 +82,24 @@ func TestSearchSeriesByTVDB(t *testing.T) {
 	if len(got) != 1 || got[0].TvdbID != 371980 || len(got[0].Seasons) != 2 {
 		t.Fatalf("unexpected: %+v", got)
 	}
-	series, eps, err := svc.GetSeriesByTVDB(context.Background(), 371980, "en")
+	series, eps, aliases, err := svc.GetSeriesByTVDB(context.Background(), 371980, "en")
 	if err != nil || series.Title != "Severance" || len(eps) != 1 || eps[0].Title != "Good News About Hell" {
 		t.Fatalf("GetSeriesByTVDB: %v series=%+v eps=%+v", err, series, eps)
+	}
+	if len(aliases) == 0 {
+		t.Fatal("expected aliases from alternativeTitles / season synthesis")
+	}
+	var hasAlt, hasSeasonTwo bool
+	for _, a := range aliases {
+		if a.Title == "Severance (2022)" && a.SeasonNumber == nil {
+			hasAlt = true
+		}
+		if a.Title == "Severance Season Two" && a.SeasonNumber != nil && *a.SeasonNumber == 2 {
+			hasSeasonTwo = true
+		}
+	}
+	if !hasAlt || !hasSeasonTwo {
+		t.Fatalf("aliases missing expected entries: %+v", aliases)
 	}
 }
 
