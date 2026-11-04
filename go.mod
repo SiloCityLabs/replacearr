@@ -17,6 +17,7 @@ require (
 	github.com/andybalholm/cascadia v1.3.5 // indirect
 	github.com/beevik/etree v1.8.1 // indirect
 	github.com/dustin/go-humanize v1.1.0 // indirect
+	github.com/gen2brain/vpx v0.2.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect
 	github.com/ncruces/go-strftime v1.1.0 // indirect

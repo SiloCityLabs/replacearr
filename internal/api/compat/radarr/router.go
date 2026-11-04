@@ -367,6 +367,12 @@ func (h *Handler) handleCreateMovie(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	remote := mediacover.PosterRemoteURL(created.Images)
+	local := mediacover.LocalURL("movie", created.ID)
+	created.Images = mediacover.SetLocalPoster(created.Images, local, remote)
+	if updated, uerr := h.store.UpdateMovie(*created); uerr == nil && updated != nil {
+		created = updated
+	}
 	h.cacheCoverAsync(created)
 	writeJSON(w, http.StatusCreated, created)
 }

@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/replacearr/replacearr/internal/domain"
-	"github.com/replacearr/replacearr/internal/mediacover"
 )
 
 func (s *Server) registerMusicBooksRoutes(mux *http.ServeMux) {
@@ -36,6 +35,9 @@ func (s *Server) handleListArtists(w http.ResponseWriter, _ *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
+	for i := range items {
+		items[i].Images = s.hydrateLibraryPosters("music", items[i].ID, items[i].Images)
+	}
 	writeJSON(w, http.StatusOK, items)
 }
 
@@ -51,7 +53,9 @@ func (s *Server) handleCreateArtist(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.syncArtistDiscography(r, created)
-	s.cacheArtistCover(created)
+	created.Images = bindLocalPosterURL("music", created.ID, created.Images)
+	_, _ = s.store.UpdateArtist(*created)
+	s.cacheCoverAsync("music", created.ID, created.Images)
 	writeJSON(w, http.StatusCreated, created)
 }
 
@@ -64,27 +68,6 @@ func (s *Server) syncArtistDiscography(r *http.Request, artist *domain.Artist) {
 		return
 	}
 	_ = s.store.ReplaceArtistDiscography(artist.ID, items)
-}
-
-func (s *Server) cacheArtistCover(a *domain.Artist) {
-	if a == nil || s.covers == nil {
-		return
-	}
-	remote := mediacover.PosterRemoteURL(a.Images)
-	if remote == "" {
-		return
-	}
-	key := mediacover.CacheKeyMusic(a.ForeignArtistID, a.ID)
-	local, err := s.covers.Ensure("music", key, a.ID, remote, a.ID)
-	if err != nil || local == "" {
-		return
-	}
-	for i := range a.Images {
-		if strings.EqualFold(a.Images[i].CoverType, "poster") {
-			a.Images[i].URL = local
-		}
-	}
-	_, _ = s.store.UpdateArtist(*a)
 }
 
 func (s *Server) handleDeleteArtist(w http.ResponseWriter, r *http.Request) {
@@ -136,6 +119,9 @@ func (s *Server) handleListAuthors(w http.ResponseWriter, _ *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
+	for i := range items {
+		items[i].Images = s.hydrateLibraryPosters("author", items[i].ID, items[i].Images)
+	}
 	writeJSON(w, http.StatusOK, items)
 }
 
@@ -150,6 +136,9 @@ func (s *Server) handleCreateAuthor(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
+	created.Images = bindLocalPosterURL("author", created.ID, created.Images)
+	_, _ = s.store.UpdateAuthor(*created)
+	s.cacheCoverAsync("author", created.ID, created.Images)
 	writeJSON(w, http.StatusCreated, created)
 }
 
@@ -181,6 +170,9 @@ func (s *Server) handleListBooks(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
+	}
+	for i := range items {
+		items[i].Images = s.hydrateLibraryPosters("book", items[i].ID, items[i].Images)
 	}
 	writeJSON(w, http.StatusOK, items)
 }
@@ -246,6 +238,11 @@ func (s *Server) handleCreateBook(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
+	createdBook.Images = bindLocalPosterURL("book", createdBook.ID, createdBook.Images)
+	if updated, uerr := s.store.UpdateBook(*createdBook); uerr == nil && updated != nil {
+		createdBook = updated
+	}
+	s.cacheCoverAsync("book", createdBook.ID, createdBook.Images)
 
 	root := req.RootFolderPath
 	if root == "" {

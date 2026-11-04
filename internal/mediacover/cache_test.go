@@ -42,6 +42,12 @@ func TestPosterRemoteURL(t *testing.T) {
 	if got := PosterRemoteURL(images); got != "https://example.com/poster.jpg" {
 		t.Fatalf("got %q", got)
 	}
+	fallback := []domain.MediaImage{
+		{CoverType: "poster", URL: "https://example.com/from-url.jpg"},
+	}
+	if got := PosterRemoteURL(fallback); got != "https://example.com/from-url.jpg" {
+		t.Fatalf("url fallback: %q", got)
+	}
 }
 
 func TestIsPosterAspect(t *testing.T) {
@@ -118,7 +124,7 @@ func TestEnsureRejectsBannerAndCachesPoster(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer f.Close()
-	if ct != "image/png" {
+	if ct != "image/webp" {
 		t.Fatalf("content type %q", ct)
 	}
 	if _, err := os.Stat(legacy); !os.IsNotExist(err) {

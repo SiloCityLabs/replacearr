@@ -373,6 +373,12 @@ func (h *Handler) handleCreateSeries(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = h.syncSeriesEpisodes(r.Context(), created)
+	remote := mediacover.PosterRemoteURL(created.Images)
+	local := mediacover.LocalURL("tv", created.ID)
+	created.Images = mediacover.SetLocalPoster(created.Images, local, remote)
+	if updated, uerr := h.store.UpdateSeries(*created); uerr == nil && updated != nil {
+		created = updated
+	}
 	h.cacheCoverAsync(created)
 	writeJSON(w, http.StatusCreated, created)
 }

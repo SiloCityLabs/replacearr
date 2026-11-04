@@ -685,6 +685,31 @@ func (s *Store) CreateBook(b domain.Book) (*domain.Book, error) {
 	return &b, nil
 }
 
+func (s *Store) UpdateBook(b domain.Book) (*domain.Book, error) {
+	if b.ID <= 0 {
+		return nil, errors.New("id is required")
+	}
+	if b.Images == nil {
+		b.Images = []domain.MediaImage{}
+	}
+	if b.Genres == nil {
+		b.Genres = []string{}
+	}
+	imgB, _ := json.Marshal(b.Images)
+	genB, _ := json.Marshal(b.Genres)
+	_, err := s.db.Exec(`
+		UPDATE books SET title=?, foreign_book_id=?, title_slug=?, release_date=?, overview=?, images_json=?,
+			monitored=?, series_title=?, series_position=?, genres_json=?, page_count=?
+		WHERE id=?`,
+		b.Title, b.ForeignBookID, b.TitleSlug, b.ReleaseDate, b.Overview, string(imgB),
+		boolToInt(b.Monitored), b.SeriesTitle, b.SeriesPosition, string(genB), b.PageCount, b.ID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return s.GetBookByID(b.ID)
+}
+
 func (s *Store) DeleteBook(id int64) error {
 	_, err := s.db.Exec(`DELETE FROM books WHERE id = ?`, id)
 	return err

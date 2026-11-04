@@ -516,6 +516,9 @@ func (s *Server) handleListSeries(w http.ResponseWriter, _ *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
+	for i := range items {
+		items[i].Images = s.hydrateLibraryPosters("tv", items[i].ID, items[i].Images)
+	}
 	writeJSON(w, http.StatusOK, items)
 }
 
@@ -531,6 +534,8 @@ func (s *Server) handleCreateSeries(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = s.syncSeriesEpisodes(r.Context(), created)
+	created.Images = bindLocalPosterURL("tv", created.ID, created.Images)
+	_, _ = s.store.UpdateSeries(*created)
 	s.cacheCoverAsync("tv", created.ID, created.Images)
 	writeJSON(w, http.StatusCreated, created)
 }
@@ -605,6 +610,9 @@ func (s *Server) handleListMovies(w http.ResponseWriter, _ *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
+	for i := range items {
+		items[i].Images = s.hydrateLibraryPosters("movie", items[i].ID, items[i].Images)
+	}
 	writeJSON(w, http.StatusOK, items)
 }
 
@@ -619,6 +627,8 @@ func (s *Server) handleCreateMovie(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
+	created.Images = bindLocalPosterURL("movie", created.ID, created.Images)
+	_, _ = s.store.UpdateMovie(*created)
 	s.cacheCoverAsync("movie", created.ID, created.Images)
 	writeJSON(w, http.StatusCreated, created)
 }
