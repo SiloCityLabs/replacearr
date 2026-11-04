@@ -49,19 +49,20 @@ PAGES = [
     ("07-queue.png", "Queue & Clients", "Live Download Queue", "main"),
     ("08-plugins.png", "Go Plugins", "Go Plugin System", "main"),
     ("09-users.png", "Users & RBAC", "Users & Access Control", "main"),
-    ("10-settings.png", "Settings", "Episode and movie naming", "main"),
+    # Settings accordion defaults to Media Management.
+    ("10-settings.png", "Settings", "Episode Naming", "main"),
     ("11-settings-general.png", "General", "Bind Address", "settings"),
     ("12-settings-ui.png", "UI", "First Day of Week", "settings"),
     ("13-settings-media.png", "Media Management", "Episode Naming", "settings"),
     ("14-settings-profiles.png", "Profiles", "Quality Profiles", "settings"),
     ("15-settings-quality.png", "Quality", "MB per minute", "settings"),
-    ("16-settings-indexers.png", "Indexers", "Indexer rows save", "settings"),
-    ("17-settings-download-clients.png", "Download Clients", "Client records are live", "settings"),
-    ("18-settings-import-lists.png", "Import Lists", "List sync options", "settings"),
-    ("19-settings-system.png", "System", "Compat endpoints", "settings"),
-    ("20-settings-metadata.png", "Metadata", "Preferred language", "settings"),
-    ("21-settings-tags.png", "Tags", "Add Tag", "settings"),
-    ("22-compatibility.png", "Go Plugins", "Overseerr", "main"),
+    ("16-settings-import-lists.png", "Import Lists", "List sync options", "settings"),
+    ("17-settings-metadata.png", "Metadata", "Preferred language", "settings"),
+    ("18-settings-subtitles.png", "Subtitles", "OpenSubtitles", "settings"),
+    ("19-settings-tags.png", "Tags", "Add Tag", "settings"),
+    # System accordion defaults to Status (compat endpoints live there).
+    ("20-system-status.png", "System", "Compat endpoints", "main"),
+    ("21-compatibility.png", "Go Plugins", "Overseerr", "main"),
 ]
 
 
@@ -255,7 +256,7 @@ def main():
             wait_text(cdp, needle)
             # Compatibility gallery shot: scroll to *arr shim cards with client base URLs
             # so it differs from the top-of-page plugins overview.
-            if filename == "22-compatibility.png":
+            if filename == "21-compatibility.png":
                 cdp.eval(
                     """
                     (() => {

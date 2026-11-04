@@ -42,9 +42,9 @@ Captured at 390×844 (phone viewport). API keys are redacted in these images.
 
 ![Users and access control](09-users.png)
 
-## Settings (home)
+## Settings (Media Management)
 
-![Settings category grid](10-settings.png)
+![Settings defaults to Media Management](10-settings.png)
 
 ## Settings — General
 
@@ -66,30 +66,26 @@ Captured at 390×844 (phone viewport). API keys are redacted in these images.
 
 ![Quality definitions](15-settings-quality.png)
 
-## Settings — Indexers
-
-![Indexer and proxy settings](16-settings-indexers.png)
-
-## Settings — Download clients
-
-![Download clients and path mappings](17-settings-download-clients.png)
-
 ## Settings — Import lists
 
-![Import lists](18-settings-import-lists.png)
-
-## Settings — System
-
-![System status and compat endpoints](19-settings-system.png)
+![Import lists](16-settings-import-lists.png)
 
 ## Settings — Metadata
 
-![Metadata options](20-settings-metadata.png)
+![Metadata options](17-settings-metadata.png)
+
+## Settings — Subtitles
+
+![OpenSubtitles integration](18-settings-subtitles.png)
 
 ## Settings — Tags
 
-![Tags](21-settings-tags.png)
+![Tags](19-settings-tags.png)
+
+## System — Status
+
+![System status and compat endpoints](20-system-status.png)
 
 ## Compatibility (*arr clients)
 
-![Connect Overseerr, Bazarr, and nzb360 via built-in *arr plugins](22-compatibility.png)
+![Connect Overseerr, Bazarr, and nzb360 via built-in *arr plugins](21-compatibility.png)
