@@ -513,6 +513,13 @@ export interface ConfigFieldSchema {
   helpText?: string;
 }
 
+export interface InboundWebhookSpec {
+  slug?: string;
+  pathAliases?: string[];
+  secretSetting: string;
+  description?: string;
+}
+
 export interface PluginManifest {
   id: string;
   name: string;
@@ -521,6 +528,8 @@ export interface PluginManifest {
   description: string;
   types: string[];
   configSchema: ConfigFieldSchema[];
+  inboundWebhooks?: InboundWebhookSpec[];
+  disabledByDefault?: boolean;
 }
 
 export interface DiscoveredPlugin {

@@ -43,6 +43,7 @@ replacearr/
 ├── cmd/replacearr/                # Main server entrypoint
 ├── examples/plugins/
 │   ├── jellyfin-notifier/         # Marketplace pointer (README only)
+│   ├── http-proxy/                # Marketplace pointer (README only)
 │   ├── sample-indexer/            # Test fixture (canonical: SiloCityLabs/replacearr-plugins)
 │   ├── openvpn-proxy/             # Marketplace pointer (README only)
 │   └── webhook-notifier/          # Marketplace pointer (README only)

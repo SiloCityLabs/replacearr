@@ -45,8 +45,8 @@ const (
 // Built-in notification channel that bridges Notify events to the SPA via SSE.
 const BuiltinBrowserNotifications = "builtin-browser-notifications"
 
-// JellyfinNotifierPluginID is the external notification plugin that refreshes Jellyfin
-// libraries and shares inbound_webhook_secret with POST /api/v1/webhooks/jellyfin.
+// JellyfinNotifierPluginID is the marketplace notification plugin id for Jellyfin.
+// Prefer Manifest.InboundWebhooks path aliases over hard-coding this in new host code.
 const JellyfinNotifierPluginID = "jellyfin-notifier"
 
 // Stable notification event types delivered to NotificationPlugin.Notify.
@@ -60,6 +60,42 @@ const (
 	// always deliver it (ignore per-event enable toggles).
 	EventNotificationTest = "notification.test"
 )
+
+// InboundWebhookSpec declares an unauthenticated (secret-based) HTTP callback the host
+// should expose for this plugin. Secrets are read from ConfigSchema via SecretSetting.
+type InboundWebhookSpec struct {
+	// Slug is an optional path segment under /api/v1/webhooks/{pluginId}/{slug}.
+	// Empty slug means /api/v1/webhooks/{pluginId}.
+	Slug string `json:"slug,omitempty"`
+	// PathAliases are additional short paths such as "jellyfin" → /api/v1/webhooks/jellyfin.
+	PathAliases []string `json:"pathAliases,omitempty"`
+	// SecretSetting is the ConfigSchema field name that holds the shared secret.
+	SecretSetting string `json:"secretSetting"`
+	// Description is optional UI/docs help text for the callback URL.
+	Description string `json:"description,omitempty"`
+}
+
+// WebhookRequest is the host → plugin payload for an inbound HTTP webhook.
+type WebhookRequest struct {
+	Slug    string            `json:"slug"`
+	Headers map[string]string `json:"headers,omitempty"`
+	Query   map[string]string `json:"query,omitempty"`
+	Body    json.RawMessage   `json:"body"`
+}
+
+// WebhookEvent is an event the plugin wants the host to fan out via NotifyAll.
+type WebhookEvent struct {
+	EventType string         `json:"eventType"`
+	Payload   map[string]any `json:"payload"`
+}
+
+// WebhookResult is the plugin → host response for handle_webhook.
+type WebhookResult struct {
+	// Status is the HTTP status to return to the caller (default 204).
+	Status int `json:"status,omitempty"`
+	// Events are fanned out to enabled NotificationPlugin channels.
+	Events []WebhookEvent `json:"events,omitempty"`
+}
 
 // ConfigFieldSchema describes a user-configurable setting exposed in the Replacearr UI.
 type ConfigFieldSchema struct {
@@ -80,6 +116,9 @@ type Manifest struct {
 	Description  string              `json:"description"`
 	Types        []PluginType        `json:"types"`
 	ConfigSchema []ConfigFieldSchema `json:"configSchema"`
+	// InboundWebhooks registers secret-authenticated HTTP callbacks on the host.
+	// Plugins that declare entries must implement InboundWebhookPlugin.
+	InboundWebhooks []InboundWebhookSpec `json:"inboundWebhooks,omitempty"`
 	// DisabledByDefault leaves the plugin off on first discovery until the user enables it.
 	// Ignored once a plugin_configs row exists.
 	DisabledByDefault bool `json:"disabledByDefault,omitempty"`
@@ -167,6 +206,12 @@ type NotificationPlugin interface {
 type NetworkProxyPlugin interface {
 	Plugin
 	ProxyURL() string
+}
+
+// InboundWebhookPlugin handles secret-authenticated HTTP callbacks registered via Manifest.InboundWebhooks.
+type InboundWebhookPlugin interface {
+	Plugin
+	HandleWebhook(ctx context.Context, req WebhookRequest) (*WebhookResult, error)
 }
 
 // RPCRequest is a newline-delimited JSON-RPC request frame sent over stdin.
@@ -365,6 +410,26 @@ func dispatch(ctx context.Context, p Plugin, req RPCRequest) (any, error) {
 			return nil, errors.New("plugin does not implement NetworkProxyPlugin")
 		}
 		return map[string]string{"proxyUrl": np.ProxyURL()}, nil
+
+	case "handle_webhook":
+		wh, ok := p.(InboundWebhookPlugin)
+		if !ok {
+			return nil, errors.New("plugin does not implement InboundWebhookPlugin")
+		}
+		var params WebhookRequest
+		if len(req.Params) > 0 && string(req.Params) != "null" {
+			if err := json.Unmarshal(req.Params, &params); err != nil {
+				return nil, fmt.Errorf("invalid handle_webhook params: %w", err)
+			}
+		}
+		result, err := wh.HandleWebhook(ctx, params)
+		if err != nil {
+			return nil, err
+		}
+		if result == nil {
+			result = &WebhookResult{Status: 204}
+		}
+		return result, nil
 
 	case "health":
 		m := p.Manifest()

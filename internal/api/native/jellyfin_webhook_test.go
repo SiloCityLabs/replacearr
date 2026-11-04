@@ -3,9 +3,11 @@ package native
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -41,6 +43,7 @@ func (s *jellyfinStubNotifier) Notify(_ context.Context, eventType string, paylo
 	return nil
 }
 
+// jellyfinSettingsStub mimics the marketplace jellyfin-notifier inbound webhook contract.
 type jellyfinSettingsStub struct {
 	settings map[string]any
 }
@@ -53,6 +56,11 @@ func (s *jellyfinSettingsStub) Manifest() pluginsdk.Manifest {
 		ConfigSchema: []pluginsdk.ConfigFieldSchema{
 			{Name: "inbound_webhook_secret", Type: "password"},
 		},
+		InboundWebhooks: []pluginsdk.InboundWebhookSpec{{
+			SecretSetting: "inbound_webhook_secret",
+			PathAliases:   []string{"jellyfin"},
+			Description:   "Jellyfin Webhook ItemAdded callback",
+		}},
 	}
 }
 
@@ -63,6 +71,75 @@ func (s *jellyfinSettingsStub) Configure(settings map[string]any) error {
 
 func (s *jellyfinSettingsStub) Notify(_ context.Context, _ string, _ map[string]any) error {
 	return nil
+}
+
+func (s *jellyfinSettingsStub) HandleWebhook(_ context.Context, req pluginsdk.WebhookRequest) (*pluginsdk.WebhookResult, error) {
+	raw := map[string]any{}
+	if len(bytes.TrimSpace(req.Body)) > 0 {
+		if err := json.Unmarshal(req.Body, &raw); err != nil {
+			return &pluginsdk.WebhookResult{Status: http.StatusBadRequest}, err
+		}
+	}
+	if !testJellyfinIsItemAdded(raw) {
+		return &pluginsdk.WebhookResult{Status: http.StatusNoContent}, nil
+	}
+	return &pluginsdk.WebhookResult{
+		Status: http.StatusNoContent,
+		Events: []pluginsdk.WebhookEvent{{
+			EventType: pluginsdk.EventJellyfinPickedUp,
+			Payload:   testNormalizeJellyfinPayload(raw),
+		}},
+	}, nil
+}
+
+func testJellyfinIsItemAdded(raw map[string]any) bool {
+	notifType := ""
+	for _, key := range []string{"NotificationType", "notificationType", "Event", "event", "Type", "type"} {
+		if v, ok := raw[key].(string); ok && strings.TrimSpace(v) != "" {
+			notifType = strings.ToLower(strings.TrimSpace(v))
+			break
+		}
+	}
+	if notifType == "" {
+		return true
+	}
+	switch notifType {
+	case "itemadded", "item.added", "library.new", "library_new", "item added":
+		return true
+	}
+	if strings.Contains(notifType, "playback") || strings.Contains(notifType, "session") {
+		return false
+	}
+	return false
+}
+
+func testNormalizeJellyfinPayload(raw map[string]any) map[string]any {
+	out := map[string]any{}
+	for _, key := range []string{"Name", "ItemName", "title", "SeriesName"} {
+		if v, ok := raw[key].(string); ok && strings.TrimSpace(v) != "" {
+			out["title"] = strings.TrimSpace(v)
+			break
+		}
+	}
+	for _, key := range []string{"ItemType", "itemType"} {
+		if v, ok := raw[key].(string); ok && strings.TrimSpace(v) != "" {
+			out["itemType"] = strings.TrimSpace(v)
+			break
+		}
+	}
+	for _, key := range []string{"ItemId", "Id", "itemId"} {
+		if v, ok := raw[key].(string); ok && strings.TrimSpace(v) != "" {
+			out["itemId"] = strings.TrimSpace(v)
+			break
+		}
+	}
+	for _, key := range []string{"Path", "ItemPath", "path"} {
+		if v, ok := raw[key].(string); ok && strings.TrimSpace(v) != "" {
+			out["path"] = strings.TrimSpace(v)
+			break
+		}
+	}
+	return out
 }
 
 func newJellyfinWebhookStack(t *testing.T) (*Server, *pluginhost.Manager, *http.ServeMux) {
@@ -184,16 +261,28 @@ func TestJellyfinWebhookItemAddedEmitsPickedUp(t *testing.T) {
 	}
 
 	channel.mu.Lock()
-	defer channel.mu.Unlock()
 	if len(channel.events) != 1 || channel.events[0] != pluginsdk.EventJellyfinPickedUp {
-		t.Fatalf("events = %#v", channel.events)
+		ev := append([]string(nil), channel.events...)
+		channel.mu.Unlock()
+		t.Fatalf("events = %#v", ev)
 	}
 	p := channel.payloads[0]
 	if p["title"] != "Severance" || p["itemType"] != "Episode" || p["itemId"] != "abc123" {
+		channel.mu.Unlock()
 		t.Fatalf("payload = %#v", p)
 	}
 	if p["path"] != "/data/TV/Severance/S01E01.mkv" {
+		channel.mu.Unlock()
 		t.Fatalf("path = %#v", p["path"])
+	}
+	channel.mu.Unlock()
+
+	// Also accept the canonical plugin-id path (must not hold channel.mu — Notify locks it).
+	rr = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/webhooks/jellyfin-notifier?secret=shared", bytes.NewReader(body))
+	mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("plugin-id path status %d", rr.Code)
 	}
 }
 
@@ -224,23 +313,5 @@ func TestJellyfinWebhookIgnoresPlayback(t *testing.T) {
 	defer channel.mu.Unlock()
 	if len(channel.events) != 0 {
 		t.Fatalf("expected no events, got %#v", channel.events)
-	}
-}
-
-func TestNormalizeAndFilterHelpers(t *testing.T) {
-	if !jellyfinWebhookIsItemAdded(map[string]any{}) {
-		t.Fatal("empty should accept")
-	}
-	if jellyfinWebhookIsItemAdded(map[string]any{"NotificationType": "PlaybackStop"}) {
-		t.Fatal("playback should reject")
-	}
-	got := normalizeJellyfinWebhookPayload(map[string]any{
-		"ItemName": "Movie",
-		"item_type": "Movie",
-		"Id":        "1",
-		"ItemPath":  "/m.mkv",
-	})
-	if got["title"] != "Movie" || got["itemType"] != "Movie" || got["itemId"] != "1" || got["path"] != "/m.mkv" {
-		t.Fatalf("got %#v", got)
 	}
 }

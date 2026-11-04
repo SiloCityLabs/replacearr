@@ -363,8 +363,10 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 		})
 	})
 
-	// Jellyfin Webhook plugin callback (shared secret from jellyfin-notifier settings; no JWT).
-	mux.HandleFunc("POST /api/v1/webhooks/jellyfin", s.handleJellyfinWebhook)
+	// Inbound plugin webhooks (secret from Manifest.InboundWebhooks; no JWT).
+	// pluginId may be a plugin id or a PathAlias (e.g. "jellyfin").
+	mux.HandleFunc("POST /api/v1/webhooks/{pluginId}", s.handleInboundWebhook)
+	mux.HandleFunc("POST /api/v1/webhooks/{pluginId}/{slug}", s.handleInboundWebhook)
 
 	// Overview
 	mux.HandleFunc("GET /api/v1/overview", s.authSvc.RequirePermission(domain.PermSystemRead, s.handleOverview))

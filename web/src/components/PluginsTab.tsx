@@ -771,6 +771,40 @@ export const PluginsTab: React.FC<PluginsTabProps> = ({
                 </div>
               )}
 
+              {(editingPlugin.manifest.inboundWebhooks || []).length > 0 && (
+                <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
+                  <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                    Inbound webhooks
+                  </div>
+                  {(editingPlugin.manifest.inboundWebhooks || []).map((wh, idx) => {
+                    const paths = [
+                      `/api/v1/webhooks/${editingPlugin.manifest.id}${wh.slug ? `/${wh.slug}` : ''}`,
+                      ...(wh.pathAliases || []).map((a) => `/api/v1/webhooks/${a}`),
+                    ];
+                    return (
+                      <div key={`${wh.secretSetting}-${idx}`} className="space-y-1">
+                        {wh.description ? (
+                          <p className="text-[11px] text-slate-400">{wh.description}</p>
+                        ) : null}
+                        {paths.map((path) => (
+                          <code
+                            key={path}
+                            className="block text-xs font-mono text-indigo-300 break-all"
+                          >
+                            POST {origin}
+                            {path}
+                          </code>
+                        ))}
+                        <p className="text-[10px] text-slate-500">
+                          Auth: header X-Replacearr-Webhook-Secret or ?secret= (setting{' '}
+                          <span className="font-mono">{wh.secretSetting}</span>)
+                        </p>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
               {(editingPlugin.manifest.configSchema || []).map((field) =>
                 field.type === 'checkbox' ? (
                   <label

@@ -32,7 +32,8 @@ func (s *Server) EmitDownloadMoved(ctx context.Context, payload map[string]any) 
 }
 
 // EmitJellyfinPickedUp notifies plugins that Jellyfin ingested media.
-// No Jellyfin client is wired yet; this is the host hook for a future integration.
+// Prefer inbound webhooks (Manifest.InboundWebhooks → handle_webhook) for external callbacks;
+// this helper remains for in-process emitters.
 func (s *Server) EmitJellyfinPickedUp(ctx context.Context, payload map[string]any) {
 	s.emitNotification(ctx, pluginsdk.EventJellyfinPickedUp, payload)
 }

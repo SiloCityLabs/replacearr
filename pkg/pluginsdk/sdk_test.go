@@ -11,6 +11,7 @@ import (
 type stubPlugin struct {
 	configured map[string]any
 	notified   []string
+	webhooks   int
 }
 
 func (s *stubPlugin) Manifest() Manifest {
@@ -28,7 +29,12 @@ func (s *stubPlugin) Manifest() Manifest {
 		},
 		ConfigSchema: []ConfigFieldSchema{
 			{Name: "api_key", Label: "API Key", Type: "password", Required: true},
+			{Name: "inbound_webhook_secret", Label: "Secret", Type: "password"},
 		},
+		InboundWebhooks: []InboundWebhookSpec{{
+			SecretSetting: "inbound_webhook_secret",
+			PathAliases:   []string{"stub"},
+		}},
 	}
 }
 
@@ -70,6 +76,14 @@ func (s *stubPlugin) Notify(_ context.Context, eventType string, _ map[string]an
 	return nil
 }
 
+func (s *stubPlugin) HandleWebhook(_ context.Context, _ WebhookRequest) (*WebhookResult, error) {
+	s.webhooks++
+	return &WebhookResult{
+		Status: 204,
+		Events: []WebhookEvent{{EventType: EventJellyfinPickedUp, Payload: map[string]any{"ok": true}}},
+	}, nil
+}
+
 func TestServeIOAllMethods(t *testing.T) {
 	p := &stubPlugin{}
 
@@ -80,7 +94,8 @@ func TestServeIOAllMethods(t *testing.T) {
 		`{"id":4,"method":"enqueue_download","params":{"title":"Severance.S02E01","downloadUrl":"magnet:?xt=1","protocol":"torrent"}}`,
 		`{"id":5,"method":"lookup_media","params":{"mediaType":"tv","query":"Severance"}}`,
 		`{"id":6,"method":"notify","params":{"eventType":"download.started","payload":{"title":"Severance"}}}`,
-		`{"id":7,"method":"health"}`,
+		`{"id":7,"method":"handle_webhook","params":{"slug":"","body":"{\"Name\":\"x\"}"}}`,
+		`{"id":8,"method":"health"}`,
 	}
 
 	in := strings.NewReader(strings.Join(requests, "\n") + "\n")
@@ -113,5 +128,8 @@ func TestServeIOAllMethods(t *testing.T) {
 	}
 	if len(p.notified) != 1 || p.notified[0] != EventDownloadStarted {
 		t.Fatalf("expected %s notification, got %v", EventDownloadStarted, p.notified)
+	}
+	if p.webhooks != 1 {
+		t.Fatalf("expected 1 handle_webhook call, got %d", p.webhooks)
 	}
 }

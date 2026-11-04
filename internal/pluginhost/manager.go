@@ -5,6 +5,7 @@ package pluginhost
 import (
 	"bufio"
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -788,6 +789,139 @@ func (m *Manager) PluginSettings(pluginID string) (enabled bool, settings map[st
 		return false, nil, false
 	}
 	return entry.info.Enabled, cloneSettings(entry.info.Settings), true
+}
+
+// ResolveInboundWebhook maps a path segment (plugin id or PathAlias) plus optional slug
+// to an enabled plugin that declared matching Manifest.InboundWebhooks.
+func (m *Manager) ResolveInboundWebhook(pathID, slug string) (pluginID string, spec pluginsdk.InboundWebhookSpec, settings map[string]any, ok bool) {
+	pathID = strings.TrimSpace(pathID)
+	slug = strings.TrimSpace(slug)
+	if pathID == "" || m == nil {
+		return "", pluginsdk.InboundWebhookSpec{}, nil, false
+	}
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	match := func(entry *managedEntry) (pluginsdk.InboundWebhookSpec, bool) {
+		if entry == nil || !entry.info.Enabled {
+			return pluginsdk.InboundWebhookSpec{}, false
+		}
+		for _, wh := range entry.info.Manifest.InboundWebhooks {
+			if strings.TrimSpace(wh.Slug) != slug {
+				continue
+			}
+			if wh.SecretSetting == "" {
+				continue
+			}
+			return wh, true
+		}
+		return pluginsdk.InboundWebhookSpec{}, false
+	}
+
+	if entry, found := m.entries[pathID]; found {
+		if spec, ok := match(entry); ok {
+			return pathID, spec, cloneSettings(entry.info.Settings), true
+		}
+	}
+
+	// Path aliases (e.g. "jellyfin" → jellyfin-notifier).
+	for _, id := range m.order {
+		entry := m.entries[id]
+		if entry == nil || !entry.info.Enabled {
+			continue
+		}
+		for _, wh := range entry.info.Manifest.InboundWebhooks {
+			if strings.TrimSpace(wh.Slug) != slug {
+				continue
+			}
+			if wh.SecretSetting == "" {
+				continue
+			}
+			for _, alias := range wh.PathAliases {
+				if strings.TrimSpace(alias) == pathID {
+					return id, wh, cloneSettings(entry.info.Settings), true
+				}
+			}
+		}
+	}
+	return "", pluginsdk.InboundWebhookSpec{}, nil, false
+}
+
+// HandleInboundWebhook authenticates via the plugin's secret setting, invokes
+// InboundWebhookPlugin.HandleWebhook (or RPC handle_webhook), and fans out returned events.
+func (m *Manager) HandleInboundWebhook(ctx context.Context, pathID, slug, providedSecret string, headers, query map[string]string, body []byte) (status int, err error) {
+	pluginID, spec, settings, ok := m.ResolveInboundWebhook(pathID, slug)
+	if !ok {
+		return http.StatusUnauthorized, errors.New("unauthorized")
+	}
+	expected := ""
+	if settings != nil {
+		if v, ok := settings[spec.SecretSetting].(string); ok {
+			expected = strings.TrimSpace(v)
+		}
+	}
+	if expected == "" || !secureCompareSecret(providedSecret, expected) {
+		return http.StatusUnauthorized, errors.New("unauthorized")
+	}
+
+	req := pluginsdk.WebhookRequest{
+		Slug:    slug,
+		Headers: headers,
+		Query:   query,
+		Body:    append(json.RawMessage(nil), body...),
+	}
+
+	m.mu.RLock()
+	entry, found := m.entries[pluginID]
+	m.mu.RUnlock()
+	if !found {
+		return http.StatusUnauthorized, errors.New("unauthorized")
+	}
+
+	var result *pluginsdk.WebhookResult
+	if entry.builtin != nil {
+		wh, ok := entry.builtin.(pluginsdk.InboundWebhookPlugin)
+		if !ok {
+			return http.StatusNotImplemented, fmt.Errorf("plugin %s does not implement InboundWebhookPlugin", pluginID)
+		}
+		result, err = wh.HandleWebhook(ctx, req)
+	} else if entry.proc != nil {
+		callCtx := ctx
+		if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+			var cancel context.CancelFunc
+			callCtx, cancel = context.WithTimeout(ctx, 15*time.Second)
+			defer cancel()
+		}
+		var out pluginsdk.WebhookResult
+		err = entry.proc.call(callCtx, "handle_webhook", req, &out)
+		if err == nil {
+			result = &out
+		}
+	} else {
+		return http.StatusServiceUnavailable, fmt.Errorf("plugin %s is not running", pluginID)
+	}
+	if err != nil {
+		return http.StatusBadGateway, err
+	}
+	if result == nil {
+		result = &pluginsdk.WebhookResult{Status: http.StatusNoContent}
+	}
+	status = result.Status
+	if status == 0 {
+		status = http.StatusNoContent
+	}
+	for _, ev := range result.Events {
+		if strings.TrimSpace(ev.EventType) == "" {
+			continue
+		}
+		m.NotifyAll(ctx, ev.EventType, ev.Payload)
+	}
+	return status, nil
+}
+
+func secureCompareSecret(provided, expected string) bool {
+	return subtle.ConstantTimeCompare([]byte(provided), []byte(expected)) == 1
 }
 
 // ConfigurePlugin updates a plugin's enabled state and settings, persists them to SQLite,
