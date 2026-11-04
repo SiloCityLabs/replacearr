@@ -1,6 +1,6 @@
 # Replacearr
 
-Website: [replacearr.com](https://replacearr.com) · Source: [github.com/replacearr/replacearr](https://github.com/replacearr/replacearr)
+Website: [replacearr.com](https://replacearr.com) · Source: [github.com/replacearr/replacearr](https://github.com/replacearr/replacearr) · Discord: [discord.gg/WUrKJuE5XB](https://discord.gg/WUrKJuE5XB)
 
 This is a highly experimental AI created repo. I still have to deslop it. feel free to make PRs and issues. All are welcome. just needed it published so that I can deploy it using dockerhub.
 

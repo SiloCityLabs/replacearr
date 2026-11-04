@@ -10,7 +10,7 @@
 - Built-in FlareSolverr integration for Cloudflare-protected indexers
 - LinuxServer-style `PUID` / `PGID` / `TZ` support
 
-Website: **https://replacearr.com** · Source: **https://github.com/replacearr/replacearr**
+Website: **https://replacearr.com** · Source: **https://github.com/replacearr/replacearr** · Discord: **https://discord.gg/WUrKJuE5XB**
 
 **Official image:** [`ldrrp/replacearr` on Docker Hub](https://hub.docker.com/r/ldrrp/replacearr)
 
