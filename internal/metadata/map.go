@@ -11,23 +11,28 @@ import (
 
 // skyHookShow matches SkyHook camelCase JSON (search + show detail).
 type skyHookShow struct {
-	TvdbID     int               `json:"tvdbId"`
-	Title      string            `json:"title"`
-	Overview   string            `json:"overview"`
-	Slug       string            `json:"slug"`
-	FirstAired string            `json:"firstAired"`
-	TvRageID   *int              `json:"tvRageId"`
-	TvMazeID   *int              `json:"tvMazeId"`
-	TmdbID     *int              `json:"tmdbId"`
-	Status     string            `json:"status"`
-	Runtime    *int              `json:"runtime"`
-	Network    string            `json:"network"`
-	ImdbID     string            `json:"imdbId"`
-	Genres     []string          `json:"genres"`
-	Images     []skyHookImage    `json:"images"`
-	Seasons    []skyHookSeason   `json:"seasons"`
-	Episodes   []skyHookEpisode  `json:"episodes"`
-	TimeOfDay  *skyHookTimeOfDay `json:"timeOfDay"`
+	TvdbID             int                  `json:"tvdbId"`
+	Title              string               `json:"title"`
+	Overview           string               `json:"overview"`
+	Slug               string               `json:"slug"`
+	FirstAired         string               `json:"firstAired"`
+	TvRageID           *int                 `json:"tvRageId"`
+	TvMazeID           *int                 `json:"tvMazeId"`
+	TmdbID             *int                 `json:"tmdbId"`
+	Status             string               `json:"status"`
+	Runtime            *int                 `json:"runtime"`
+	Network            string               `json:"network"`
+	ImdbID             string               `json:"imdbId"`
+	Genres             []string             `json:"genres"`
+	Images             []skyHookImage       `json:"images"`
+	Seasons            []skyHookSeason      `json:"seasons"`
+	Episodes           []skyHookEpisode     `json:"episodes"`
+	AlternativeTitles  []skyHookAltTitle    `json:"alternativeTitles"`
+	TimeOfDay          *skyHookTimeOfDay    `json:"timeOfDay"`
+}
+
+type skyHookAltTitle struct {
+	Title string `json:"title"`
 }
 
 type skyHookImage struct {
@@ -36,8 +41,9 @@ type skyHookImage struct {
 }
 
 type skyHookSeason struct {
-	SeasonNumber int  `json:"seasonNumber"`
-	Monitored    bool `json:"monitored"`
+	SeasonNumber int    `json:"seasonNumber"`
+	Title        string `json:"title"`
+	Monitored    bool   `json:"monitored"`
 }
 
 type skyHookEpisode struct {
@@ -231,6 +237,48 @@ func mapSkyHookSeasons(seasons []skyHookSeason) []domain.Season {
 			SeasonNumber: s.SeasonNumber,
 			Monitored:    s.SeasonNumber > 0,
 		})
+	}
+	return out
+}
+
+// mapSeriesAliases builds series_aliases rows from SkyHook alternative titles,
+// named seasons, and synthesized ordinal season titles (Sonarr-style).
+func mapSeriesAliases(show skyHookShow) []domain.SeriesAlias {
+	title := strings.TrimSpace(show.Title)
+	seen := map[string]struct{}{}
+	var out []domain.SeriesAlias
+	add := func(aliasTitle string, season *int) {
+		aliasTitle = strings.TrimSpace(aliasTitle)
+		if aliasTitle == "" || strings.EqualFold(aliasTitle, title) {
+			return
+		}
+		key := strings.ToLower(aliasTitle)
+		if season != nil {
+			key += fmt.Sprintf("|%d", *season)
+		} else {
+			key += "|*"
+		}
+		if _, ok := seen[key]; ok {
+			return
+		}
+		seen[key] = struct{}{}
+		out = append(out, domain.SeriesAlias{Title: aliasTitle, SeasonNumber: season})
+	}
+
+	for _, alt := range show.AlternativeTitles {
+		add(alt.Title, nil)
+	}
+	for _, season := range show.Seasons {
+		if season.SeasonNumber <= 0 {
+			continue
+		}
+		sn := season.SeasonNumber
+		if strings.TrimSpace(season.Title) != "" {
+			add(season.Title, &sn)
+		}
+		for _, syn := range domain.SynthesizeSeasonAliases(title, sn) {
+			add(syn, &sn)
+		}
 	}
 	return out
 }

@@ -348,7 +348,7 @@ func (h *Handler) handleCreateSeries(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if sr.Title == "" && sr.TvdbID > 0 && h.meta != nil {
-		if looked, _, err := h.meta.GetSeriesByTVDB(r.Context(), sr.TvdbID, h.preferredLanguage()); err == nil {
+		if looked, _, _, err := h.meta.GetSeriesByTVDB(r.Context(), sr.TvdbID, h.preferredLanguage()); err == nil {
 			sr.Title = looked.Title
 			if sr.Year == 0 {
 				sr.Year = looked.Year
@@ -472,9 +472,12 @@ func (h *Handler) syncSeriesEpisodes(ctx context.Context, sr *domain.Series) err
 	if h.meta == nil || sr == nil || sr.TvdbID <= 0 || sr.ID <= 0 {
 		return nil
 	}
-	_, eps, err := h.meta.GetSeriesByTVDB(ctx, sr.TvdbID, h.preferredLanguage())
+	_, eps, aliases, err := h.meta.GetSeriesByTVDB(ctx, sr.TvdbID, h.preferredLanguage())
 	if err != nil {
 		return err
+	}
+	if len(aliases) > 0 {
+		_ = h.store.ReplaceSeriesAliases(sr.ID, aliases)
 	}
 	if len(eps) == 0 {
 		return nil
@@ -596,18 +599,7 @@ func (h *Handler) handleSearchReleases(w http.ResponseWriter, r *http.Request) {
 				term = sr.Title
 			}
 			tvdbID = sr.TvdbID
-			if aliases, aErr := h.store.ListSeriesAliases(sr.ID); aErr == nil && len(aliases) > 0 {
-				parts := []string{term}
-				for _, a := range aliases {
-					if a.Title != "" && !strings.EqualFold(a.Title, term) {
-						parts = append(parts, a.Title)
-					}
-				}
-				term = strings.Join(parts, " ")
-			}
-			if season == 0 && episode == 0 && domain.PreferSeasonPackQuery(*sr) {
-				season = 1
-			}
+			// Alias planning / aired-vs-airing season packs are handled in SearchReleases.
 		}
 	}
 	if term == "" {

@@ -8,7 +8,7 @@ In upstream Sonarr (`Sonarr/src/Sonarr.Http/V3ApiControllerAttribute.cs`), every
 * `/api/v3/*` (default root mount for drop-in Sonarr replacement)
 * `/sonarr/api/v3/*` (virtual URL-base mount when sharing a single host/port with Radarr and Prowlarr clients)
 
-Release search accepts `season` / `episode` (or `ep`) and prefers season-pack tokens for aired/ended series. Manual grabs accept `downloadUrl` (magnet or torrent URL). Posters are served from `/MediaCover/{id}/poster.jpg` as cached WebP when available (disk key uses IMDb/TVDB; only poster coverType is cached). `POST /series` and empty `GET /episode?seriesId=` sync the episode guide from SkyHook (`shows/{lang}/{tvdbId}/official`).
+Release search accepts `season` / `episode` (or `ep`). For all TV (not anime-only), season searches prefer a single season-pack query when the season is fully aired (or the series has ended); still-airing seasons also fall back to per-aired-episode queries. Season-identifying aliases (SkyHook `alternativeTitles`, named seasons, and synthesized titles like `Show 2nd Season` / `Show S02`) are searched without appending a season number. Manual grabs accept `downloadUrl` (magnet or torrent URL). Posters are served from `/MediaCover/{id}/poster.jpg` as cached WebP when available (disk key uses IMDb/TVDB; only poster coverType is cached). `POST /series` and empty `GET /episode?seriesId=` sync the episode guide and search aliases from SkyHook (`shows/{lang}/{tvdbId}/official`).
 
 ---
 

@@ -91,8 +91,9 @@ export const SeriesDetailPanel: React.FC<SeriesDetailPanelProps> = ({
   };
 
   const searchSeason = (seasonNumber: number) => {
+    // Pass title + season only; backend plans pack vs episode queries and season aliases.
     onSearchReleases({
-      query: `${series.title} S${String(seasonNumber).padStart(2, '0')}`,
+      query: series.title,
       type: 'tvsearch',
       seriesId: series.id,
       tvdbId: series.tvdbId || undefined,

@@ -121,7 +121,7 @@ func (s *Service) SearchSeries(ctx context.Context, term, language string) ([]do
 	lower := strings.ToLower(term)
 
 	if id, ok := parsePrefixedInt(lower, "tvdb:", "tvdbid:"); ok {
-		series, _, err := s.GetSeriesByTVDB(ctx, id, lang)
+		series, _, _, err := s.GetSeriesByTVDB(ctx, id, lang)
 		if err != nil {
 			if isNotFound(err) {
 				return []domain.Series{}, nil
@@ -144,21 +144,21 @@ func (s *Service) SearchSeries(ctx context.Context, term, language string) ([]do
 	return out, nil
 }
 
-// GetSeriesByTVDB fetches a single series by TVDB id, including the episode guide.
-func (s *Service) GetSeriesByTVDB(ctx context.Context, tvdbID int, language string) (domain.Series, []domain.Episode, error) {
+// GetSeriesByTVDB fetches a single series by TVDB id, including episodes and search aliases.
+func (s *Service) GetSeriesByTVDB(ctx context.Context, tvdbID int, language string) (domain.Series, []domain.Episode, []domain.SeriesAlias, error) {
 	if tvdbID <= 0 {
-		return domain.Series{}, nil, errNotFound
+		return domain.Series{}, nil, nil, errNotFound
 	}
 	lang := LanguageCode(language)
 	u := fmt.Sprintf("%s/shows/%s/%d/official", s.skyHookBase, url.PathEscape(lang), tvdbID)
 	var show skyHookShow
 	if err := s.getJSON(ctx, u, &show); err != nil {
-		return domain.Series{}, nil, err
+		return domain.Series{}, nil, nil, err
 	}
 	if show.TvdbID == 0 {
-		return domain.Series{}, nil, errNotFound
+		return domain.Series{}, nil, nil, errNotFound
 	}
-	return mapSeries(show), mapSkyHookEpisodes(show.Episodes), nil
+	return mapSeries(show), mapSkyHookEpisodes(show.Episodes), mapSeriesAliases(show), nil
 }
 
 // SearchMovies performs Radarr-style movie lookup (free-text, imdb:, tmdb:, or URLs).

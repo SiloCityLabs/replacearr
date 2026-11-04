@@ -1695,6 +1695,39 @@ func (s *Store) AddSeriesAlias(seriesID int64, title string, seasonNumber *int) 
 	return alias, nil
 }
 
+// ReplaceSeriesAliases replaces all alternate titles for a series.
+func (s *Store) ReplaceSeriesAliases(seriesID int64, aliases []domain.SeriesAlias) error {
+	if seriesID <= 0 {
+		return errors.New("seriesId is required")
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.Exec(`DELETE FROM series_aliases WHERE series_id = ?`, seriesID); err != nil {
+		return err
+	}
+	for _, a := range aliases {
+		title := strings.TrimSpace(a.Title)
+		if title == "" {
+			continue
+		}
+		var season any
+		if a.SeasonNumber != nil {
+			season = *a.SeasonNumber
+		}
+		if _, err := tx.Exec(
+			`INSERT INTO series_aliases (series_id, title, season_number) VALUES (?, ?, ?)`,
+			seriesID, title, season,
+		); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
 func boolToInt(v bool) int {
 	if v {
 		return 1
