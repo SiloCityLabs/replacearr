@@ -226,6 +226,7 @@ If the key is missing or invalid, upstream returns `401 Unauthorized` (`Response
 * **Upstream Source**: `Calendar/CalendarController.cs`
 * **Query Parameters**: `?start=2026-10-23T00:00:00Z&end=2026-10-30T00:00:00Z&unmonitored=false&includeSeries=true&includeEpisodeFile=false&includeEpisodeImages=false&tags=`
 * **Response**: Array of `EpisodeResource` objects (`List<EpisodeResource>`) ordered by `airDateUtc` ascending, optionally embedding `"series": { ... }` when `includeSeries=true` (used by **Homepage** and **nzb360**).
+* **Replacearr**: Compat handler filters by `start`/`end` on `airDateUtc`. Native UI uses `GET /api/v1/calendar` with media-type and status filters (`downloaded|missing|queued|unreleased`).
 
 ### 4.5 `/api/v3/queue` and `/api/v3/history` (Paginated Envelopes)
 * **Upstream Source**: `Queue/QueueController.cs` (`QueueResource.cs`), `History/HistoryController.cs` (`HistoryResource.cs`), `Sonarr.Http/PagingResource.cs`

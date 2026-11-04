@@ -8,7 +8,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import type { AppConfig, Episode, QualityProfile, ReleaseSearchRequest, RootFolder, Series } from '../types';
-import { api } from '../api';
+import { api, truncateText } from '../api';
 import { useRovingFocus } from '../htpc/useRovingFocus';
 import { ManualTorrentForm, type ManualTorrentTarget } from './ManualTorrentForm';
 import { SeriesDetailPanel } from './SeriesDetailPanel';
@@ -286,7 +286,9 @@ export const SeriesTab: React.FC<SeriesTabProps> = ({
                     </span>
                   )}
                 </div>
-                <p className="text-xs text-slate-400 line-clamp-2">{item.overview}</p>
+                <p className="text-xs text-slate-400">
+                  {truncateText(item.overview || '')}
+                </p>
                 <div className="text-[11px] font-mono text-slate-500">
                   TVDB: {item.tvdbId} • Status: {item.status || 'continuing'}
                 </div>
@@ -409,8 +411,10 @@ export const SeriesTab: React.FC<SeriesTabProps> = ({
                       <span>{s.runtime || 45}m</span>
                     </div>
 
-                    <p className="mt-2 text-xs text-slate-400 line-clamp-3 leading-relaxed hidden md:block">
-                      {s.overview || 'Monitored TV series in Replacearr unified database.'}
+                    <p className="mt-2 text-xs text-slate-400 leading-relaxed hidden md:block">
+                      {truncateText(
+                        s.overview || 'Monitored TV series in Replacearr unified database.'
+                      )}
                     </p>
 
                     <div className="mt-3 flex items-center gap-1.5 text-[11px] font-mono text-slate-500 truncate">

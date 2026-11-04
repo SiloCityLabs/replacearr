@@ -77,6 +77,7 @@ Inspection of `Sonarr/src/NzbDrone.Core`, `Radarr/src/NzbDrone.Core`, and `Prowl
     * `UpgradableSpecification` / `UpgradeDiskSpecification` / `UpgradeAllowedSpecification` (does release upgrade existing disk file?)
     * `AcceptableSizeSpecification` & `MaximumSizeSpecification` (within `QualityDefinition` min/max MB-per-minute bounds?)
     * `MinimumAgeSpecification`, `RetentionSpecification`, `TorrentSeedingSpecification` (min seeders), `BlocklistSpecification`, `QueueSpecification`, `ReleaseRestrictionsSpecification` (required/ignored terms).
+  * **Replacearr today:** grab paths call `store.IsBlocklisted` (`blocklist` table, migration `008_blocklist.sql`) and reject with history event `blocked`. Native UI/API: `/api/v1/blocklist` plus per-media Blocklist pages. Full Decision Engine specification pipeline remains partial.
   * If any specification returns `DownloadSpecDecision.Reject(reason, message)`, a `DownloadRejection` (`Permanent` or `Temporary`) is attached.
   * Accepted decisions are ranked by `DownloadDecisionComparer` (Protocol preference -> Quality index -> Custom Format score -> Proper/Repack revision -> Seeders/Peers -> Age -> Size).
 

@@ -25,7 +25,7 @@ help: ## Show all available make targets
 	@echo ""
 	@awk 'BEGIN {FS = ":.*##"} /^[a-zA-Z0-9_-]+:.*?##/ { printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
 
-start: ## Start containerized local dev via root docker-compose.yml (/data/TV paths, Vite+API)
+start: ## Start containerized local dev (Air live reload + Vite; /data/TV paths)
 	@mkdir -p config data/TV data/Movies data/downloads
 	docker compose up --build -d
 
@@ -96,7 +96,7 @@ test-web: ## Run frontend typecheck and build verification
 
 clean: ## Remove build artifacts and embedded dist files
 	@echo "==> Cleaning build artifacts..."
-	rm -rf $(BIN_DIR) $(WEB_DIR)/dist coverage.out
+	rm -rf $(BIN_DIR) $(WEB_DIR)/dist coverage.out tmp air.log
 	find $(EMBED_DIST) -mindepth 1 ! -name '.gitkeep' -delete 2>/dev/null || true
 
 clean-all: clean ## Also remove web/node_modules

@@ -128,7 +128,7 @@ export const SubtitlesPage: React.FC<SubtitlesPageProps> = ({
           label="API key"
           helpText="Create a consumer key at opensubtitles.com/consumers"
         >
-          <TextInput
+          <PasswordInput
             value={draft.openSubtitles.apiKey}
             onChange={(apiKey) =>
               setDraft((d) => ({

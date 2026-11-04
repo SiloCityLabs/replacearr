@@ -1,5 +1,7 @@
+/** @deprecated Prefer NavView from nav.ts — kept for Dashboard shortcuts */
 export type NavTab =
   | 'dashboard'
+  | 'calendar'
   | 'series'
   | 'movies'
   | 'music'
@@ -8,7 +10,145 @@ export type NavTab =
   | 'queue'
   | 'plugins'
   | 'users'
-  | 'settings';
+  | 'settings'
+  | 'system';
+
+export interface BlocklistItem {
+  id: number;
+  mediaType: string;
+  sourceTitle: string;
+  torrentInfoHash?: string;
+  indexer?: string;
+  message?: string;
+  seriesId?: number;
+  movieId?: number;
+  artistId?: number;
+  authorId?: number;
+  size?: number;
+  protocol?: string;
+  createdAt: string;
+}
+
+export interface NamedCount {
+  name: string;
+  count: number;
+}
+
+export interface MediaStatistics {
+  mediaType: string;
+  itemCount: number;
+  monitoredCount: number;
+  withFileCount: number;
+  missingCount: number;
+  unreleasedCount: number;
+  sizeOnDisk: number;
+  averageFileSize: number;
+  statusBreakdown?: NamedCount[];
+  seriesTypeBreakdown?: NamedCount[];
+  episodeStatusBreakdown?: NamedCount[];
+  qualityProfiles?: NamedCount[];
+  qualityBreakdown?: Array<{ name: string; count: number; size: number }>;
+  genres?: NamedCount[];
+  fileTypes?: NamedCount[];
+  missingItems?: Array<{ title: string; detail?: string; id?: number }>;
+}
+
+export interface CalendarEvent {
+  id: string;
+  title: string;
+  date: string;
+  mediaType: string;
+  status: 'downloaded' | 'missing' | 'queued' | 'unreleased' | string;
+  seriesId?: number;
+  movieId?: number;
+  artistId?: number;
+  albumId?: number;
+  bookId?: number;
+  episodeId?: number;
+}
+
+export interface HealthCheck {
+  source: string;
+  type: 'ok' | 'warning' | 'error' | string;
+  message: string;
+  time?: string;
+}
+
+export interface SystemTask {
+  name: string;
+  label?: string;
+  interval?: string;
+  lastRunAt?: string;
+  nextRunAt?: string;
+  lastDurationMs?: number;
+  status?: string;
+}
+
+export interface BackupFile {
+  id: string;
+  name: string;
+  size: number;
+  createdAt: string;
+}
+
+export interface UpdateStatus {
+  currentVersion: string;
+  latestVersion?: string;
+  updateAvailable: boolean;
+  mechanism: string;
+  checkedAt?: string;
+}
+
+export interface HistoryRecord {
+  id: number;
+  mediaType: string;
+  seriesId?: number;
+  episodeId?: number;
+  movieId?: number;
+  artistId?: number;
+  albumId?: number;
+  authorId?: number;
+  bookId?: number;
+  editionId?: number;
+  sourceTitle: string;
+  quality?: Record<string, unknown>;
+  date: string;
+  eventType: string;
+  data?: Record<string, unknown>;
+}
+
+export interface HistoryPage {
+  page: number;
+  pageSize: number;
+  totalRecords: number;
+  records: HistoryRecord[];
+}
+
+export interface LogEntry {
+  time: string;
+  level: string;
+  logger?: string;
+  message: string;
+}
+
+export interface ChangelogSection {
+  version: string;
+  date?: string;
+  notes: string[];
+}
+
+export interface LibraryImportScanItem {
+  path: string;
+  relativePath: string;
+  size: number;
+  guessedTitle: string;
+  seasonNumber?: number;
+  episodeNumber?: number;
+}
+
+export interface LibraryImportScanResult {
+  items: LibraryImportScanItem[];
+}
 
 /** Interactive Search payload — must target a library entity. */
 export interface ReleaseSearchRequest {
@@ -462,19 +602,6 @@ export interface QueueItem {
   added: string;
 }
 
-export interface HistoryRecord {
-  id: number;
-  mediaType: string;
-  seriesId?: number;
-  episodeId?: number;
-  movieId?: number;
-  sourceTitle: string;
-  quality: Record<string, unknown>;
-  date: string;
-  eventType: string;
-  data: Record<string, unknown>;
-}
-
 export interface QualityItem {
   id: number;
   name: string;
@@ -785,6 +912,12 @@ export interface MediaManagementConfig {
   chmodFolder: string;
   chownGroup: string;
   autoRenameFolders: boolean;
+  unwantedFileExtensions: string;
+  tvUnwantedFileExtensions: string;
+  movieUnwantedFileExtensions: string;
+  musicUnwantedFileExtensions: string;
+  bookUnwantedFileExtensions: string;
+  deleteUnwantedFiles: boolean;
 }
 
 export interface IndexerOptions {

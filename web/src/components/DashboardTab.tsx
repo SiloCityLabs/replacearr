@@ -6,7 +6,6 @@ import {
   BookOpen,
   Radio,
   DownloadCloud,
-  Puzzle,
   Activity,
   ArrowUpRight,
   Clock,
@@ -227,24 +226,6 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
             <ArrowUpRight className="w-3 h-3 text-sky-400 opacity-0 group-hover:opacity-100 transition shrink-0" />
           </div>
         </button>
-
-        <button
-          type="button"
-          onClick={() => onNavigate('plugins')}
-          className="text-left group bg-slate-900/90 hover:bg-slate-900 border border-slate-800 hover:border-purple-500/40 rounded-xl p-2.5 sm:p-3 transition"
-        >
-          <div className="flex items-center justify-between gap-1 mb-1.5">
-            <span className="text-[11px] sm:text-xs font-medium text-slate-400 truncate">Go Plugins</span>
-            <div className="p-1 rounded-md bg-purple-500/10 text-purple-400 border border-purple-500/20 group-hover:scale-105 transition shrink-0">
-              <Puzzle className="w-3.5 h-3.5" />
-            </div>
-          </div>
-          <div className="text-xl sm:text-2xl font-bold text-white leading-none">{counts.plugins}</div>
-          <div className="mt-1 flex items-center justify-between gap-1 text-[10px] sm:text-xs text-slate-400">
-            <span className="truncate">JSON-RPC SDK</span>
-            <ArrowUpRight className="w-3 h-3 text-purple-400 opacity-0 group-hover:opacity-100 transition shrink-0" />
-          </div>
-        </button>
       </div>
 
       {/* Active Queue Preview + Recent History */}
@@ -411,12 +392,6 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
 
           <div className="mt-5 pt-4 border-t border-slate-800/80 flex items-center justify-between text-xs text-slate-400">
             <span>Version {overview?.system?.version || '1.0.0-go'}</span>
-            <button
-              onClick={() => onNavigate('plugins')}
-              className="text-indigo-400 hover:text-indigo-300 font-medium"
-            >
-              View Plugins →
-            </button>
           </div>
         </div>
       </div>

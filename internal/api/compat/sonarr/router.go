@@ -491,13 +491,33 @@ func (h *Handler) syncSeriesEpisodes(ctx context.Context, sr *domain.Series) err
 	return h.store.ReplaceEpisodesForSeries(sr.ID, eps)
 }
 
-func (h *Handler) handleCalendar(w http.ResponseWriter, _ *http.Request) {
+func (h *Handler) handleCalendar(w http.ResponseWriter, r *http.Request) {
 	eps, err := h.store.ListEpisodes(0)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, eps)
+	start, _ := time.Parse(time.RFC3339, r.URL.Query().Get("start"))
+	end, _ := time.Parse(time.RFC3339, r.URL.Query().Get("end"))
+	if start.IsZero() && end.IsZero() {
+		writeJSON(w, http.StatusOK, eps)
+		return
+	}
+	out := make([]domain.Episode, 0, len(eps))
+	for _, ep := range eps {
+		air := ep.AirDateUtc
+		if air.IsZero() {
+			continue
+		}
+		if !start.IsZero() && air.Before(start) {
+			continue
+		}
+		if !end.IsZero() && air.After(end) {
+			continue
+		}
+		out = append(out, ep)
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (h *Handler) handleGetQueue(w http.ResponseWriter, _ *http.Request) {

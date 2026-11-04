@@ -35,7 +35,7 @@ Replacearr is a single-binary Go replacement for Sonarr, Radarr, and Prowlarr. O
 ## Working agreement
 
 - Prefer `make` targets over ad-hoc commands: `make start`, `make test`, `make build`.
-- Local UI/API checks use `make start` (root `docker-compose.yml`) so media paths match production (`/data/TV`, `/data/Movies`). After Go or plugin changes, restart the compose service so `:8989` picks up the new binary. Vite HMR covers most `web/` edits without a restart. Stop with `make stop`.
+- Local UI/API checks use `make start` (root `docker-compose.yml`) so media paths match production (`/data/TV`, `/data/Movies`). The dev container runs [Air](https://github.com/air-verse/air) (`.air.toml`) so Go edits rebuild/restart the API process in-place; Vite HMR covers `web/` edits. Restart the compose service only after Dockerfile/entrypoint/Air config changes. Stop with `make stop`.
 - Run `go test -race ./...` for Go changes and `npm run typecheck` in `web/` for UI changes.
 - Do not hand-edit `internal/webui/dist` or `web/dist`. Rebuild with `make build-web`.
 - Do not commit databases, `.env`, API keys, or `./config/`.
@@ -46,11 +46,15 @@ Replacearr is a single-binary Go replacement for Sonarr, Radarr, and Prowlarr. O
 - Auth stays JWT (`Authorization: Bearer`, `replacearr_token` cookie) plus `*arr` keys (`X-Api-Key`, `?apikey=`). Key scopes are `all`, `sonarr`, `radarr`, `lidarr`, `readarr`, or `prowlarr`.
 - Music (MusicBrainz) and Books/ebook+audiobook (OpenLibrary) are native modules (`docs/discovery/05` / `06`). Thin `/lidarr` and `/readarr` mounts are for migration only.
 
+## UI navigation
+
+The SPA uses accordion left-nav groups (`web/src/nav.ts`, `SideNav`) with `activeView` ids such as `series.library`, `settings.media`, and `system.logs`. Media libraries (TV / Movies / Music / Books) each expose Library, Library Import, Statistics, and Blocklist. Calendar and System are top-level. Settings categories live in the left nav (not an in-page submenu). Backup/Updates/Events/Logs/Changelog live under System.
+
 ## Still open from the architecture plan
 
 - Raise Go and compat test coverage toward the routes in `docs/discovery/`.
 - Full PWA support for the embedded SPA.
-- GitHub Actions build pipeline, then any further release pipelines.
+- Deeper Decision Engine (custom formats, RSS sync runners) beyond blocklist rejection on grab.
 
 ## Verify
 

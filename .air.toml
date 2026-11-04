@@ -1,0 +1,59 @@
+# Air live-reload for local Docker development (root Dockerfile / entrypoint.sh).
+# Production images do not include Air — see docker/Dockerfile.
+#:schema https://json.schemastore.org/any.json
+
+root = "."
+tmp_dir = "tmp"
+
+[build]
+  # Static binary matching production build flags (no CGO).
+  cmd = "CGO_ENABLED=0 go build -buildvcs=false -o ./tmp/replacearr ./cmd/replacearr"
+  entrypoint = ["./tmp/replacearr"]
+  include_ext = ["go", "sql"]
+  exclude_dir = [
+    ".git",
+    ".github",
+    ".cursor",
+    "tmp",
+    "vendor",
+    "bin",
+    "web",
+    "config",
+    "data",
+    "definitions",
+    "docs",
+    "docker",
+    "internal/webui/dist",
+    "node_modules",
+  ]
+  exclude_regex = ["_test\\.go"]
+  exclude_unchanged = true
+  follow_symlink = false
+  log = "air.log"
+  # Bind mounts often miss inotify events; poll so host edits always rebuild.
+  poll = true
+  poll_interval = 500
+  delay = 500
+  # Keep the previous binary running until a new build succeeds; Air itself
+  # keeps watching after compile errors so fixing the error triggers another build.
+  stop_on_error = false
+  send_interrupt = true
+  kill_delay = "2s"
+
+[log]
+  time = false
+  main_only = false
+  silent = false
+
+[color]
+  main = "magenta"
+  watcher = "cyan"
+  build = "yellow"
+  runner = "green"
+
+[misc]
+  clean_on_exit = false
+
+[screen]
+  clear_on_rebuild = false
+  keep_scroll = true

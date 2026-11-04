@@ -23,6 +23,7 @@ import (
 	"github.com/replacearr/replacearr/internal/plugincatalog"
 	"github.com/replacearr/replacearr/internal/pluginhost"
 	"github.com/replacearr/replacearr/internal/subtitles"
+	"github.com/replacearr/replacearr/internal/tasks"
 	"github.com/replacearr/replacearr/pkg/pluginsdk"
 )
 
@@ -36,6 +37,7 @@ type Server struct {
 	flareClient   *flaresolverr.Client
 	covers        *mediacover.Store
 	subtitles     *subtitles.Service
+	scheduler     *tasks.Scheduler
 	version       string
 	startedAt     time.Time
 }
@@ -455,6 +457,8 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/plugins/catalog/install", s.authSvc.RequirePermission(domain.PermPluginsManage, s.handlePluginCatalogInstall))
 	mux.HandleFunc("POST /api/v1/plugins/catalog/uninstall", s.authSvc.RequirePermission(domain.PermPluginsManage, s.handlePluginCatalogUninstall))
 	mux.HandleFunc("GET /api/v1/notifications/stream", s.authSvc.RequirePermission(domain.PermSystemRead, s.handleNotificationStream))
+
+	s.registerExpandedRoutes(mux)
 }
 
 func (s *Server) handleOverview(w http.ResponseWriter, _ *http.Request) {
@@ -814,6 +818,29 @@ func (s *Server) handleGrabRelease(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Title == "" {
 		req.Title = req.DownloadURL
+	}
+	blockMedia := req.MediaType
+	if blockMedia == "" {
+		switch {
+		case req.MovieID > 0:
+			blockMedia = "movies"
+		case req.ArtistID > 0 || req.AlbumID > 0:
+			blockMedia = "music"
+		case req.BookID > 0 || req.AuthorID > 0 || req.EditionID > 0:
+			blockMedia = "books"
+		default:
+			blockMedia = "tv"
+		}
+	}
+	if blocked, _ := s.store.IsBlocklisted(blockMedia, req.Title, ""); blocked {
+		_ = s.store.CreateHistory(domain.HistoryRecord{
+			MediaType: blockMedia, SeriesID: req.SeriesID, MovieID: req.MovieID,
+			ArtistID: req.ArtistID, AuthorID: req.AuthorID, BookID: req.BookID,
+			SourceTitle: req.Title, EventType: "blocked",
+			Quality: map[string]any{}, Data: map[string]any{"reason": "blocklist"},
+		})
+		writeErr(w, http.StatusConflict, fmt.Errorf("release is blocklisted"))
+		return
 	}
 	if req.Protocol == "" {
 		req.Protocol = "torrent"

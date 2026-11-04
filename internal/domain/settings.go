@@ -1,5 +1,7 @@
 package domain
 
+import "strings"
+
 // AppConfig is the single settings document stored under the "app" key.
 type AppConfig struct {
 	SetupComplete         bool                  `json:"setupComplete"`
@@ -153,6 +155,12 @@ type MediaManagementConfig struct {
 	ChmodFolder                     string `json:"chmodFolder"`
 	ChownGroup                      string `json:"chownGroup"`
 	AutoRenameFolders               bool   `json:"autoRenameFolders"`
+	UnwantedFileExtensions          string `json:"unwantedFileExtensions"`
+	TVUnwantedFileExtensions        string `json:"tvUnwantedFileExtensions"`
+	MovieUnwantedFileExtensions     string `json:"movieUnwantedFileExtensions"`
+	MusicUnwantedFileExtensions     string `json:"musicUnwantedFileExtensions"`
+	BookUnwantedFileExtensions      string `json:"bookUnwantedFileExtensions"`
+	DeleteUnwantedFiles             bool   `json:"deleteUnwantedFiles"`
 }
 
 type IndexerOptions struct {
@@ -352,6 +360,8 @@ func DefaultAppConfig() AppConfig {
 			FileDate:                      "none",
 			RecycleBinCleanupDays:         7,
 			ChmodFolder:                   "755",
+			UnwantedFileExtensions:        ".exe",
+			DeleteUnwantedFiles:           true,
 		},
 		IndexerOptions: IndexerOptions{RssSyncInterval: 15},
 		DownloadClientOptions: DownloadClientOptions{
@@ -480,6 +490,9 @@ func (c *AppConfig) Normalize() {
 	}
 	if c.Subtitles.Languages == nil {
 		c.Subtitles.Languages = []string{"en"}
+	}
+	if strings.TrimSpace(c.MediaManagement.UnwantedFileExtensions) == "" {
+		c.MediaManagement.UnwantedFileExtensions = ".exe"
 	}
 
 	c.Security.AuthenticationMethod = "forms"

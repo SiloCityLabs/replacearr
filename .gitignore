@@ -1,8 +1,9 @@
-# Temporary artifacts
+# Temporary artifacts (includes Air live-reload build output under tmp/)
 tmp/
 core
 core.*
 *.core
+air.log
 
 # Build outputs
 bin/

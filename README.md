@@ -63,7 +63,8 @@ replacearr/
 │   └── entrypoint.sh              # PUID/PGID setup & bundled plugin seeding
 ├── Dockerfile                     # Root Go+Node image for local containerized development
 ├── docker-compose.yml             # Local containerized development (bind-mount, /data paths)
-├── entrypoint.sh                  # Local dev container entrypoint (API + Vite)
+├── entrypoint.sh                  # Local dev container entrypoint (Air + Vite)
+├── .air.toml                      # Air live-reload config for the Go API
 └── Makefile                       # Build, test, and Docker automation
 ```
 
@@ -271,7 +272,7 @@ services:
 ### Prerequisites
 
 - **Docker** & **Docker Compose** (required for local development via `make start`)
-- **Go** `1.23+` and **Node.js** `24+` only if you run `make test` / `make build` on the host
+- **Go** `1.25+` (toolchain pinned to **1.27** in `go.mod` / Dockerfiles) and **Node.js** `24+` only if you run `make test` / `make build` on the host
 
 ### Quick Start (Local Development)
 
@@ -287,6 +288,25 @@ make build
 ./bin/replacearr
 ```
 
+#### Live reload (Air)
+
+The development container runs [Air](https://github.com/air-verse/air) for the Go API and Vite HMR for the UI:
+
+- `make start` bind-mounts the repo at `/workspace` and starts Air via `entrypoint.sh` (config: `.air.toml`).
+- Saving a `.go` or embedded `.sql` migration rebuilds and restarts **only** the Replacearr process inside the running container — the container itself stays up.
+- Compile errors print in `docker compose logs -f replacearr`; Air keeps watching, so fixing the error triggers another build automatically.
+- Frontend edits still use Vite HMR on `:5173` (no container restart).
+- Production images (`docker/Dockerfile`) do **not** install Air.
+
+**File watching / bind-mount troubleshooting**
+
+| Symptom | What to try |
+| :--- | :--- |
+| Edits on the host do not rebuild | Confirm the compose volume `.:/workspace` is mounted (`docker compose exec replacearr ls /workspace/cmd`). `.air.toml` enables `poll = true` for bind mounts; rebuild the image if that file is missing (`make start`). |
+| Rebuild is slow or flapping | Narrow watched paths in `.air.toml` `exclude_dir`; avoid writing under watched trees (`tmp/`, `bin/`, `web/`). |
+| `air: command not found` | Rebuild the **development** image (`docker compose build --no-cache replacearr` then `make start`). Do not expect Air in the production image. |
+| Stale binary after a failed compile | Check logs for the compile error; Air leaves the previous successful binary running until the next successful build (`stop_on_error = false`). |
+
 ### Makefile Targets Reference
 
 | Command | Description |
@@ -299,7 +319,7 @@ make build
 | `make test` | Run all Go backend unit/integration tests and frontend typechecks |
 | `make test-go` | Run `go test -v -race ./...` |
 | `make test-web` | Run TypeScript verification (`npm run typecheck`) in `web/` |
-| `make start` | Start containerized local dev (`docker-compose.yml`: bind-mount, `/data/TV` paths, Vite+API) |
+| `make start` | Start containerized local dev with Air live reload + Vite (`docker-compose.yml`) |
 | `make stop` | Stop the local containerized stack (keeps `./config` and `./data`) |
 | `make build-docker` | Build the public production multi-stage Docker image (`docker/Dockerfile`) |
 | `make clean` | Clean build artifacts, embedded dist files, and temporary dev config |

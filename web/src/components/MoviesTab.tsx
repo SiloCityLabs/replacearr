@@ -10,7 +10,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import type { Movie, QualityProfile, ReleaseSearchRequest, RootFolder } from '../types';
-import { api, formatBytes } from '../api';
+import { api, formatBytes, truncateText } from '../api';
 import { useRovingFocus } from '../htpc/useRovingFocus';
 import { ManualTorrentForm, type ManualTorrentTarget } from './ManualTorrentForm';
 import { MovieDetailPanel } from './MovieDetailPanel';
@@ -278,7 +278,9 @@ export const MoviesTab: React.FC<MoviesTabProps> = ({
                     </span>
                   )}
                 </div>
-                <p className="text-xs text-slate-400 line-clamp-2">{item.overview}</p>
+                <p className="text-xs text-slate-400">
+                  {truncateText(item.overview || '')}
+                </p>
                 <div className="text-[11px] font-mono text-slate-500">
                   TMDB: {item.tmdbId} • IMDb: {item.imdbId || 'N/A'} • {item.runtime || 120} min
                 </div>
@@ -406,8 +408,10 @@ export const MoviesTab: React.FC<MoviesTabProps> = ({
                       )}
                     </div>
 
-                    <p className="mt-2 text-xs text-slate-400 line-clamp-3 leading-relaxed hidden md:block">
-                      {m.overview || 'Monitored feature film in Replacearr unified database.'}
+                    <p className="mt-2 text-xs text-slate-400 leading-relaxed hidden md:block">
+                      {truncateText(
+                        m.overview || 'Monitored feature film in Replacearr unified database.'
+                      )}
                     </p>
 
                     <div className="mt-3 flex items-center gap-1.5 text-[11px] font-mono text-slate-500 truncate">

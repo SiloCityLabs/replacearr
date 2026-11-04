@@ -100,6 +100,56 @@ func (s *Store) GetMovieFileByMovieID(movieID int64) (*domain.MovieFile, error) 
 	return scanMovieFile(row)
 }
 
+func (s *Store) ListEpisodeFiles(seriesID int64) ([]domain.EpisodeFile, error) {
+	q := `SELECT id, series_id, episode_id, path, relative_path, size, scene_name, release_group, date_added FROM episode_files`
+	args := []any{}
+	if seriesID > 0 {
+		q += ` WHERE series_id = ?`
+		args = append(args, seriesID)
+	}
+	rows, err := s.db.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []domain.EpisodeFile{}
+	for rows.Next() {
+		var f domain.EpisodeFile
+		var added string
+		if err := rows.Scan(&f.ID, &f.SeriesID, &f.EpisodeID, &f.Path, &f.RelativePath, &f.Size, &f.SceneName, &f.ReleaseGroup, &added); err != nil {
+			return nil, err
+		}
+		f.DateAdded = parseSQLTime(added)
+		out = append(out, f)
+	}
+	return out, nil
+}
+
+func (s *Store) ListMovieFiles(movieID int64) ([]domain.MovieFile, error) {
+	q := `SELECT id, movie_id, path, relative_path, size, scene_name, release_group, date_added FROM movie_files`
+	args := []any{}
+	if movieID > 0 {
+		q += ` WHERE movie_id = ?`
+		args = append(args, movieID)
+	}
+	rows, err := s.db.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []domain.MovieFile{}
+	for rows.Next() {
+		var f domain.MovieFile
+		var added string
+		if err := rows.Scan(&f.ID, &f.MovieID, &f.Path, &f.RelativePath, &f.Size, &f.SceneName, &f.ReleaseGroup, &added); err != nil {
+			return nil, err
+		}
+		f.DateAdded = parseSQLTime(added)
+		out = append(out, f)
+	}
+	return out, nil
+}
+
 func scanEpisodeFile(row *sql.Row) (*domain.EpisodeFile, error) {
 	var f domain.EpisodeFile
 	var added string

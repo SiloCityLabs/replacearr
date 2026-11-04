@@ -25,6 +25,7 @@ import {
 import type { CatalogPlugin, DiscoveredPlugin } from '../types';
 import { api } from '../api';
 import { isBrowserNotificationPlugin, notifyBrowser, requestPermission } from '../notifications';
+import { PasswordInput, SecretDisplay } from './settings/fields';
 
 interface PluginsTabProps {
   plugins: DiscoveredPlugin[];
@@ -541,32 +542,33 @@ export const PluginsTab: React.FC<PluginsTabProps> = ({
             </p>
           </div>
 
-          <div className="bg-slate-950 border border-slate-800 rounded-xl p-3.5 flex items-center gap-3 min-w-0 w-full lg:max-w-md">
-            <div className="min-w-0 flex-1">
+          <div className="bg-slate-950 border border-slate-800 rounded-xl p-3.5 space-y-2 min-w-0 w-full lg:max-w-md">
+            <div className="flex items-center justify-between gap-2">
               <div className="text-[10px] font-mono uppercase tracking-wider text-slate-400">
                 System Master API Key
               </div>
-              <code className="block text-sm font-mono font-bold text-emerald-400 select-all truncate">
-                {masterApiKey || 'replacearr-master-api-key'}
-              </code>
+              <button
+                type="button"
+                onClick={() => copy(masterApiKey || 'replacearr-master-api-key', 'master-key')}
+                className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold inline-flex items-center gap-1.5 transition shrink-0"
+              >
+                {copiedId === 'master-key' ? (
+                  <>
+                    <Check className="w-3.5 h-3.5" />
+                    <span>Copied</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-3.5 h-3.5" />
+                    <span>Copy Key</span>
+                  </>
+                )}
+              </button>
             </div>
-            <button
-              type="button"
-              onClick={() => copy(masterApiKey || 'replacearr-master-api-key', 'master-key')}
-              className="px-3 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold inline-flex items-center gap-1.5 transition shrink-0"
-            >
-              {copiedId === 'master-key' ? (
-                <>
-                  <Check className="w-3.5 h-3.5" />
-                  <span>Copied</span>
-                </>
-              ) : (
-                <>
-                  <Copy className="w-3.5 h-3.5" />
-                  <span>Copy Key</span>
-                </>
-              )}
-            </button>
+            <SecretDisplay
+              value={masterApiKey || 'replacearr-master-api-key'}
+              className="block text-sm font-mono font-bold text-emerald-400 select-all break-all"
+            />
           </div>
         </div>
 
@@ -961,26 +963,32 @@ export const PluginsTab: React.FC<PluginsTabProps> = ({
                       {field.label || field.name}{' '}
                       {field.required ? <span className="text-rose-400">*</span> : null}
                     </label>
-                    <input
-                      id={`plugin-field-${field.name}`}
-                      type={
-                        field.type === 'password'
-                          ? 'password'
-                          : field.type === 'number'
-                            ? 'number'
-                            : 'text'
-                      }
-                      value={String(formSettings[field.name] ?? '')}
-                      onChange={(e) =>
-                        setFormSettings({
-                          ...formSettings,
-                          [field.name]:
-                            field.type === 'number' ? Number(e.target.value) : e.target.value,
-                        })
-                      }
-                      readOnly={Boolean(COMPAT_BASE[editingPlugin.manifest.id])}
-                      className="w-full min-h-10 px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white font-mono"
-                    />
+                    {field.type === 'password' ? (
+                      <PasswordInput
+                        id={`plugin-field-${field.name}`}
+                        value={String(formSettings[field.name] ?? '')}
+                        onChange={(value) =>
+                          setFormSettings({ ...formSettings, [field.name]: value })
+                        }
+                        readOnly={Boolean(COMPAT_BASE[editingPlugin.manifest.id])}
+                        className="w-full min-h-10 px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white font-mono"
+                      />
+                    ) : (
+                      <input
+                        id={`plugin-field-${field.name}`}
+                        type={field.type === 'number' ? 'number' : 'text'}
+                        value={String(formSettings[field.name] ?? '')}
+                        onChange={(e) =>
+                          setFormSettings({
+                            ...formSettings,
+                            [field.name]:
+                              field.type === 'number' ? Number(e.target.value) : e.target.value,
+                          })
+                        }
+                        readOnly={Boolean(COMPAT_BASE[editingPlugin.manifest.id])}
+                        className="w-full min-h-10 px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white font-mono"
+                      />
+                    )}
                     {field.helpText ? (
                       <p className="text-[11px] text-slate-500 mt-1">{field.helpText}</p>
                     ) : null}

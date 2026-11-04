@@ -7,8 +7,9 @@
 #   # or: docker compose up --build
 #
 # UI (Vite HMR):  http://localhost:5173
-# API:            http://localhost:8989
+# API (Air):      http://localhost:8989  — Go live reload via .air.toml
 #
+# Source is bind-mounted at /workspace; Air rebuilds the API process on .go changes.
 # Path layout matches production: /config, /data/TV, /data/Movies, /data/Music, /data/Books, /data/Audiobooks, /data/downloads
 # ==============================================================================
 

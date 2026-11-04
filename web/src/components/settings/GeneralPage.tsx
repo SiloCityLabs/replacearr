@@ -94,7 +94,7 @@ export const GeneralPage: React.FC<GeneralPageProps> = ({
 
   return (
     <div>
-      <PageIntro title="General" caption="Host, security, proxy, logging, updates, and backup." />
+      <PageIntro title="General" caption="Host, security, proxy, and logging. Backup and updates live under System." />
 
       {draft.host.pendingRestart ? (
         <p className="text-xs text-amber-200/90 bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2 mb-4">
@@ -311,68 +311,10 @@ export const GeneralPage: React.FC<GeneralPageProps> = ({
             </FieldRow>
           </Section>
 
-          <Section title="Updates">
-            <FieldRow label="Branch">
-              <TextInput
-                value={draft.updates.branch}
-                onChange={(value) =>
-                  setDraft((current) => ({ ...current, updates: { ...current.updates, branch: value } }))
-                }
-              />
-            </FieldRow>
-            <FieldRow label="Update Automatically">
-              <Checkbox
-                checked={draft.updates.updateAutomatically}
-                onChange={(value) =>
-                  setDraft((current) => ({
-                    ...current,
-                    updates: { ...current.updates, updateAutomatically: value },
-                  }))
-                }
-              />
-            </FieldRow>
-            <FieldRow label="Mechanism">
-              <TextInput value="docker" disabled onChange={() => undefined} />
-            </FieldRow>
-            <FieldRow label="Update Script Path">
-              <TextInput
-                value={draft.updates.updateScriptPath}
-                onChange={(value) =>
-                  setDraft((current) => ({
-                    ...current,
-                    updates: { ...current.updates, updateScriptPath: value },
-                  }))
-                }
-              />
-            </FieldRow>
-          </Section>
-
-          <Section title="Backup" caption="Stored only. Replacearr does not run a backup job yet.">
-            <FieldRow label="Folder">
-              <TextInput
-                value={draft.backup.folder}
-                onChange={(value) =>
-                  setDraft((current) => ({ ...current, backup: { ...current.backup, folder: value } }))
-                }
-              />
-            </FieldRow>
-            <FieldRow label="Interval">
-              <NumberInput
-                value={draft.backup.interval}
-                onChange={(value) =>
-                  setDraft((current) => ({ ...current, backup: { ...current.backup, interval: value } }))
-                }
-              />
-            </FieldRow>
-            <FieldRow label="Retention">
-              <NumberInput
-                value={draft.backup.retention}
-                onChange={(value) =>
-                  setDraft((current) => ({ ...current, backup: { ...current.backup, retention: value } }))
-                }
-              />
-            </FieldRow>
-          </Section>
+          <p className="text-xs text-slate-400 mb-4">
+            Backup settings live under <span className="text-slate-200">System → Backup</span>. Check for
+            Docker image updates under <span className="text-slate-200">System → Updates</span>.
+          </p>
         </>
       ) : null}
 

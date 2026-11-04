@@ -5,8 +5,12 @@ import type {
   Artist,
   AuthResponse,
   Author,
+  BackupFile,
+  BlocklistItem,
   Book,
+  CalendarEvent,
   CardigannDefinition,
+  ChangelogSection,
   DiscoveredPlugin,
   DomainClearance,
   CatalogResolveResponse,
@@ -15,8 +19,14 @@ import type {
   Edition,
   Episode,
   FlareSolverrHealth,
+  HealthCheck,
+  HistoryPage,
+  HistoryRecord,
   Indexer,
   IndexerProxy,
+  LibraryImportScanResult,
+  LogEntry,
+  MediaStatistics,
   Movie,
   OverviewResponse,
   QualityDefinition,
@@ -29,9 +39,11 @@ import type {
   SubtitleCandidate,
   SubtitlesStatus,
   SubtitleTrack,
+  SystemTask,
   Tag,
   TagDetails,
   Track,
+  UpdateStatus,
   User,
 } from './types';
 
@@ -783,6 +795,150 @@ export const api = {
       body: JSON.stringify(payload),
     });
   },
+
+  async getBlocklist(mediaType?: string): Promise<BlocklistItem[]> {
+    const q = mediaType ? `?mediaType=${encodeURIComponent(mediaType)}` : '';
+    const res = await request<unknown>(`/api/v1/blocklist${q}`);
+    return unwrapArray<BlocklistItem>(res);
+  },
+
+  async addBlocklist(payload: Partial<BlocklistItem>): Promise<BlocklistItem> {
+    return request<BlocklistItem>('/api/v1/blocklist', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async deleteBlocklist(id: number): Promise<void> {
+    await request(`/api/v1/blocklist/${id}`, { method: 'DELETE' });
+  },
+
+  async deleteBlocklistBulk(ids: number[]): Promise<void> {
+    await request('/api/v1/blocklist/bulk', {
+      method: 'DELETE',
+      body: JSON.stringify({ ids }),
+    });
+  },
+
+  async getStatistics(mediaType: string): Promise<MediaStatistics> {
+    return request<MediaStatistics>(`/api/v1/statistics?mediaType=${encodeURIComponent(mediaType)}`);
+  },
+
+  async getCalendar(params: {
+    start: string;
+    end: string;
+    mediaTypes?: string;
+    statuses?: string;
+  }): Promise<CalendarEvent[]> {
+    const q = new URLSearchParams();
+    q.set('start', params.start);
+    q.set('end', params.end);
+    if (params.mediaTypes) q.set('mediaTypes', params.mediaTypes);
+    if (params.statuses) q.set('statuses', params.statuses);
+    const res = await request<unknown>(`/api/v1/calendar?${q}`);
+    return unwrapArray<CalendarEvent>(res);
+  },
+
+  async scanLibraryImport(payload: {
+    mediaType: string;
+    path: string;
+    rootFolderId?: number;
+  }): Promise<LibraryImportScanResult> {
+    return request<LibraryImportScanResult>('/api/v1/libraryimport/scan', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async runLibraryImport(payload: {
+    mediaType: string;
+    items: Array<{
+      path: string;
+      matchId: number;
+      seasonNumber?: number;
+      episodeNumber?: number;
+    }>;
+  }): Promise<{ imported: number }> {
+    return request<{ imported: number }>('/api/v1/libraryimport', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async rescanLibrary(payload: { mediaType: string; id?: number }): Promise<{ ok: boolean }> {
+    return request<{ ok: boolean }>('/api/v1/libraryimport/rescan', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async getHealthChecks(): Promise<HealthCheck[]> {
+    const res = await request<unknown>('/api/v1/system/healthchecks');
+    return unwrapArray<HealthCheck>(res);
+  },
+
+  async getSystemTasks(): Promise<SystemTask[]> {
+    const res = await request<unknown>('/api/v1/system/tasks');
+    return unwrapArray<SystemTask>(res);
+  },
+
+  async runSystemTask(name: string): Promise<void> {
+    await request(`/api/v1/system/tasks/${encodeURIComponent(name)}/run`, { method: 'POST' });
+  },
+
+  async listBackups(): Promise<BackupFile[]> {
+    const res = await request<unknown>('/api/v1/system/backup');
+    return unwrapArray<BackupFile>(res);
+  },
+
+  async createBackup(): Promise<BackupFile> {
+    return request<BackupFile>('/api/v1/system/backup', { method: 'POST' });
+  },
+
+  backupDownloadUrl(id: string): string {
+    const token = getStoredToken();
+    const q = token ? `?token=${encodeURIComponent(token)}` : '';
+    return `/api/v1/system/backup/${encodeURIComponent(id)}${q}`;
+  },
+
+  async deleteBackup(id: string): Promise<void> {
+    await request(`/api/v1/system/backup/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  },
+
+  async restoreBackup(id: string): Promise<void> {
+    await request(`/api/v1/system/backup/${encodeURIComponent(id)}/restore`, { method: 'POST' });
+  },
+
+  async getUpdateStatus(): Promise<UpdateStatus> {
+    return request<UpdateStatus>('/api/v1/system/updates');
+  },
+
+  async getHistory(params: {
+    page?: number;
+    pageSize?: number;
+    mediaType?: string;
+    eventType?: string;
+  }): Promise<HistoryPage> {
+    const q = new URLSearchParams();
+    if (params.page) q.set('page', String(params.page));
+    if (params.pageSize) q.set('pageSize', String(params.pageSize));
+    if (params.mediaType) q.set('mediaType', params.mediaType);
+    if (params.eventType) q.set('eventType', params.eventType);
+    return request<HistoryPage>(`/api/v1/history?${q}`);
+  },
+
+  async getSystemLogs(params?: { level?: string; limit?: number }): Promise<LogEntry[]> {
+    const q = new URLSearchParams();
+    if (params?.level) q.set('level', params.level);
+    if (params?.limit) q.set('limit', String(params.limit));
+    const res = await request<unknown>(`/api/v1/system/logs?${q}`);
+    return unwrapArray<LogEntry>(res);
+  },
+
+  async getChangelog(): Promise<ChangelogSection[]> {
+    const res = await request<unknown>('/api/v1/system/changelog');
+    return unwrapArray<ChangelogSection>(res);
+  },
 };
 
 export function formatBytes(bytes: number): string {
@@ -795,4 +951,10 @@ export function formatBytes(bytes: number): string {
     idx++;
   }
   return `${val.toFixed(idx > 1 ? 2 : 0)} ${units[idx]}`;
+}
+
+/** Truncate card/list copy for display; full text stays available on detail views. */
+export function truncateText(text: string, max = 200): string {
+  if (text.length <= max) return text;
+  return `${text.slice(0, max)}...`;
 }

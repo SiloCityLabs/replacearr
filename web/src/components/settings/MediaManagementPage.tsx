@@ -260,6 +260,48 @@ export const MediaManagementPage: React.FC<MediaManagementPageProps> = ({
         </>
       ) : null}
 
+      <Section
+        title="Unwanted File Filters"
+        caption="Extensions deleted from download folders after import. Global defaults apply to all libraries; per-type fields append."
+      >
+        <FieldRow label="Delete Unwanted Files">
+          <Checkbox
+            checked={draft.deleteUnwantedFiles !== false}
+            onChange={(value) => patch('deleteUnwantedFiles', value)}
+          />
+        </FieldRow>
+        <FieldRow label="Global Extensions" helpText="Comma-separated, e.g. .exe,.bat">
+          <TextInput
+            value={draft.unwantedFileExtensions ?? '.exe'}
+            onChange={(value) => patch('unwantedFileExtensions', value)}
+          />
+        </FieldRow>
+        <FieldRow label="TV Extensions">
+          <TextInput
+            value={draft.tvUnwantedFileExtensions ?? ''}
+            onChange={(value) => patch('tvUnwantedFileExtensions', value)}
+          />
+        </FieldRow>
+        <FieldRow label="Movie Extensions">
+          <TextInput
+            value={draft.movieUnwantedFileExtensions ?? ''}
+            onChange={(value) => patch('movieUnwantedFileExtensions', value)}
+          />
+        </FieldRow>
+        <FieldRow label="Music Extensions">
+          <TextInput
+            value={draft.musicUnwantedFileExtensions ?? ''}
+            onChange={(value) => patch('musicUnwantedFileExtensions', value)}
+          />
+        </FieldRow>
+        <FieldRow label="Book Extensions">
+          <TextInput
+            value={draft.bookUnwantedFileExtensions ?? ''}
+            onChange={(value) => patch('bookUnwantedFileExtensions', value)}
+          />
+        </FieldRow>
+      </Section>
+
       <Section title="File Management">
         <FieldRow label="Unmonitor Deleted Episodes">
           <Checkbox

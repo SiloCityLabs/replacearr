@@ -189,31 +189,79 @@ export function PasswordInput({
   onChange,
   readOnly,
   disabled,
+  placeholder,
+  className = inputClass,
+  id,
 }: {
   value: string;
   onChange: (value: string) => void;
   readOnly?: boolean;
   disabled?: boolean;
+  placeholder?: string;
+  className?: string;
+  id?: string;
 }) {
   const [visible, setVisible] = useState(false);
   return (
     <div className="flex items-center gap-2">
       <input
+        id={id}
         type={visible ? 'text' : 'password'}
-        className={inputClass}
+        className={className}
         value={value}
         readOnly={readOnly}
         disabled={disabled}
+        placeholder={placeholder}
         onChange={(e) => onChange(e.target.value)}
       />
       <button
         type="button"
         onClick={() => setVisible((current) => !current)}
         className="shrink-0 inline-flex items-center gap-1 px-2.5 py-2 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-300"
-        aria-label={visible ? 'Hide password' : 'Show password'}
+        aria-label={visible ? 'Hide secret' : 'Show secret'}
       >
         {visible ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
         {visible ? 'Hide' : 'Show'}
+      </button>
+    </div>
+  );
+}
+
+/** Read-only secret (API keys, tokens) — masked by default with a show/hide control. */
+export function SecretDisplay({
+  value,
+  className = 'block text-xs font-mono text-white bg-slate-950 p-2 rounded border border-slate-800 break-all',
+  maskedClassName,
+  emptyMask = '••••••••••••••••',
+  compact = false,
+}: {
+  value: string;
+  className?: string;
+  maskedClassName?: string;
+  emptyMask?: string;
+  compact?: boolean;
+}) {
+  const [visible, setVisible] = useState(false);
+  const masked =
+    value.length > 0 ? '•'.repeat(Math.min(Math.max(value.length, 12), 40)) : emptyMask;
+  return (
+    <div className="flex items-start gap-2 min-w-0">
+      <code className={`${visible ? className : maskedClassName || className} min-w-0 flex-1`}>
+        {visible ? value : masked}
+      </code>
+      <button
+        type="button"
+        onClick={() => setVisible((current) => !current)}
+        className={
+          compact
+            ? 'shrink-0 p-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300'
+            : 'shrink-0 inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-300'
+        }
+        aria-label={visible ? 'Hide API key' : 'Show API key'}
+        title={visible ? 'Hide API key' : 'Show API key'}
+      >
+        {visible ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+        {compact ? null : visible ? 'Hide' : 'Show'}
       </button>
     </div>
   );

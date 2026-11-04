@@ -20,8 +20,10 @@ import (
 	"github.com/replacearr/replacearr/internal/auth"
 	"github.com/replacearr/replacearr/internal/config"
 	"github.com/replacearr/replacearr/internal/db"
+	"github.com/replacearr/replacearr/internal/applog"
 	"github.com/replacearr/replacearr/internal/downloadmonitor"
 	"github.com/replacearr/replacearr/internal/pluginhost"
+	"github.com/replacearr/replacearr/internal/tasks"
 	"github.com/replacearr/replacearr/internal/webui"
 	"github.com/replacearr/replacearr/pkg/pluginsdk"
 )
@@ -54,8 +56,17 @@ func main() {
 
 	nativeSrv := native.NewServer(store, cfg, authSvc, pluginMgr, Version)
 
+	if appCfg, err := store.GetAppConfig(); err == nil {
+		applog.SetMinLevel(appCfg.Logging.LogLevel)
+	}
+	applog.Info("main", "Replacearr starting")
+
+	sched := tasks.New(store, cfg.ConfigDir, cfg.DatabasePath)
+	nativeSrv.SetScheduler(sched)
 	monitorCtx, monitorCancel := context.WithCancel(context.Background())
 	defer monitorCancel()
+	go sched.Run(monitorCtx)
+
 	monitor := downloadmonitor.New(store, pluginMgr, nativeSrv)
 	if sub := nativeSrv.Subtitles(); sub != nil {
 		monitor.SetSubtitleHook(sub)

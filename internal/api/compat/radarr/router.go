@@ -473,13 +473,43 @@ func (h *Handler) handleMovieLookupIMDB(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, mv)
 }
 
-func (h *Handler) handleCalendar(w http.ResponseWriter, _ *http.Request) {
+func (h *Handler) handleCalendar(w http.ResponseWriter, r *http.Request) {
 	movies, err := h.store.ListMovies()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, movies)
+	start, _ := time.Parse(time.RFC3339, r.URL.Query().Get("start"))
+	end, _ := time.Parse(time.RFC3339, r.URL.Query().Get("end"))
+	if start.IsZero() && end.IsZero() {
+		writeJSON(w, http.StatusOK, movies)
+		return
+	}
+	out := make([]domain.Movie, 0, len(movies))
+	for _, mv := range movies {
+		raw := mv.DigitalRelease
+		if raw == "" {
+			raw = mv.PhysicalRelease
+		}
+		if raw == "" {
+			raw = mv.InCinemas
+		}
+		air, err := time.Parse(time.RFC3339, raw)
+		if err != nil {
+			air, err = time.Parse("2006-01-02", raw)
+		}
+		if err != nil || air.IsZero() {
+			continue
+		}
+		if !start.IsZero() && air.Before(start) {
+			continue
+		}
+		if !end.IsZero() && air.After(end) {
+			continue
+		}
+		out = append(out, mv)
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (h *Handler) handleGetQueue(w http.ResponseWriter, _ *http.Request) {

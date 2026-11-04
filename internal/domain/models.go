@@ -629,8 +629,82 @@ type HistoryRecord struct {
 	SourceTitle string         `json:"sourceTitle"`
 	Quality     map[string]any `json:"quality"`
 	Date        time.Time      `json:"date"`
-	EventType   string         `json:"eventType"` // grabbed, downloadFolderImported
+	EventType   string         `json:"eventType"` // grabbed, downloadFolderImported, downloadFailed, blocked
 	Data        map[string]any `json:"data"`
+}
+
+type BlocklistItem struct {
+	ID              int64     `json:"id"`
+	MediaType       string    `json:"mediaType"`
+	SourceTitle     string    `json:"sourceTitle"`
+	TorrentInfoHash string    `json:"torrentInfoHash,omitempty"`
+	Indexer         string    `json:"indexer,omitempty"`
+	Message         string    `json:"message,omitempty"`
+	SeriesID        int64     `json:"seriesId,omitempty"`
+	MovieID         int64     `json:"movieId,omitempty"`
+	ArtistID        int64     `json:"artistId,omitempty"`
+	AuthorID        int64     `json:"authorId,omitempty"`
+	Size            int64     `json:"size,omitempty"`
+	Protocol        string    `json:"protocol,omitempty"`
+	CreatedAt       time.Time `json:"createdAt"`
+}
+
+type CalendarEvent struct {
+	ID        string    `json:"id"`
+	Title     string    `json:"title"`
+	Date      time.Time `json:"date"`
+	MediaType string    `json:"mediaType"`
+	Status    string    `json:"status"` // downloaded, missing, queued, unreleased
+	SeriesID  int64     `json:"seriesId,omitempty"`
+	MovieID   int64     `json:"movieId,omitempty"`
+	ArtistID  int64     `json:"artistId,omitempty"`
+	AlbumID   int64     `json:"albumId,omitempty"`
+	BookID    int64     `json:"bookId,omitempty"`
+	EpisodeID int64     `json:"episodeId,omitempty"`
+}
+
+type MediaStatistics struct {
+	MediaType              string            `json:"mediaType"`
+	ItemCount              int               `json:"itemCount"`
+	MonitoredCount         int               `json:"monitoredCount"`
+	WithFileCount          int               `json:"withFileCount"`
+	MissingCount           int               `json:"missingCount"`
+	UnreleasedCount        int               `json:"unreleasedCount"`
+	SizeOnDisk             int64             `json:"sizeOnDisk"`
+	AverageFileSize        int64             `json:"averageFileSize"`
+	StatusBreakdown        []NamedCount      `json:"statusBreakdown,omitempty"`
+	SeriesTypeBreakdown    []NamedCount      `json:"seriesTypeBreakdown,omitempty"`
+	EpisodeStatusBreakdown []NamedCount      `json:"episodeStatusBreakdown,omitempty"`
+	QualityProfiles        []NamedCount      `json:"qualityProfiles,omitempty"`
+	QualityBreakdown       []QualityStat     `json:"qualityBreakdown,omitempty"`
+	Genres                 []NamedCount      `json:"genres,omitempty"`
+	FileTypes              []NamedCount      `json:"fileTypes,omitempty"`
+	MissingItems           []MissingStatItem `json:"missingItems,omitempty"`
+}
+
+// NamedCount is a labeled tally for charts (status, genre, profile, etc.).
+type NamedCount struct {
+	Name  string `json:"name"`
+	Count int    `json:"count"`
+}
+
+type QualityStat struct {
+	Name  string `json:"name"`
+	Count int    `json:"count"`
+	Size  int64  `json:"size"`
+}
+
+type MissingStatItem struct {
+	ID     int64  `json:"id,omitempty"`
+	Title  string `json:"title"`
+	Detail string `json:"detail,omitempty"`
+}
+
+type HealthCheck struct {
+	Source  string    `json:"source"`
+	Type    string    `json:"type"` // ok, warning, error
+	Message string    `json:"message"`
+	Time    time.Time `json:"time,omitempty"`
 }
 
 // Indexer Proxy (FlareSolverr / HTTP / SOCKS) Models

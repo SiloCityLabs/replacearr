@@ -13,7 +13,8 @@ BUNDLED_DEFINITIONS="${REPLACEARR_BUNDLED_DEFINITIONS:-/workspace/definitions}"
 mkdir -p /data/TV /data/Movies /data/Music /data/Books /data/Audiobooks /data/downloads \
 	"${CONFIG_DIR}" \
 	"${PLUGIN_DIR}" \
-	"${DEFINITIONS_DIR}"
+	"${DEFINITIONS_DIR}" \
+	tmp
 
 # Seed missing Cardigann YAML into the runtime definitions dir without overwriting edits.
 if [ -d "${BUNDLED_DEFINITIONS}" ]; then
@@ -42,8 +43,14 @@ fi
 echo "==> Building plugins..."
 make --no-print-directory build-plugins
 
-echo "==> Starting Replacearr backend (:8989) and Vite dev server (:5173)..."
+if ! command -v air >/dev/null 2>&1; then
+	echo "error: air not found in PATH; rebuild the development image (make start)" >&2
+	exit 1
+fi
+
+echo "==> Starting Replacearr with Air live reload (:8989) and Vite dev server (:5173)..."
+echo "==> Edit a .go file under the bind-mounted workspace to rebuild/restart the API process."
 trap 'kill 0' INT TERM
-go run ./cmd/replacearr &
+air -c .air.toml &
 (cd "${WEB_DIR}" && npm run dev) &
 wait

@@ -9,7 +9,15 @@ import {
   CheckCircle2,
   Sparkles,
 } from 'lucide-react';
-import type { DownloadClient, QualityProfile, QueueItem, RootFolder } from '../types';
+import type {
+  AppConfig,
+  DownloadClient,
+  DownloadClientOptions,
+  QualityProfile,
+  QueueItem,
+  RemotePathMapping,
+  RootFolder,
+} from '../types';
 import { api, formatBytes } from '../api';
 import {
   blankDownloadClientForm,
@@ -23,6 +31,8 @@ interface QueueClientsTabProps {
   clients: DownloadClient[];
   profiles: QualityProfile[];
   rootFolders: RootFolder[];
+  appConfig?: AppConfig | null;
+  onSaveConfig?: (next: AppConfig) => Promise<AppConfig>;
   onRefresh: () => Promise<void>;
   onNotify: (msg: string, isError?: boolean) => void;
 }
@@ -32,10 +42,22 @@ export const QueueClientsTab: React.FC<QueueClientsTabProps> = ({
   clients,
   profiles,
   rootFolders,
+  appConfig,
+  onSaveConfig,
   onRefresh,
   onNotify,
 }) => {
   const [clientForm, setClientForm] = useState<DownloadClientForm | null>(null);
+  const [opts, setOpts] = useState<DownloadClientOptions | null>(appConfig?.downloadClientOptions ?? null);
+  const [mappings, setMappings] = useState<RemotePathMapping[]>(appConfig?.remotePathMappings ?? []);
+  const [savingOpts, setSavingOpts] = useState(false);
+
+  React.useEffect(() => {
+    if (appConfig) {
+      setOpts(appConfig.downloadClientOptions);
+      setMappings(appConfig.remotePathMappings ?? []);
+    }
+  }, [appConfig]);
 
   // Root folder form
   const [newFolderPath, setNewFolderPath] = useState('');
@@ -382,6 +404,117 @@ export const QueueClientsTab: React.FC<QueueClientsTabProps> = ({
           </div>
         </div>
       </div>
+
+      {opts && appConfig && onSaveConfig ? (
+        <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-5 space-y-4">
+          <h3 className="text-sm font-bold text-white">Completed Download Handling</h3>
+          <div className="space-y-2 text-xs text-slate-300">
+            {(
+              [
+                ['enableCompletedDownloadHandling', 'Enable Completed Download Handling'],
+                ['autoRedownloadFailed', 'Auto Redownload Failed'],
+                ['autoRedownloadFailedFromInteractiveSearch', 'Auto Redownload Failed from Interactive Search'],
+              ] as const
+            ).map(([key, label]) => (
+              <label key={key} className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={Boolean(opts[key])}
+                  onChange={(e) => setOpts({ ...opts, [key]: e.target.checked })}
+                />
+                {label}
+              </label>
+            ))}
+            <label className="block space-y-1">
+              <span className="text-slate-400">Working folders</span>
+              <input
+                value={opts.downloadClientWorkingFolders}
+                onChange={(e) => setOpts({ ...opts, downloadClientWorkingFolders: e.target.value })}
+                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white"
+              />
+            </label>
+          </div>
+
+          <h3 className="text-sm font-bold text-white pt-2">Remote Path Mappings</h3>
+          <div className="space-y-2">
+            {mappings.map((m, index) => (
+              <div key={`${m.id}-${index}`} className="grid grid-cols-1 md:grid-cols-[1fr_1fr_1fr_auto] gap-2">
+                <input
+                  value={m.host}
+                  placeholder="Host"
+                  onChange={(e) =>
+                    setMappings((prev) =>
+                      prev.map((row, i) => (i === index ? { ...row, host: e.target.value } : row))
+                    )
+                  }
+                  className="bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white"
+                />
+                <input
+                  value={m.remotePath}
+                  placeholder="Remote path"
+                  onChange={(e) =>
+                    setMappings((prev) =>
+                      prev.map((row, i) => (i === index ? { ...row, remotePath: e.target.value } : row))
+                    )
+                  }
+                  className="bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white"
+                />
+                <input
+                  value={m.localPath}
+                  placeholder="Local path"
+                  onChange={(e) =>
+                    setMappings((prev) =>
+                      prev.map((row, i) => (i === index ? { ...row, localPath: e.target.value } : row))
+                    )
+                  }
+                  className="bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white"
+                />
+                <button
+                  type="button"
+                  onClick={() => setMappings((prev) => prev.filter((_, i) => i !== index))}
+                  className="px-2 py-1 rounded-lg text-xs text-rose-300 border border-rose-500/30"
+                >
+                  Remove
+                </button>
+              </div>
+            ))}
+            <button
+              type="button"
+              onClick={() =>
+                setMappings((prev) => [...prev, { id: 0, host: '', remotePath: '', localPath: '' }])
+              }
+              className="px-3 py-1.5 rounded-lg text-xs border border-slate-700 text-slate-300"
+            >
+              Add mapping
+            </button>
+          </div>
+
+          <button
+            type="button"
+            disabled={savingOpts}
+            onClick={() => {
+              void (async () => {
+                setSavingOpts(true);
+                try {
+                  await onSaveConfig({
+                    ...appConfig,
+                    downloadClientOptions: opts,
+                    remotePathMappings: mappings,
+                  });
+                  onNotify('Download client options saved');
+                } catch (err) {
+                  onNotify(err instanceof Error ? err.message : 'Save failed', true);
+                } finally {
+                  setSavingOpts(false);
+                }
+              })();
+            }}
+            className="px-3 py-2 rounded-lg text-xs bg-indigo-600 text-white disabled:opacity-60"
+          >
+            Save options
+          </button>
+        </div>
+      ) : null}
 
       {clientForm ? (
         <DownloadClientModal

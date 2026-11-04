@@ -16,6 +16,7 @@ import (
 	"github.com/replacearr/replacearr/internal/db"
 	"github.com/replacearr/replacearr/internal/domain"
 	"github.com/replacearr/replacearr/internal/downloadclient/qbittorrent"
+	"github.com/replacearr/replacearr/internal/mediafile"
 	"github.com/replacearr/replacearr/pkg/pluginsdk"
 )
 
@@ -238,6 +239,13 @@ func (m *Monitor) importCompleted(ctx context.Context, appCfg domain.AppConfig, 
 	}
 	if err := importFile(src, dest, appCfg.MediaManagement.CopyUsingHardlinks); err != nil {
 		return err
+	}
+
+	if appCfg.MediaManagement.DeleteUnwantedFiles {
+		unwanted := mediafile.UnwantedExtensions(appCfg.MediaManagement, q.MediaType)
+		if _, err := mediafile.DeleteUnwantedInDir(srcRoot, unwanted, appCfg.MediaManagement.RecycleBin); err != nil {
+			log.Printf("downloadmonitor: unwanted cleanup: %v", err)
+		}
 	}
 
 	sceneName := strings.TrimSpace(q.Title)
@@ -538,41 +546,10 @@ func findPrimaryVideo(root string) (string, error) {
 	return best, nil
 }
 
-func isVideo(path string) bool {
-	switch strings.ToLower(filepath.Ext(path)) {
-	case ".mkv", ".mp4", ".avi", ".m4v", ".ts", ".m2ts", ".wmv", ".mov":
-		return true
-	default:
-		return false
-	}
-}
-
-func isAudio(path string) bool {
-	switch strings.ToLower(filepath.Ext(path)) {
-	case ".flac", ".mp3", ".aac", ".m4a", ".alac", ".wav", ".ogg", ".opus":
-		return true
-	default:
-		return false
-	}
-}
-
-func isEbook(path string) bool {
-	switch strings.ToLower(filepath.Ext(path)) {
-	case ".epub", ".mobi", ".azw", ".azw3", ".pdf", ".cbz", ".cbr":
-		return true
-	default:
-		return false
-	}
-}
-
-func isAudiobook(path string) bool {
-	switch strings.ToLower(filepath.Ext(path)) {
-	case ".m4b", ".mp3", ".flac", ".m4a", ".aac":
-		return true
-	default:
-		return false
-	}
-}
+func isVideo(path string) bool    { return mediafile.IsVideo(path) }
+func isAudio(path string) bool    { return mediafile.IsAudio(path) }
+func isEbook(path string) bool    { return mediafile.IsEbook(path) }
+func isAudiobook(path string) bool { return mediafile.IsAudiobook(path) }
 
 func findPrimaryMedia(root string, match func(string) bool) (string, error) {
 	info, err := os.Stat(root)

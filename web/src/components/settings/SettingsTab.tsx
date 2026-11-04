@@ -1,174 +1,80 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import {
-  Download,
-  FolderCog,
-  Gauge,
-  Info,
-  ListPlus,
-  Palette,
-  Radio,
-  Settings,
-  SlidersHorizontal,
-  Tags,
-  Users,
-  Captions,
-  Clapperboard,
-} from 'lucide-react';
 import type {
-  APIKey,
   AppConfig,
-  CardigannDefinition,
-  DiscoveredPlugin,
-  DownloadClient,
-  Indexer,
   OverviewResponse,
   QualityProfile,
-  Role,
   RootFolder,
-  User,
+  Indexer,
 } from '../../types';
 import { api } from '../../api';
-import { UsersRbacTab } from '../UsersRbacTab';
 import { GeneralPage } from './GeneralPage';
 import { UiPage } from './UiPage';
 import { MediaManagementPage } from './MediaManagementPage';
 import { ProfilesPage } from './ProfilesPage';
 import { QualityPage } from './QualityPage';
-import { IndexersSettingsPage } from './IndexersSettingsPage';
-import { DownloadClientsPage } from './DownloadClientsPage';
 import { ImportListsPage } from './ImportListsPage';
 import { MetadataPage } from './MetadataPage';
 import { SubtitlesPage } from './SubtitlesPage';
 import { TagsPage } from './TagsPage';
-import { SystemInfoPage } from './SystemInfoPage';
 import { errorText } from './fields';
 
+export type SettingsPageId =
+  | 'media'
+  | 'profiles'
+  | 'quality'
+  | 'importLists'
+  | 'metadata'
+  | 'subtitles'
+  | 'tags'
+  | 'general'
+  | 'ui';
+
 export interface SettingsTabProps {
+  page: SettingsPageId;
   config: AppConfig | null;
   overview: OverviewResponse | null;
   indexers: Indexer[];
-  definitions: CardigannDefinition[];
-  plugins: DiscoveredPlugin[];
-  clients: DownloadClient[];
   profiles: QualityProfile[];
   rootFolders: RootFolder[];
-  users: User[];
-  roles: Role[];
-  apiKeys: APIKey[];
-  permissions: string[];
   onRefresh: () => Promise<void>;
   onNotify: (msg: string, isError?: boolean) => void;
   onConfigChange: (config: AppConfig) => void;
+  onDirtyChange?: (dirty: boolean) => void;
 }
 
-const CATEGORIES = [
-  {
-    id: 'media',
-    title: 'Media Management',
-    description: 'Episode and movie naming, imports, and root folders.',
-    icon: FolderCog,
-  },
-  {
-    id: 'profiles',
-    title: 'Profiles',
-    description: 'Quality, delay, and release profiles.',
-    icon: SlidersHorizontal,
-  },
-  {
-    id: 'quality',
-    title: 'Quality',
-    description: 'Quality definitions and size limits.',
-    icon: Gauge,
-  },
-  {
-    id: 'indexers',
-    title: 'Indexers',
-    description: 'Indexers, proxies, and indexer options.',
-    icon: Radio,
-  },
-  {
-    id: 'downloadClients',
-    title: 'Download Clients',
-    description: 'Clients, remote path mappings, and completed download handling.',
-    icon: Download,
-  },
-  {
-    id: 'importLists',
-    title: 'Import Lists',
-    description: 'Lists and how removals are synced.',
-    icon: ListPlus,
-  },
-  {
-    id: 'metadata',
-    title: 'Metadata',
-    description: 'Language and metadata consumers.',
-    icon: Clapperboard,
-  },
-  {
-    id: 'subtitles',
-    title: 'Subtitles',
-    description: 'OpenSubtitles and language preferences.',
-    icon: Captions,
-  },
-  {
-    id: 'tags',
-    title: 'Tags',
-    description: 'Labels and where they are used.',
-    icon: Tags,
-  },
-  {
-    id: 'general',
-    title: 'General',
-    description: 'Host, security, proxy, logging, and backup.',
-    icon: Settings,
-  },
-  {
-    id: 'ui',
-    title: 'UI',
-    description: 'Dates, theme, and language.',
-    icon: Palette,
-  },
-  {
-    id: 'users',
-    title: 'Users',
-    description: 'Accounts, roles, and API keys.',
-    icon: Users,
-  },
-  {
-    id: 'system',
-    title: 'System',
-    description: 'Version, database mode, uptime, and compat endpoints.',
-    icon: Info,
-  },
-] as const;
-
-type SettingsView = 'home' | (typeof CATEGORIES)[number]['id'];
-
 export const SettingsTab: React.FC<SettingsTabProps> = ({
+  page,
   config,
-  overview,
   indexers,
-  definitions,
-  plugins,
-  clients,
   profiles,
   rootFolders,
-  users,
-  roles,
-  apiKeys,
-  permissions,
   onRefresh,
   onNotify,
   onConfigChange,
+  onDirtyChange,
 }) => {
-  const [view, setView] = useState<SettingsView>('home');
   const [dirty, setDirty] = useState(false);
   const [localConfig, setLocalConfig] = useState<AppConfig | null>(config);
-  const onDirtyChange = useCallback((next: boolean) => setDirty(next), []);
+
+  const handleDirty = useCallback(
+    (next: boolean) => {
+      setDirty(next);
+      onDirtyChange?.(next);
+    },
+    [onDirtyChange]
+  );
 
   useEffect(() => {
     if (config && !dirty) setLocalConfig(config);
   }, [config, dirty]);
+
+  useEffect(() => {
+    setDirty(false);
+    onDirtyChange?.(false);
+    if (config) setLocalConfig(config);
+    // Reset when navigating between settings pages
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page]);
 
   const save = useCallback(
     async (next: AppConfig) => {
@@ -176,6 +82,8 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
         const saved = await api.saveConfig(next);
         setLocalConfig(saved);
         onConfigChange(saved);
+        setDirty(false);
+        onDirtyChange?.(false);
         onNotify('Saved settings');
         return saved;
       } catch (err) {
@@ -183,7 +91,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
         throw err;
       }
     },
-    [onConfigChange, onNotify]
+    [onConfigChange, onNotify, onDirtyChange]
   );
 
   const handleApiKey = (apiKey: string) => {
@@ -192,165 +100,64 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
     onConfigChange({ ...config, security: { ...config.security, apiKey } });
   };
 
-  const openView = (next: SettingsView) => {
-    if (next === view) return;
-    if (dirty && !window.confirm('Discard unsaved changes?')) return;
-    setDirty(false);
-    setView(next);
-  };
-
   if (!localConfig) {
     return <p className="text-sm text-slate-400">Loading settings...</p>;
   }
 
-  const current = CATEGORIES.find((category) => category.id === view);
-
-  return (
-    <div className="flex flex-col md:flex-row gap-4 md:gap-6">
-      <nav className="flex md:flex-col gap-1 overflow-x-auto md:overflow-visible md:w-56 shrink-0">
-        <button
-          type="button"
-          onClick={() => openView('home')}
-          className={`shrink-0 md:w-full text-left px-3 py-2 rounded-lg text-xs font-medium border whitespace-nowrap ${
-            view === 'home'
-              ? 'bg-indigo-600/15 text-white border-indigo-500/30'
-              : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/60 border-transparent'
-          }`}
-        >
-          All Settings
-        </button>
-        {CATEGORIES.map((category) => {
-          const Icon = category.icon;
-          const active = view === category.id;
-          return (
-            <button
-              key={category.id}
-              type="button"
-              onClick={() => openView(category.id)}
-              className={`shrink-0 md:w-full inline-flex items-center gap-2 text-left px-3 py-2 rounded-lg text-xs font-medium border whitespace-nowrap ${
-                active
-                  ? 'bg-indigo-600/15 text-white border-indigo-500/30'
-                  : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/60 border-transparent'
-              }`}
-            >
-              <Icon className={`w-3.5 h-3.5 ${active ? 'text-indigo-300' : 'text-slate-500'}`} />
-              {category.title}
-            </button>
-          );
-        })}
-      </nav>
-
-      <div className="flex-1 min-w-0">
-        {view === 'home' ? (
-          <div>
-            <h2 className="text-lg font-bold text-white mb-4">Settings</h2>
-            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
-              {CATEGORIES.map((category) => {
-                const Icon = category.icon;
-                return (
-                  <button
-                    key={category.id}
-                    type="button"
-                    onClick={() => openView(category.id)}
-                    className="text-left bg-slate-900/90 border border-slate-800 hover:border-indigo-500/40 rounded-xl p-5 space-y-2 transition"
-                  >
-                    <Icon className="w-5 h-5 text-indigo-300" />
-                    <div className="text-sm font-semibold text-white">{category.title}</div>
-                    <p className="text-xs text-slate-400">{category.description}</p>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        ) : null}
-
-        {view !== 'home' && current ? (
-          <div key={view}>
-            {view === 'media' ? (
-              <MediaManagementPage
-                config={localConfig}
-                rootFolders={rootFolders}
-                onSave={save}
-                onDirtyChange={onDirtyChange}
-                onRefresh={onRefresh}
-                onNotify={onNotify}
-              />
-            ) : null}
-            {view === 'profiles' ? (
-              <ProfilesPage
-                config={localConfig}
-                profiles={profiles}
-                indexers={indexers}
-                onSave={save}
-                onRefresh={onRefresh}
-                onNotify={onNotify}
-              />
-            ) : null}
-            {view === 'quality' ? (
-              <QualityPage config={localConfig} onSave={save} onDirtyChange={onDirtyChange} />
-            ) : null}
-            {view === 'indexers' ? (
-              <IndexersSettingsPage
-                config={localConfig}
-                indexers={indexers}
-                definitions={definitions}
-                plugins={plugins}
-                onSave={save}
-                onDirtyChange={onDirtyChange}
-                onRefresh={onRefresh}
-                onNotify={onNotify}
-              />
-            ) : null}
-            {view === 'downloadClients' ? (
-              <DownloadClientsPage
-                config={localConfig}
-                clients={clients}
-                onSave={save}
-                onDirtyChange={onDirtyChange}
-                onRefresh={onRefresh}
-                onNotify={onNotify}
-              />
-            ) : null}
-            {view === 'importLists' ? (
-              <ImportListsPage
-                config={localConfig}
-                profiles={profiles}
-                rootFolders={rootFolders}
-                onSave={save}
-                onDirtyChange={onDirtyChange}
-              />
-            ) : null}
-            {view === 'metadata' ? (
-              <MetadataPage config={localConfig} onSave={save} onDirtyChange={onDirtyChange} />
-            ) : null}
-            {view === 'subtitles' ? (
-              <SubtitlesPage config={localConfig} onSave={save} onDirtyChange={onDirtyChange} />
-            ) : null}
-            {view === 'tags' ? <TagsPage onNotify={onNotify} /> : null}
-            {view === 'general' ? (
-              <GeneralPage
-                config={localConfig}
-                onSave={save}
-                onDirtyChange={onDirtyChange}
-                onNotify={onNotify}
-                onApiKey={handleApiKey}
-              />
-            ) : null}
-            {view === 'ui' ? <UiPage config={localConfig} onSave={save} onDirtyChange={onDirtyChange} /> : null}
-            {view === 'users' ? (
-              <UsersRbacTab
-                users={users}
-                roles={roles}
-                apiKeys={apiKeys}
-                permissions={permissions}
-                onRefresh={onRefresh}
-                onNotify={onNotify}
-              />
-            ) : null}
-            {view === 'system' ? <SystemInfoPage overview={overview} /> : null}
-          </div>
-        ) : null}
-      </div>
-    </div>
-  );
+  switch (page) {
+    case 'media':
+      return (
+        <MediaManagementPage
+          config={localConfig}
+          rootFolders={rootFolders}
+          onSave={save}
+          onDirtyChange={handleDirty}
+          onRefresh={onRefresh}
+          onNotify={onNotify}
+        />
+      );
+    case 'profiles':
+      return (
+        <ProfilesPage
+          config={localConfig}
+          profiles={profiles}
+          indexers={indexers}
+          onSave={save}
+          onRefresh={onRefresh}
+          onNotify={onNotify}
+        />
+      );
+    case 'quality':
+      return <QualityPage config={localConfig} onSave={save} onDirtyChange={handleDirty} />;
+    case 'importLists':
+      return (
+        <ImportListsPage
+          config={localConfig}
+          profiles={profiles}
+          rootFolders={rootFolders}
+          onSave={save}
+          onDirtyChange={handleDirty}
+        />
+      );
+    case 'metadata':
+      return <MetadataPage config={localConfig} onSave={save} onDirtyChange={handleDirty} />;
+    case 'subtitles':
+      return <SubtitlesPage config={localConfig} onSave={save} onDirtyChange={handleDirty} />;
+    case 'tags':
+      return <TagsPage onNotify={onNotify} />;
+    case 'general':
+      return (
+        <GeneralPage
+          config={localConfig}
+          onSave={save}
+          onDirtyChange={handleDirty}
+          onNotify={onNotify}
+          onApiKey={handleApiKey}
+        />
+      );
+    case 'ui':
+      return <UiPage config={localConfig} onSave={save} onDirtyChange={handleDirty} />;
+    default:
+      return null;
+  }
 };

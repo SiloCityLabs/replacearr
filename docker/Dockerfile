@@ -20,7 +20,7 @@ RUN npm run build
 # ------------------------------------------------------------------------------
 # Stage 2: Go Binary & Plugin Builder
 # ------------------------------------------------------------------------------
-FROM golang:alpine AS go-builder
+FROM golang:1.27-alpine AS go-builder
 
 ARG VERSION=0.1.0
 ARG COMMIT=prod

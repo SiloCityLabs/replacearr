@@ -651,6 +651,18 @@ func (s *Store) CreateQualityProfile(qp domain.QualityProfile) (*domain.QualityP
 // --- TV Series & Episodes ---
 
 func (s *Store) ListSeries() ([]domain.Series, error) {
+	out, err := s.ListSeriesBasic()
+	if err != nil {
+		return nil, err
+	}
+	for i := range out {
+		s.enrichSeriesStatistics(&out[i])
+	}
+	return out, nil
+}
+
+// ListSeriesBasic returns series rows without per-series episode enrichment queries.
+func (s *Store) ListSeriesBasic() ([]domain.Series, error) {
 	rows, err := s.db.Query(`
 		SELECT id, title, sort_title, status, ended, overview, network, air_time, images_json, seasons_json,
 		       year, path, quality_profile_id, language_profile_id, season_folder, monitored, use_scene_numbering,
@@ -669,7 +681,7 @@ func (s *Store) ListSeries() ([]domain.Series, error) {
 		}
 		out = append(out, sr)
 	}
-	return out, nil
+	return out, rows.Err()
 }
 
 func (s *Store) GetSeriesByID(id int64) (*domain.Series, error) {
@@ -682,14 +694,17 @@ func (s *Store) GetSeriesByID(id int64) (*domain.Series, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	if !rows.Next() {
+		rows.Close()
 		return nil, sql.ErrNoRows
 	}
 	sr, err := scanSeries(rows)
 	if err != nil {
+		rows.Close()
 		return nil, err
 	}
+	rows.Close()
+	s.enrichSeriesStatistics(&sr)
 	return &sr, nil
 }
 
@@ -730,12 +745,48 @@ func scanSeries(rows *sql.Rows) (domain.Series, error) {
 	sr.Statistics = map[string]any{
 		"seasonCount":       len(sr.Seasons),
 		"episodeFileCount":  0,
-		"episodeCount":      12,
-		"totalEpisodeCount": 12,
+		"episodeCount":      0,
+		"totalEpisodeCount": 0,
 		"sizeOnDisk":        0,
 		"percentOfEpisodes": 0.0,
 	}
 	return sr, nil
+}
+
+func (s *Store) enrichSeriesStatistics(sr *domain.Series) {
+	if sr == nil {
+		return
+	}
+	epCount, fileCount := 0, 0
+	var sizeOnDisk int64
+	if eps, err := s.ListEpisodes(sr.ID); err == nil {
+		epCount = len(eps)
+		for _, ep := range eps {
+			if ep.HasFile {
+				fileCount++
+			}
+		}
+	}
+	if files, err := s.ListEpisodeFiles(sr.ID); err == nil {
+		for _, f := range files {
+			sizeOnDisk += f.Size
+		}
+		if fileCount == 0 {
+			fileCount = len(files)
+		}
+	}
+	pct := 0.0
+	if epCount > 0 {
+		pct = float64(fileCount) / float64(epCount) * 100
+	}
+	sr.Statistics = map[string]any{
+		"seasonCount":       len(sr.Seasons),
+		"episodeFileCount":  fileCount,
+		"episodeCount":      epCount,
+		"totalEpisodeCount": epCount,
+		"sizeOnDisk":        sizeOnDisk,
+		"percentOfEpisodes": pct,
+	}
 }
 
 func (s *Store) CreateSeries(sr domain.Series) (*domain.Series, error) {
@@ -1459,18 +1510,43 @@ func (s *Store) MarkMovieHasFile(movieID int64, hasFile bool) error {
 }
 
 func (s *Store) ListHistory(mediaType string) ([]domain.HistoryRecord, error) {
-	query := `SELECT id, media_type, series_id, episode_id, movie_id,
-		COALESCE(artist_id, 0), COALESCE(album_id, 0), COALESCE(author_id, 0), COALESCE(book_id, 0), COALESCE(edition_id, 0),
-		source_title, quality_json, date, event_type, data_json FROM history_records`
-	var args []any
+	records, _, err := s.ListHistoryPage(mediaType, "", 1, 100)
+	return records, err
+}
+
+func (s *Store) ListHistoryPage(mediaType, eventType string, page, pageSize int) ([]domain.HistoryRecord, int, error) {
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 {
+		pageSize = 50
+	}
+	where := []string{}
+	args := []any{}
 	if mediaType != "" && mediaType != "all" {
-		query += ` WHERE media_type = ?`
+		where = append(where, `media_type = ?`)
 		args = append(args, mediaType)
 	}
-	query += ` ORDER BY date DESC LIMIT 100`
+	if eventType != "" {
+		where = append(where, `event_type = ?`)
+		args = append(args, eventType)
+	}
+	clause := ""
+	if len(where) > 0 {
+		clause = " WHERE " + strings.Join(where, " AND ")
+	}
+	var total int
+	if err := s.db.QueryRow(`SELECT COUNT(1) FROM history_records`+clause, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	query := `SELECT id, media_type, series_id, episode_id, movie_id,
+		COALESCE(artist_id, 0), COALESCE(album_id, 0), COALESCE(author_id, 0), COALESCE(book_id, 0), COALESCE(edition_id, 0),
+		source_title, quality_json, date, event_type, data_json FROM history_records` + clause +
+		` ORDER BY date DESC LIMIT ? OFFSET ?`
+	args = append(args, pageSize, (page-1)*pageSize)
 	rows, err := s.db.Query(query, args...)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer rows.Close()
 	out := []domain.HistoryRecord{}
@@ -1480,13 +1556,18 @@ func (s *Store) ListHistory(mediaType string) ([]domain.HistoryRecord, error) {
 		if err := rows.Scan(&h.ID, &h.MediaType, &h.SeriesID, &h.EpisodeID, &h.MovieID,
 			&h.ArtistID, &h.AlbumID, &h.AuthorID, &h.BookID, &h.EditionID,
 			&h.SourceTitle, &qJSON, &h.Date, &h.EventType, &dJSON); err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		_ = json.Unmarshal([]byte(qJSON), &h.Quality)
 		_ = json.Unmarshal([]byte(dJSON), &h.Data)
 		out = append(out, h)
 	}
-	return out, nil
+	return out, total, nil
+}
+
+func (s *Store) DeleteHistoryOlderThan(cutoff time.Time) error {
+	_, err := s.db.Exec(`DELETE FROM history_records WHERE date < ?`, cutoff.UTC().Format(time.RFC3339Nano))
+	return err
 }
 
 func (s *Store) CreateHistory(h domain.HistoryRecord) error {

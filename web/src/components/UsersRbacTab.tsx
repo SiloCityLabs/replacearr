@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import type { APIKey, Role, User } from '../types';
 import { api } from '../api';
+import { SecretDisplay } from './settings/fields';
 
 interface UsersRbacTabProps {
   users: User[];
@@ -66,6 +67,7 @@ export const UsersRbacTab: React.FC<UsersRbacTabProps> = ({
   const [newEmail, setNewEmail] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [newRoleId, setNewRoleId] = useState<number>(roles[0]?.id || 1);
+  const [revealedEmails, setRevealedEmails] = useState<Record<number, boolean>>({});
 
   // Role Editor State
   const [selectedRole, setSelectedRole] = useState<Role | null>(roles[0] || null);
@@ -248,7 +250,19 @@ export const UsersRbacTab: React.FC<UsersRbacTabProps> = ({
                 <tr key={u.id} className="hover:bg-slate-800/30 transition">
                   <td className="py-3 px-4 font-semibold text-white">{u.username}</td>
                   <td className="py-3 px-4 text-slate-400 font-mono">
-                    {u.email || `${u.username}@replacearr.local`}
+                    {revealedEmails[u.id] ? (
+                      u.email || `${u.username}@replacearr.local`
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setRevealedEmails((prev) => ({ ...prev, [u.id]: true }))
+                        }
+                        className="text-indigo-400 hover:text-indigo-300 underline underline-offset-2"
+                      >
+                        Show email
+                      </button>
+                    )}
                   </td>
                   <td className="py-3 px-4">
                     <select
@@ -445,9 +459,7 @@ export const UsersRbacTab: React.FC<UsersRbacTabProps> = ({
                   {copiedKeyId === 'latest' ? 'Copied!' : 'Copy Key'}
                 </button>
               </div>
-              <code className="block text-xs font-mono text-white bg-slate-950 p-2 rounded border border-slate-800 break-all">
-                {latestCreatedKey}
-              </code>
+              <SecretDisplay value={latestCreatedKey} />
             </div>
           )}
 
@@ -466,7 +478,15 @@ export const UsersRbacTab: React.FC<UsersRbacTabProps> = ({
                   </div>
                   <div className="text-[11px] font-mono text-slate-400 mt-1 flex items-center gap-2 min-w-0">
                     <Lock className="w-3 h-3 text-slate-500 shrink-0" />
-                    <span className="truncate">{k.rawKey ? k.rawKey : `${k.keyPrefix}••••••••••••••••`}</span>
+                    {k.rawKey ? (
+                      <SecretDisplay
+                        value={k.rawKey}
+                        compact
+                        className="block text-[11px] font-mono text-slate-300 break-all truncate"
+                      />
+                    ) : (
+                      <span className="truncate">{`${k.keyPrefix}••••••••••••••••`}</span>
+                    )}
                   </div>
                 </div>
 

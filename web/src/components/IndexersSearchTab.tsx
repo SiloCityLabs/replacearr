@@ -12,11 +12,13 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import type {
+  AppConfig,
   CardigannDefinition,
   DiscoveredPlugin,
   DomainClearance,
   FlareSolverrHealth,
   Indexer,
+  IndexerOptions,
   IndexerProxy,
 } from '../types';
 import { api } from '../api';
@@ -37,6 +39,8 @@ interface IndexersSearchTabProps {
   indexers: Indexer[];
   definitions: CardigannDefinition[];
   plugins: DiscoveredPlugin[];
+  appConfig?: AppConfig | null;
+  onSaveConfig?: (next: AppConfig) => Promise<AppConfig>;
   onRefresh: () => Promise<void>;
   onNotify: (msg: string, isError?: boolean) => void;
 }
@@ -45,10 +49,18 @@ export const IndexersSearchTab: React.FC<IndexersSearchTabProps> = ({
   indexers,
   definitions,
   plugins,
+  appConfig,
+  onSaveConfig,
   onRefresh,
   onNotify,
 }) => {
   const [subView, setSubView] = useState<'indexers' | 'cardigann' | 'flaresolverr'>('indexers');
+  const [indexerOpts, setIndexerOpts] = useState<IndexerOptions | null>(appConfig?.indexerOptions ?? null);
+  const [savingOpts, setSavingOpts] = useState(false);
+
+  useEffect(() => {
+    if (appConfig?.indexerOptions) setIndexerOpts(appConfig.indexerOptions);
+  }, [appConfig]);
 
   // Cardigann Definitions Filter
   const [defFilter, setDefFilter] = useState('');
@@ -628,6 +640,54 @@ export const IndexersSearchTab: React.FC<IndexersSearchTabProps> = ({
           </div>
         </div>
       )}
+
+      {subView === 'indexers' && indexerOpts && appConfig && onSaveConfig ? (
+        <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-5 space-y-3">
+          <h3 className="text-sm font-bold text-white">Indexer Options</h3>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            {(
+              [
+                ['minimumAge', 'Minimum Age'],
+                ['retention', 'Retention'],
+                ['maximumSize', 'Maximum Size'],
+                ['rssSyncInterval', 'RSS Sync Interval'],
+              ] as const
+            ).map(([key, label]) => (
+              <label key={key} className="text-xs space-y-1 block">
+                <span className="text-slate-400">{label}</span>
+                <input
+                  type="number"
+                  value={indexerOpts[key]}
+                  onChange={(e) =>
+                    setIndexerOpts({ ...indexerOpts, [key]: Number(e.target.value) })
+                  }
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white"
+                />
+              </label>
+            ))}
+          </div>
+          <button
+            type="button"
+            disabled={savingOpts}
+            onClick={() => {
+              void (async () => {
+                setSavingOpts(true);
+                try {
+                  await onSaveConfig({ ...appConfig, indexerOptions: indexerOpts });
+                  onNotify('Indexer options saved');
+                } catch (err) {
+                  onNotify(err instanceof Error ? err.message : 'Save failed', true);
+                } finally {
+                  setSavingOpts(false);
+                }
+              })();
+            }}
+            className="px-3 py-2 rounded-lg text-xs bg-indigo-600 text-white disabled:opacity-60"
+          >
+            Save options
+          </button>
+        </div>
+      ) : null}
 
       {indexerForm ? (
         <IndexerModal

@@ -3,7 +3,10 @@
 # Go + Node image for local containerized development (docker-compose.yml).
 # Production image: docker/Dockerfile
 # ==============================================================================
-FROM golang:alpine
+FROM golang:1.27-alpine
+
+# Pin Air for reproducible live-reload builds (dev-only; not in production).
+ARG AIR_VERSION=v1.67.4
 
 # Dev image uses Alpine-packaged nodejs/npm (unpinned). Host and CI use Node 24 (.nvmrc);
 # production UI builds use node:24-alpine in docker/Dockerfile.
@@ -16,6 +19,9 @@ RUN apk add --no-cache \
     make \
     ca-certificates \
     tzdata
+
+# Install Air into the image PATH (/go/bin is already on PATH in the official Go image).
+RUN go install "github.com/air-verse/air@${AIR_VERSION}"
 
 WORKDIR /workspace
 
