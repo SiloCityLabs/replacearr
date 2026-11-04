@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -450,6 +451,7 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/plugins/{id}/test", s.authSvc.RequirePermission(domain.PermPluginsManage, s.handleTestNotificationPlugin))
 	mux.HandleFunc("GET /api/v1/plugins/catalog", s.authSvc.RequirePermission(domain.PermPluginsRead, s.handlePluginCatalog))
 	mux.HandleFunc("POST /api/v1/plugins/catalog/refresh", s.authSvc.RequirePermission(domain.PermPluginsManage, s.handlePluginCatalogRefresh))
+	mux.HandleFunc("POST /api/v1/plugins/catalog/resolve", s.authSvc.RequirePermission(domain.PermPluginsManage, s.handlePluginCatalogResolve))
 	mux.HandleFunc("POST /api/v1/plugins/catalog/install", s.authSvc.RequirePermission(domain.PermPluginsManage, s.handlePluginCatalogInstall))
 	mux.HandleFunc("POST /api/v1/plugins/catalog/uninstall", s.authSvc.RequirePermission(domain.PermPluginsManage, s.handlePluginCatalogUninstall))
 	mux.HandleFunc("GET /api/v1/notifications/stream", s.authSvc.RequirePermission(domain.PermSystemRead, s.handleNotificationStream))
@@ -1212,28 +1214,75 @@ func (s *Server) handlePluginCatalogRefresh(w http.ResponseWriter, r *http.Reque
 	})
 }
 
+func (s *Server) handlePluginCatalogResolve(w http.ResponseWriter, r *http.Request) {
+	if s.pluginCatalog == nil {
+		writeErr(w, http.StatusServiceUnavailable, fmt.Errorf("plugin catalog is not configured"))
+		return
+	}
+	var req struct {
+		URL string `json:"url"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	resolved, err := s.pluginCatalog.ResolveGitHub(r.Context(), req.URL)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	_, hasAsset := plugincatalog.SelectAsset(resolved.Plugin, runtime.GOOS, runtime.GOARCH)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"plugin":           resolved.Plugin,
+		"repoUrl":          resolved.RepoURL,
+		"manifestUrl":      resolved.ManifestURL,
+		"hasPlatformAsset": hasAsset,
+	})
+}
+
 func (s *Server) handlePluginCatalogInstall(w http.ResponseWriter, r *http.Request) {
 	if s.pluginCatalog == nil || s.pluginMgr == nil {
 		writeErr(w, http.StatusServiceUnavailable, fmt.Errorf("plugin catalog is not configured"))
 		return
 	}
 	var req struct {
-		ID string `json:"id"`
+		ID  string `json:"id"`
+		URL string `json:"url"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
 	req.ID = strings.TrimSpace(req.ID)
-	if req.ID == "" {
-		writeErr(w, http.StatusBadRequest, fmt.Errorf("id is required"))
+	req.URL = strings.TrimSpace(req.URL)
+	if req.ID == "" && req.URL == "" {
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("id or url is required"))
 		return
 	}
-	// Stop a previously installed copy before replacing the binary.
-	_ = s.pluginMgr.RemoveExternalPlugin(req.ID)
-	if err := s.pluginCatalog.Install(r.Context(), req.ID); err != nil {
-		writeErr(w, http.StatusBadRequest, err)
-		return
+
+	var installedID string
+	if req.URL != "" {
+		// Preview id so we can stop a prior copy before replacing the binary.
+		resolved, err := s.pluginCatalog.ResolveGitHub(r.Context(), req.URL)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, err)
+			return
+		}
+		installedID = resolved.Plugin.ID
+		_ = s.pluginMgr.RemoveExternalPlugin(installedID)
+		plugin, err := s.pluginCatalog.InstallFromURL(r.Context(), req.URL)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, err)
+			return
+		}
+		installedID = plugin.ID
+	} else {
+		installedID = req.ID
+		_ = s.pluginMgr.RemoveExternalPlugin(installedID)
+		if err := s.pluginCatalog.Install(r.Context(), installedID); err != nil {
+			writeErr(w, http.StatusBadRequest, err)
+			return
+		}
 	}
 	if err := s.pluginMgr.DiscoverAndStart(); err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
@@ -1241,7 +1290,7 @@ func (s *Server) handlePluginCatalogInstall(w http.ResponseWriter, r *http.Reque
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":      true,
-		"id":      req.ID,
+		"id":      installedID,
 		"plugins": s.pluginMgr.ListPlugins(),
 	})
 }

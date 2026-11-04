@@ -52,7 +52,7 @@ replacearr/
 │   ├── db/                        # Pure-Go SQLite store, migrations & default seeders
 │   ├── domain/                    # Core domain models & RBAC permission constants
 │   ├── indexers/                  # Torznab/Newznab, Cardigann YAML & Plugin search engine
-│   ├── plugincatalog/             # Marketplace index.json fetch + checksummed install
+│   ├── plugincatalog/             # Marketplace registry.json fetch + checksummed install
 │   ├── pluginhost/                # Out-of-process plugin host & JSON-RPC supervisor
 │   └── webui/                     # Go embed.FS serving the compiled React SPA
 ├── pkg/pluginsdk/                 # Public Go SDK for authoring Replacearr plugins
@@ -194,7 +194,7 @@ func main() {
 
 **Marketplace:** optional community/first-party plugins are listed from
 [`replacearr/replacearr-plugins`](https://github.com/replacearr/replacearr-plugins)
-`index.json` (override with `REPLACEARR_PLUGIN_CATALOG_URL`). Use **Plugins → Marketplace**
+`registry.json` (override with `REPLACEARR_PLUGIN_CATALOG_URL`). Use **Plugins → Marketplace**
 to install checksummed release binaries into `REPLACEARR_PLUGIN_DIR`.
 
 Or build a plugin yourself and place it in `/config/plugins` (or `bin/plugins` in development):
@@ -257,7 +257,7 @@ services:
 | `REPLACEARR_CONFIG_DIR` | `/config` | Directory for SQLite database, JWT secret, and plugins |
 | `REPLACEARR_DB_PATH` | `/config/replacearr.db` | Custom path to SQLite database file |
 | `REPLACEARR_PLUGIN_DIR` | `/config/plugins` | Directory scanned for executable Go plugins |
-| `REPLACEARR_PLUGIN_CATALOG_URL` | replacearr-plugins `index.json` | Marketplace catalog URL (HTTPS) |
+| `REPLACEARR_PLUGIN_CATALOG_URL` | replacearr-plugins `registry.json` | Marketplace registry URL (HTTPS) |
 | `REPLACEARR_DEFINITIONS_DIR` | `/config/definitions` | Directory scanned for Cardigann YAML definitions (seeded from bundled `definitions/`) |
 | `REPLACEARR_ADMIN_USER` | `admin` | Initial admin username seeded on first startup |
 | `REPLACEARR_ADMIN_PASS` | `replacearr` | Initial admin password seeded on first startup |

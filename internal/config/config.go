@@ -63,7 +63,7 @@ func Load() *Config {
 		DatabasePath:     dbPath,
 		PluginDir:        pluginDir,
 		DefinitionsDir:   defDir,
-		PluginCatalogURL: envOrDefault("REPLACEARR_PLUGIN_CATALOG_URL", "https://raw.githubusercontent.com/replacearr/replacearr-plugins/main/index.json"),
+		PluginCatalogURL: envOrDefault("REPLACEARR_PLUGIN_CATALOG_URL", "https://raw.githubusercontent.com/replacearr/replacearr-plugins/main/registry.json"),
 		JWTSecret:        jwtSecret,
 		AdminUser:        envOrDefault("REPLACEARR_ADMIN_USER", "admin"),
 		AdminPass:        envOrDefault("REPLACEARR_ADMIN_PASS", "replacearr"),

@@ -18,7 +18,7 @@ Replacearr is a single-binary Go replacement for Sonarr, Radarr, and Prowlarr. O
 | `internal/domain` | Models and permission constants |
 | `internal/flaresolverr` | FlareSolverr v1 client, challenge detection, clearance cache |
 | `pkg/pluginsdk` | Public plugin SDK |
-| `internal/plugincatalog` | Marketplace `index.json` fetch + SHA256 install into `PLUGIN_DIR` |
+| `internal/plugincatalog` | Marketplace `registry.json` fetch + SHA256 install into `PLUGIN_DIR` |
 | `web/` | React source and the installable PWA (`public/manifest.webmanifest`, `public/sw.js`) |
 | `.github/workflows` | CI, Docker Hub image publish, and tagged release binaries |
 
@@ -42,7 +42,7 @@ Replacearr is a single-binary Go replacement for Sonarr, Radarr, and Prowlarr. O
 - New permissions go in `internal/domain` and the built-in role seed, then the UI permission list.
 - Compat routes must stay compatible with upstream Sonarr/Radarr/Prowlarr JSON. Read `docs/discovery/01`–`03` and the matching upstream controller on GitHub before changing a response, then update the discovery note.
 - Keep search in-process. Do not add HTTP sync from a Prowlarr module into Sonarr or Radarr modules.
-- Optional plugins install from [replacearr/replacearr-plugins](https://github.com/replacearr/replacearr-plugins) via `REPLACEARR_PLUGIN_CATALOG_URL` (`index.json`); do not add that repo as a git submodule of Replacearr.
+- Optional plugins install from [replacearr/replacearr-plugins](https://github.com/replacearr/replacearr-plugins) via `REPLACEARR_PLUGIN_CATALOG_URL` (`registry.json`); do not add that repo as a git submodule of Replacearr.
 - Auth stays JWT (`Authorization: Bearer`, `replacearr_token` cookie) plus `*arr` keys (`X-Api-Key`, `?apikey=`). Key scopes are `all`, `sonarr`, `radarr`, `lidarr`, `readarr`, or `prowlarr`.
 - Music (MusicBrainz) and Books/ebook+audiobook (OpenLibrary) are native modules (`docs/discovery/05` / `06`). Thin `/lidarr` and `/readarr` mounts are for migration only.
 

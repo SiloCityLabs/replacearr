@@ -565,6 +565,16 @@ export interface CatalogPlugin {
   installedVersion?: string;
   updateAvailable: boolean;
   hasPlatformAsset: boolean;
+  source?: string;
+  repoUrl?: string;
+  manifestUrl?: string;
+}
+
+export interface CatalogResolveResponse {
+  plugin: CatalogPlugin;
+  repoUrl: string;
+  manifestUrl: string;
+  hasPlatformAsset: boolean;
 }
 
 export interface PluginCatalogResponse {

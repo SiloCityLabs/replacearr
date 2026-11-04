@@ -111,6 +111,17 @@ export const PluginsTab: React.FC<PluginsTabProps> = ({
   const [catalogUrl, setCatalogUrl] = useState('');
   const [catalogLoading, setCatalogLoading] = useState(false);
   const [catalogBusyId, setCatalogBusyId] = useState<string | null>(null);
+  const [githubURL, setGithubURL] = useState('');
+  const [githubPreview, setGithubPreview] = useState<{
+    name: string;
+    id: string;
+    version: string;
+    author: string;
+    description: string;
+    hasPlatformAsset: boolean;
+    repoUrl: string;
+  } | null>(null);
+  const [githubBusy, setGithubBusy] = useState(false);
 
   const isNotificationPlugin = (p: DiscoveredPlugin | null) =>
     Boolean(p?.manifest.types?.includes('notification'));
@@ -136,7 +147,11 @@ export const PluginsTab: React.FC<PluginsTabProps> = ({
   const handleInstallCatalog = async (entry: CatalogPlugin) => {
     setCatalogBusyId(entry.id);
     try {
-      await api.installCatalogPlugin(entry.id);
+      if (entry.source === 'github' && entry.repoUrl) {
+        await api.installCatalogPluginFromURL(entry.repoUrl);
+      } else {
+        await api.installCatalogPlugin(entry.id);
+      }
       onNotify(`Installed "${entry.name}" v${entry.version}`);
       await onRefresh();
       await loadCatalog(true);
@@ -158,6 +173,47 @@ export const PluginsTab: React.FC<PluginsTabProps> = ({
       onNotify(err instanceof Error ? err.message : 'Uninstall failed', true);
     } finally {
       setCatalogBusyId(null);
+    }
+  };
+
+  const handleResolveGitHub = async () => {
+    const url = githubURL.trim();
+    if (!url) return;
+    setGithubBusy(true);
+    setGithubPreview(null);
+    try {
+      const res = await api.resolveCatalogPluginURL(url);
+      setGithubPreview({
+        name: res.plugin.name,
+        id: res.plugin.id,
+        version: res.plugin.version,
+        author: res.plugin.author,
+        description: res.plugin.description,
+        hasPlatformAsset: res.hasPlatformAsset,
+        repoUrl: res.repoUrl,
+      });
+    } catch (err) {
+      onNotify(err instanceof Error ? err.message : 'Could not resolve GitHub plugin', true);
+    } finally {
+      setGithubBusy(false);
+    }
+  };
+
+  const handleInstallGitHub = async () => {
+    const url = githubURL.trim();
+    if (!url) return;
+    setGithubBusy(true);
+    try {
+      const res = await api.installCatalogPluginFromURL(url);
+      onNotify(`Installed "${res.id}" from GitHub`);
+      setGithubURL('');
+      setGithubPreview(null);
+      await onRefresh();
+      await loadCatalog(true);
+    } catch (err) {
+      onNotify(err instanceof Error ? err.message : 'GitHub install failed', true);
+    } finally {
+      setGithubBusy(false);
     }
   };
 
@@ -553,9 +609,66 @@ export const PluginsTab: React.FC<PluginsTabProps> = ({
         </div>
         {catalogUrl ? (
           <p className="text-[11px] font-mono text-slate-500 truncate">
-            Index: {catalogUrl}
+            Registry: {catalogUrl}
           </p>
         ) : null}
+
+        <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+              Install from GitHub
+            </h3>
+            <span className="text-[11px] text-amber-400/90">
+              Third-party repos are not reviewed by Replacearr — install at your own risk.
+            </span>
+          </div>
+          <div className="flex flex-col sm:flex-row gap-2">
+            <input
+              type="text"
+              value={githubURL}
+              onChange={(e) => {
+                setGithubURL(e.target.value);
+                setGithubPreview(null);
+              }}
+              placeholder="owner/repo or https://github.com/owner/repo"
+              className="flex-1 min-w-0 px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-sm text-slate-100 font-mono placeholder:text-slate-600 focus:outline-none focus:border-indigo-500"
+            />
+            <button
+              type="button"
+              disabled={githubBusy || !githubURL.trim()}
+              onClick={() => void handleResolveGitHub()}
+              className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs text-slate-200 font-semibold transition disabled:opacity-40"
+            >
+              Preview
+            </button>
+            <button
+              type="button"
+              disabled={githubBusy || !githubURL.trim() || (githubPreview != null && !githubPreview.hasPlatformAsset)}
+              onClick={() => void handleInstallGitHub()}
+              className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-xs text-white font-semibold transition disabled:opacity-40"
+            >
+              <Download className="w-3.5 h-3.5" />
+              Install
+            </button>
+          </div>
+          {githubPreview ? (
+            <div className="text-xs text-slate-300 space-y-1">
+              <p>
+                <span className="font-semibold text-white">{githubPreview.name}</span>{' '}
+                <span className="font-mono text-indigo-300">v{githubPreview.version}</span>{' '}
+                <span className="text-slate-500">
+                  {githubPreview.author} • {githubPreview.id}
+                </span>
+              </p>
+              <p className="text-slate-400">{githubPreview.description}</p>
+              <p className="font-mono text-[11px] text-slate-500 truncate">{githubPreview.repoUrl}</p>
+              {!githubPreview.hasPlatformAsset ? (
+                <p className="text-amber-400">No checksummed asset for this OS/arch.</p>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
           {catalog.map((entry) => {
             const busy = catalogBusyId === entry.id;
@@ -581,6 +694,11 @@ export const PluginsTab: React.FC<PluginsTabProps> = ({
                           update available
                         </span>
                       ) : null}
+                      {entry.source === 'github' ? (
+                        <span className="text-[10px] font-mono uppercase px-2 py-0.5 rounded-full bg-rose-500/15 text-rose-300 border border-rose-500/30">
+                          github
+                        </span>
+                      ) : null}
                     </div>
                     <p className="text-xs text-slate-400 mt-1">{entry.description}</p>
                     <div className="mt-2 flex flex-wrap gap-2">
@@ -596,10 +714,15 @@ export const PluginsTab: React.FC<PluginsTabProps> = ({
                         {entry.author} • {entry.id}
                       </span>
                     </div>
+                    {entry.repoUrl ? (
+                      <p className="mt-1 text-[11px] font-mono text-slate-500 truncate">
+                        {entry.repoUrl}
+                      </p>
+                    ) : null}
                   </div>
-                  {entry.homepage ? (
+                  {entry.homepage || entry.repoUrl ? (
                     <a
-                      href={entry.homepage}
+                      href={entry.homepage || entry.repoUrl}
                       target="_blank"
                       rel="noreferrer"
                       className="p-2 rounded-lg border border-slate-800 text-slate-400 hover:text-white shrink-0"
@@ -648,7 +771,7 @@ export const PluginsTab: React.FC<PluginsTabProps> = ({
           })}
           {!catalogLoading && catalog.length === 0 ? (
             <p className="text-sm text-slate-500 col-span-full">
-              Marketplace index is empty or unreachable.
+              Marketplace registry is empty or unreachable.
             </p>
           ) : null}
         </div>

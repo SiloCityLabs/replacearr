@@ -123,7 +123,7 @@ docker exec replacearr cat /config/api_key.txt
 | `REPLACEARR_CONFIG_DIR` | `/config` | Base directory for the database, secrets, plugins, and definitions. |
 | `REPLACEARR_DB_PATH` | `/config/replacearr.db` | SQLite database file. |
 | `REPLACEARR_PLUGIN_DIR` | `/config/plugins` | Directory scanned for executable Go plugins. |
-| `REPLACEARR_PLUGIN_CATALOG_URL` | replacearr-plugins `index.json` | Marketplace catalog URL used by Plugins → Marketplace. |
+| `REPLACEARR_PLUGIN_CATALOG_URL` | replacearr-plugins `registry.json` | Marketplace registry URL used by Plugins → Marketplace. |
 | `REPLACEARR_DEFINITIONS_DIR` | `/config/definitions` | Directory scanned for Cardigann YAML indexer definitions. |
 
 ### Authentication (first run only)

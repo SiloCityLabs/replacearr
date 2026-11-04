@@ -9,6 +9,7 @@ import type {
   CardigannDefinition,
   DiscoveredPlugin,
   DomainClearance,
+  CatalogResolveResponse,
   PluginCatalogResponse,
   DownloadClient,
   Edition,
@@ -533,6 +534,20 @@ export const api = {
     return request<{ ok: boolean; id: string }>('/api/v1/plugins/catalog/install', {
       method: 'POST',
       body: JSON.stringify({ id }),
+    });
+  },
+
+  async resolveCatalogPluginURL(url: string): Promise<CatalogResolveResponse> {
+    return request<CatalogResolveResponse>('/api/v1/plugins/catalog/resolve', {
+      method: 'POST',
+      body: JSON.stringify({ url }),
+    });
+  },
+
+  async installCatalogPluginFromURL(url: string): Promise<{ ok: boolean; id: string }> {
+    return request<{ ok: boolean; id: string }>('/api/v1/plugins/catalog/install', {
+      method: 'POST',
+      body: JSON.stringify({ url }),
     });
   },
 

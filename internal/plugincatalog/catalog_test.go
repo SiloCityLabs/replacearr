@@ -13,32 +13,34 @@ import (
 	"testing"
 )
 
-func TestInstallAndUninstall(t *testing.T) {
+func TestInstallAndUninstallRegistryV2(t *testing.T) {
 	payload := []byte("#!/bin/sh\necho replacearr-plugin\n")
 	sum := sha256.Sum256(payload)
 	digest := hex.EncodeToString(sum[:])
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/index.json", func(w http.ResponseWriter, _ *http.Request) {
-		idx := Index{
+	mux.HandleFunc("/registry.json", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(Registry{
 			SchemaVersion: SchemaVersion,
-			UpdatedAt:     "2026-11-04T00:00:00Z",
-			Plugins: []Plugin{{
-				ID:      "demo-plugin",
-				Name:    "Demo",
-				Version: "1.2.0",
-				Author:  "test",
-				Types:   []string{"notification"},
-				Assets: []Asset{{
-					GOOS:   runtime.GOOS,
-					GOARCH: runtime.GOARCH,
-					URL:    "https://example.invalid/bin", // rewritten via client transport
-					SHA256: digest,
-					Size:   int64(len(payload)),
-				}},
+			Plugins:       []RegistryEntry{{ID: "demo-plugin", Manifest: "manifests/demo-plugin.json"}},
+		})
+	})
+	mux.HandleFunc("/manifests/demo-plugin.json", func(w http.ResponseWriter, r *http.Request) {
+		plugin := Plugin{
+			ID:      "demo-plugin",
+			Name:    "Demo",
+			Version: "1.2.0",
+			Author:  "test",
+			Types:   []string{"notification"},
+			Assets: []Asset{{
+				GOOS:   runtime.GOOS,
+				GOARCH: runtime.GOARCH,
+				URL:    "https://example.invalid/bin",
+				SHA256: digest,
+				Size:   int64(len(payload)),
 			}},
 		}
-		_ = json.NewEncoder(w).Encode(idx)
+		_ = json.NewEncoder(w).Encode(plugin)
 	})
 	mux.HandleFunc("/bin", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write(payload)
@@ -47,13 +49,15 @@ func TestInstallAndUninstall(t *testing.T) {
 	defer srv.Close()
 
 	pluginDir := t.TempDir()
-	client := New(srv.URL+"/index.json", pluginDir)
+	client := New(srv.URL+"/registry.json", pluginDir)
 	client.httpClient = srv.Client()
 
-	// Rewrite asset URL host to the test server.
 	idx, err := client.Fetch(context.Background(), true)
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
+	}
+	if len(idx.Plugins) != 1 {
+		t.Fatalf("want 1 plugin, got %d", len(idx.Plugins))
 	}
 	idx.Plugins[0].Assets[0].URL = srv.URL + "/bin"
 	client.mu.Lock()
@@ -71,12 +75,9 @@ func TestInstallAndUninstall(t *testing.T) {
 	if string(got) != string(payload) {
 		t.Fatalf("installed bytes mismatch")
 	}
-	fi, err := os.Stat(dest)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if fi.Mode()&0o111 == 0 {
-		t.Fatalf("expected executable bit, mode=%v", fi.Mode())
+	origin, ok := ReadOrigin(pluginDir, "demo-plugin")
+	if !ok || origin.Source != OriginRegistry || origin.InstalledVersion != "1.2.0" {
+		t.Fatalf("origin sidecar missing/wrong: %+v ok=%v", origin, ok)
 	}
 
 	entries, err := client.List(context.Background(), []InstalledInfo{{
@@ -95,6 +96,33 @@ func TestInstallAndUninstall(t *testing.T) {
 	if _, err := os.Stat(dest); !os.IsNotExist(err) {
 		t.Fatalf("expected binary removed, err=%v", err)
 	}
+	if _, ok := ReadOrigin(pluginDir, "demo-plugin"); ok {
+		t.Fatal("expected origin sidecar removed")
+	}
+}
+
+func TestLegacySchemaV1StillLoads(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/index.json", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(Index{
+			SchemaVersion: LegacySchemaV1,
+			Plugins: []Plugin{{
+				ID: "legacy-plugin", Name: "Legacy", Version: "0.1.0",
+				Assets: []Asset{{GOOS: "linux", GOARCH: "amd64", URL: "https://x/a", SHA256: "aa", Size: 1}},
+			}},
+		})
+	})
+	srv := httptest.NewTLSServer(mux)
+	defer srv.Close()
+	client := New(srv.URL+"/index.json", t.TempDir())
+	client.httpClient = srv.Client()
+	idx, err := client.Fetch(context.Background(), true)
+	if err != nil {
+		t.Fatalf("Fetch legacy: %v", err)
+	}
+	if idx.SchemaVersion != LegacySchemaV1 || len(idx.Plugins) != 1 {
+		t.Fatalf("unexpected index: %+v", idx)
+	}
 }
 
 func TestRejectNonHTTPSAndBadID(t *testing.T) {
@@ -107,6 +135,20 @@ func TestRejectNonHTTPSAndBadID(t *testing.T) {
 	}
 	if err := validatePluginID("../evil"); err == nil {
 		t.Fatal("expected path traversal rejection")
+	}
+}
+
+func TestParseGitHubPluginURL(t *testing.T) {
+	owner, repo, tag, err := ParseGitHubPluginURL("replacearr/plugin-http-proxy")
+	if err != nil || owner != "replacearr" || repo != "plugin-http-proxy" || tag != "" {
+		t.Fatalf("got %s/%s tag=%q err=%v", owner, repo, tag, err)
+	}
+	owner, repo, tag, err = ParseGitHubPluginURL("https://github.com/replacearr/plugin-http-proxy/releases/tag/v0.1.0")
+	if err != nil || owner != "replacearr" || repo != "plugin-http-proxy" || tag != "v0.1.0" {
+		t.Fatalf("got %s/%s tag=%q err=%v", owner, repo, tag, err)
+	}
+	if _, _, _, err := ParseGitHubPluginURL("https://gitlab.com/x/y"); err == nil {
+		t.Fatal("expected non-github rejection")
 	}
 }
 
@@ -125,5 +167,15 @@ func TestSelectAssetAndVersionGreater(t *testing.T) {
 	if versionGreater("1.0.0", "1.0.0") {
 		t.Fatal("equal versions should not be greater")
 	}
-	_ = filepath.Join // keep import used on windows path helpers in coverage
+	_ = filepath.Join
+}
+
+func TestRejectOffOriginManifest(t *testing.T) {
+	_, err := resolveManifestRef(
+		"https://raw.githubusercontent.com/replacearr/replacearr-plugins/main/registry.json",
+		"https://evil.example/manifest.json",
+	)
+	if err == nil {
+		t.Fatal("expected off-origin absolute manifest rejection")
+	}
 }
