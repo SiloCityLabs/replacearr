@@ -1,5 +1,7 @@
 # Replacearr
 
+Website: [replacearr.com](https://replacearr.com) · Source: [github.com/replacearr/replacearr](https://github.com/replacearr/replacearr)
+
 This is a highly experimental AI created repo. I still have to deslop it. feel free to make PRs and issues. All are welcome. just needed it published so that I can deploy it using dockerhub.
 
 **Replacearr** is a fast, single-binary, Go-powered replacement for **Sonarr**, **Radarr**, and **Prowlarr** with a unified React web interface, role-based access control (RBAC) for users and scoped API keys, native Cardigann YAML indexer definitions, and an out-of-process **Go Plugin SDK** (`pkg/pluginsdk`).
@@ -42,11 +44,7 @@ This is a highly experimental AI created repo. I still have to deslop it. feel f
 replacearr/
 ├── cmd/replacearr/                # Main server entrypoint
 ├── examples/plugins/
-│   ├── jellyfin-notifier/         # Marketplace pointer (README only)
-│   ├── http-proxy/                # Marketplace pointer (README only)
-│   ├── sample-indexer/            # Test fixture (canonical: SiloCityLabs/replacearr-plugins)
-│   ├── openvpn-proxy/             # Marketplace pointer (README only)
-│   └── webhook-notifier/          # Marketplace pointer (README only)
+│   └── sample-indexer/            # Host test fixture (shipped plugins: replacearr/replacearr-plugins)
 ├── internal/
 │   ├── api/                       # Unified REST API + Sonarr/Radarr/Prowlarr compat routers
 │   ├── auth/                      # Password hashing, JWT tokens, RBAC & API key middleware
@@ -195,7 +193,7 @@ func main() {
 ```
 
 **Marketplace:** optional community/first-party plugins are listed from
-[`SiloCityLabs/replacearr-plugins`](https://github.com/SiloCityLabs/replacearr-plugins)
+[`replacearr/replacearr-plugins`](https://github.com/replacearr/replacearr-plugins)
 `index.json` (override with `REPLACEARR_PLUGIN_CATALOG_URL`). Use **Plugins → Marketplace**
 to install checksummed release binaries into `REPLACEARR_PLUGIN_DIR`.
 
@@ -259,7 +257,7 @@ services:
 | `REPLACEARR_CONFIG_DIR` | `/config` | Directory for SQLite database, JWT secret, and plugins |
 | `REPLACEARR_DB_PATH` | `/config/replacearr.db` | Custom path to SQLite database file |
 | `REPLACEARR_PLUGIN_DIR` | `/config/plugins` | Directory scanned for executable Go plugins |
-| `REPLACEARR_PLUGIN_CATALOG_URL` | SiloCityLabs `index.json` | Marketplace catalog URL (HTTPS) |
+| `REPLACEARR_PLUGIN_CATALOG_URL` | replacearr-plugins `index.json` | Marketplace catalog URL (HTTPS) |
 | `REPLACEARR_DEFINITIONS_DIR` | `/config/definitions` | Directory scanned for Cardigann YAML definitions (seeded from bundled `definitions/`) |
 | `REPLACEARR_ADMIN_USER` | `admin` | Initial admin username seeded on first startup |
 | `REPLACEARR_ADMIN_PASS` | `replacearr` | Initial admin password seeded on first startup |

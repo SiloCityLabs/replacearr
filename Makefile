@@ -70,8 +70,8 @@ build-web: ## Build static React frontend and copy into Go embed directory
 	@touch $(EMBED_DIST)/.gitkeep
 	@echo "==> Static frontend embedded in $(EMBED_DIST)"
 
-build-plugins: ## Optional plugins install from the marketplace (SiloCityLabs/replacearr-plugins); keeps bin/plugins/ ready
-	@echo "==> No in-tree plugins to build — install from Plugins → Marketplace (SiloCityLabs/replacearr-plugins)"
+build-plugins: ## Optional plugins install from the marketplace (replacearr/replacearr-plugins); keeps bin/plugins/ ready
+	@echo "==> No in-tree plugins to build — install from Plugins → Marketplace (replacearr/replacearr-plugins)"
 	@mkdir -p $(PLUGINS_DIR)
 
 build-backend: ## Build Replacearr Go binary (assumes build-web has been run)

@@ -1,7 +1,6 @@
 # sample-indexer
 
-Canonical marketplace source:
+In-tree fixture used by `internal/pluginhost` tests.
 
-https://github.com/SiloCityLabs/replacearr-plugins/tree/main/plugins/sample-indexer
-
-This directory is kept as an in-tree copy for `internal/pluginhost` tests (`go build` during `go test`). Prefer installing the marketplace binary for real use.
+Shipped plugins (including this demo) live in
+[replacearr/replacearr-plugins](https://github.com/replacearr/replacearr-plugins).

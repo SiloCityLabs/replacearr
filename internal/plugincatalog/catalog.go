@@ -21,7 +21,7 @@ import (
 )
 
 const (
-	DefaultCatalogURL = "https://raw.githubusercontent.com/SiloCityLabs/replacearr-plugins/main/index.json"
+	DefaultCatalogURL = "https://raw.githubusercontent.com/replacearr/replacearr-plugins/main/index.json"
 	SchemaVersion     = 1
 	defaultCacheTTL   = 10 * time.Minute
 	maxAssetBytes     = 256 << 20 // 256 MiB
