@@ -90,10 +90,12 @@ func (s *Store) seedDefaults() error {
 		},
 		{
 			Name:        "manager",
-			Description: "Manage TV series, movies, indexers, and download clients",
+			Description: "Manage TV series, movies, music, books, indexers, and download clients",
 			Perms: []string{
 				domain.PermTVRead, domain.PermTVWrite, domain.PermTVDelete,
 				domain.PermMoviesRead, domain.PermMoviesWrite, domain.PermMoviesDelete,
+				domain.PermMusicRead, domain.PermMusicWrite, domain.PermMusicDelete,
+				domain.PermBooksRead, domain.PermBooksWrite, domain.PermBooksDelete,
 				domain.PermIndexersRead, domain.PermIndexersWrite, domain.PermIndexersSearch,
 				domain.PermDownloadsRead, domain.PermDownloadsWrite,
 				domain.PermProfilesRead, domain.PermProfilesWrite,
@@ -102,10 +104,12 @@ func (s *Store) seedDefaults() error {
 		},
 		{
 			Name:        "requester",
-			Description: "Can view and add TV series and movies and search indexers",
+			Description: "Can view and add TV, movies, music, and books and search indexers",
 			Perms: []string{
 				domain.PermTVRead, domain.PermTVWrite,
 				domain.PermMoviesRead, domain.PermMoviesWrite,
+				domain.PermMusicRead, domain.PermMusicWrite,
+				domain.PermBooksRead, domain.PermBooksWrite,
 				domain.PermIndexersRead, domain.PermIndexersSearch,
 				domain.PermDownloadsRead, domain.PermProfilesRead, domain.PermSystemRead,
 			},
@@ -115,6 +119,7 @@ func (s *Store) seedDefaults() error {
 			Description: "Read-only access to library, calendar, and queue",
 			Perms: []string{
 				domain.PermTVRead, domain.PermMoviesRead,
+				domain.PermMusicRead, domain.PermBooksRead,
 				domain.PermIndexersRead, domain.PermDownloadsRead,
 				domain.PermProfilesRead, domain.PermSystemRead,
 			},
@@ -125,6 +130,8 @@ func (s *Store) seedDefaults() error {
 			Perms: []string{
 				domain.PermTVRead, domain.PermTVWrite,
 				domain.PermMoviesRead, domain.PermMoviesWrite,
+				domain.PermMusicRead, domain.PermMusicWrite,
+				domain.PermBooksRead, domain.PermBooksWrite,
 				domain.PermIndexersRead, domain.PermIndexersSearch,
 				domain.PermDownloadsRead, domain.PermDownloadsWrite,
 				domain.PermProfilesRead, domain.PermSystemRead,
@@ -150,9 +157,7 @@ func (s *Store) seedDefaults() error {
 	if qpCount == 0 {
 		defaultProfiles := []domain.QualityProfile{
 			{
-				Name:           "Any",
-				UpgradeAllowed: true,
-				Cutoff:         7,
+				Name: "Any", MediaType: "video", UpgradeAllowed: true, Cutoff: 7,
 				Items: []domain.QualityItem{
 					{ID: 1, Name: "SDTV", Source: "television", Resolution: 480, Allowed: true},
 					{ID: 4, Name: "HDTV-720p", Source: "television", Resolution: 720, Allowed: true},
@@ -162,9 +167,7 @@ func (s *Store) seedDefaults() error {
 				},
 			},
 			{
-				Name:           "HD - 720p/1080p",
-				UpgradeAllowed: true,
-				Cutoff:         9,
+				Name: "HD - 720p/1080p", MediaType: "video", UpgradeAllowed: true, Cutoff: 9,
 				Items: []domain.QualityItem{
 					{ID: 4, Name: "HDTV-720p", Source: "television", Resolution: 720, Allowed: true},
 					{ID: 7, Name: "WEBDL-1080p", Source: "web", Resolution: 1080, Allowed: true},
@@ -172,9 +175,7 @@ func (s *Store) seedDefaults() error {
 				},
 			},
 			{
-				Name:           "Ultra-HD (4K)",
-				UpgradeAllowed: true,
-				Cutoff:         19,
+				Name: "Ultra-HD (4K)", MediaType: "video", UpgradeAllowed: true, Cutoff: 19,
 				Items: []domain.QualityItem{
 					{ID: 18, Name: "HDTV-2160p", Source: "television", Resolution: 2160, Allowed: true},
 					{ID: 19, Name: "WEBDL-2160p", Source: "web", Resolution: 2160, Allowed: true},
@@ -183,6 +184,44 @@ func (s *Store) seedDefaults() error {
 			},
 		}
 		for _, qp := range defaultProfiles {
+			_, _ = s.CreateQualityProfile(qp)
+		}
+	}
+
+	// 3. Seed music / ebook / audiobook quality profiles if missing
+	for _, qp := range []domain.QualityProfile{
+		{
+			Name: "Music", MediaType: "music", UpgradeAllowed: true, Cutoff: 104,
+			Items: []domain.QualityItem{
+				{ID: 101, Name: "MP3-192", Source: "mp3", Allowed: true},
+				{ID: 102, Name: "MP3-320", Source: "mp3", Allowed: true},
+				{ID: 103, Name: "AAC-256", Source: "aac", Allowed: true},
+				{ID: 104, Name: "FLAC", Source: "flac", Allowed: true},
+				{ID: 105, Name: "FLAC-24", Source: "flac", Allowed: true},
+			},
+		},
+		{
+			Name: "Ebook", MediaType: "ebook", UpgradeAllowed: true, Cutoff: 121,
+			Items: []domain.QualityItem{
+				{ID: 121, Name: "EPUB", Source: "ebook", Allowed: true},
+				{ID: 122, Name: "AZW3", Source: "ebook", Allowed: true},
+				{ID: 123, Name: "MOBI", Source: "ebook", Allowed: true},
+				{ID: 124, Name: "PDF", Source: "ebook", Allowed: true},
+				{ID: 125, Name: "CBZ", Source: "comic", Allowed: true},
+			},
+		},
+		{
+			Name: "Audiobook", MediaType: "audiobook", UpgradeAllowed: true, Cutoff: 141,
+			Items: []domain.QualityItem{
+				{ID: 141, Name: "M4B", Source: "audiobook", Allowed: true},
+				{ID: 142, Name: "MP3 Audiobook", Source: "audiobook", Allowed: true},
+				{ID: 143, Name: "FLAC Audiobook", Source: "audiobook", Allowed: true},
+			},
+		},
+	} {
+		var n int
+		_ = s.db.QueryRow(`SELECT COUNT(*) FROM quality_profiles WHERE name = ?`, qp.Name).Scan(&n)
+		if n == 0 {
 			_, _ = s.CreateQualityProfile(qp)
 		}
 	}
@@ -565,7 +604,7 @@ func (s *Store) DeleteRootFolder(id int64) error {
 }
 
 func (s *Store) ListQualityProfiles() ([]domain.QualityProfile, error) {
-	rows, err := s.db.Query(`SELECT id, name, upgrade_allowed, cutoff, items_json, min_format_score, cutoff_format_score FROM quality_profiles ORDER BY id ASC`)
+	rows, err := s.db.Query(`SELECT id, name, COALESCE(media_type, 'video'), upgrade_allowed, cutoff, items_json, min_format_score, cutoff_format_score FROM quality_profiles ORDER BY id ASC`)
 	if err != nil {
 		return nil, err
 	}
@@ -575,10 +614,13 @@ func (s *Store) ListQualityProfiles() ([]domain.QualityProfile, error) {
 		var qp domain.QualityProfile
 		var upg int
 		var itemsJSON string
-		if err := rows.Scan(&qp.ID, &qp.Name, &upg, &qp.Cutoff, &itemsJSON, &qp.MinFormatScore, &qp.CutoffFormatScore); err != nil {
+		if err := rows.Scan(&qp.ID, &qp.Name, &qp.MediaType, &upg, &qp.Cutoff, &itemsJSON, &qp.MinFormatScore, &qp.CutoffFormatScore); err != nil {
 			return nil, err
 		}
 		qp.UpgradeAllowed = upg == 1
+		if qp.MediaType == "" {
+			qp.MediaType = "video"
+		}
 		_ = json.Unmarshal([]byte(itemsJSON), &qp.Items)
 		if qp.Items == nil {
 			qp.Items = []domain.QualityItem{}
@@ -593,9 +635,12 @@ func (s *Store) CreateQualityProfile(qp domain.QualityProfile) (*domain.QualityP
 	if qp.UpgradeAllowed {
 		upg = 1
 	}
+	if qp.MediaType == "" {
+		qp.MediaType = "video"
+	}
 	b, _ := json.Marshal(qp.Items)
-	res, err := s.db.Exec(`INSERT INTO quality_profiles (name, upgrade_allowed, cutoff, items_json, min_format_score, cutoff_format_score) VALUES (?, ?, ?, ?, ?, ?)`,
-		qp.Name, upg, qp.Cutoff, string(b), qp.MinFormatScore, qp.CutoffFormatScore)
+	res, err := s.db.Exec(`INSERT INTO quality_profiles (name, media_type, upgrade_allowed, cutoff, items_json, min_format_score, cutoff_format_score) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		qp.Name, qp.MediaType, upg, qp.Cutoff, string(b), qp.MinFormatScore, qp.CutoffFormatScore)
 	if err != nil {
 		return nil, err
 	}
@@ -1289,7 +1334,9 @@ func (s *Store) DeleteDownloadClient(id int64) error {
 
 func (s *Store) ListQueueItems(mediaType string) ([]domain.QueueItem, error) {
 	query := `
-		SELECT id, media_type, series_id, episode_id, movie_id, title, status,
+		SELECT id, media_type, series_id, episode_id, movie_id,
+		       COALESCE(artist_id, 0), COALESCE(album_id, 0), COALESCE(author_id, 0), COALESCE(book_id, 0), COALESCE(edition_id, 0),
+		       title, status,
 		       tracked_download_status, tracked_download_state, size, sizeleft, timeleft,
 		       estimated_completion, protocol, download_client, download_id, indexer, output_path, added
 		FROM queue_items`
@@ -1308,7 +1355,9 @@ func (s *Store) ListQueueItems(mediaType string) ([]domain.QueueItem, error) {
 	for rows.Next() {
 		var q domain.QueueItem
 		if err := rows.Scan(
-			&q.ID, &q.MediaType, &q.SeriesID, &q.EpisodeID, &q.MovieID, &q.Title, &q.Status,
+			&q.ID, &q.MediaType, &q.SeriesID, &q.EpisodeID, &q.MovieID,
+			&q.ArtistID, &q.AlbumID, &q.AuthorID, &q.BookID, &q.EditionID,
+			&q.Title, &q.Status,
 			&q.TrackedDownloadStatus, &q.TrackedDownloadState, &q.Size, &q.Sizeleft, &q.Timeleft,
 			&q.EstimatedCompletion, &q.Protocol, &q.DownloadClient, &q.DownloadID, &q.Indexer,
 			&q.OutputPath, &q.Added,
@@ -1336,11 +1385,13 @@ func (s *Store) CreateQueueItem(q domain.QueueItem) (*domain.QueueItem, error) {
 	}
 	res, err := s.db.Exec(`
 		INSERT INTO queue_items (
-			media_type, series_id, episode_id, movie_id, title, status,
+			media_type, series_id, episode_id, movie_id, artist_id, album_id, author_id, book_id, edition_id,
+			title, status,
 			tracked_download_status, tracked_download_state, size, sizeleft, timeleft,
 			estimated_completion, protocol, download_client, download_id, indexer, output_path
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		q.MediaType, q.SeriesID, q.EpisodeID, q.MovieID, q.Title, q.Status,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		q.MediaType, q.SeriesID, q.EpisodeID, q.MovieID, q.ArtistID, q.AlbumID, q.AuthorID, q.BookID, q.EditionID,
+		q.Title, q.Status,
 		q.TrackedDownloadStatus, q.TrackedDownloadState, q.Size, q.Sizeleft, q.Timeleft,
 		q.EstimatedCompletion, q.Protocol, q.DownloadClient, q.DownloadID, q.Indexer, q.OutputPath,
 	)
@@ -1392,7 +1443,9 @@ func (s *Store) MarkMovieHasFile(movieID int64, hasFile bool) error {
 }
 
 func (s *Store) ListHistory(mediaType string) ([]domain.HistoryRecord, error) {
-	query := `SELECT id, media_type, series_id, episode_id, movie_id, source_title, quality_json, date, event_type, data_json FROM history_records`
+	query := `SELECT id, media_type, series_id, episode_id, movie_id,
+		COALESCE(artist_id, 0), COALESCE(album_id, 0), COALESCE(author_id, 0), COALESCE(book_id, 0), COALESCE(edition_id, 0),
+		source_title, quality_json, date, event_type, data_json FROM history_records`
 	var args []any
 	if mediaType != "" && mediaType != "all" {
 		query += ` WHERE media_type = ?`
@@ -1408,7 +1461,9 @@ func (s *Store) ListHistory(mediaType string) ([]domain.HistoryRecord, error) {
 	for rows.Next() {
 		var h domain.HistoryRecord
 		var qJSON, dJSON string
-		if err := rows.Scan(&h.ID, &h.MediaType, &h.SeriesID, &h.EpisodeID, &h.MovieID, &h.SourceTitle, &qJSON, &h.Date, &h.EventType, &dJSON); err != nil {
+		if err := rows.Scan(&h.ID, &h.MediaType, &h.SeriesID, &h.EpisodeID, &h.MovieID,
+			&h.ArtistID, &h.AlbumID, &h.AuthorID, &h.BookID, &h.EditionID,
+			&h.SourceTitle, &qJSON, &h.Date, &h.EventType, &dJSON); err != nil {
 			return nil, err
 		}
 		_ = json.Unmarshal([]byte(qJSON), &h.Quality)
@@ -1422,9 +1477,10 @@ func (s *Store) CreateHistory(h domain.HistoryRecord) error {
 	qB, _ := json.Marshal(h.Quality)
 	dB, _ := json.Marshal(h.Data)
 	_, err := s.db.Exec(`
-		INSERT INTO history_records (media_type, series_id, episode_id, movie_id, source_title, quality_json, event_type, data_json)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		h.MediaType, h.SeriesID, h.EpisodeID, h.MovieID, h.SourceTitle, string(qB), h.EventType, string(dB),
+		INSERT INTO history_records (media_type, series_id, episode_id, movie_id, artist_id, album_id, author_id, book_id, edition_id, source_title, quality_json, event_type, data_json)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		h.MediaType, h.SeriesID, h.EpisodeID, h.MovieID, h.ArtistID, h.AlbumID, h.AuthorID, h.BookID, h.EditionID,
+		h.SourceTitle, string(qB), h.EventType, string(dB),
 	)
 	return err
 }

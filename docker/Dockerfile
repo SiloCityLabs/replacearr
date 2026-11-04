@@ -66,6 +66,9 @@ RUN apk add --no-cache \
       /config/definitions \
       /data/TV \
       /data/Movies \
+      /data/Music \
+      /data/Books \
+      /data/Audiobooks \
       /data/downloads \
       /usr/local/share/replacearr/plugins \
       /usr/local/share/replacearr/definitions

@@ -18,9 +18,23 @@ export const InteractiveSearchModal: React.FC<InteractiveSearchModalProps> = ({
 }) => {
   const seriesId = request.seriesId;
   const movieId = request.movieId;
-  const hasLibrary = (seriesId != null && seriesId > 0) || (movieId != null && movieId > 0);
+  const artistId = request.artistId;
+  const albumId = request.albumId;
+  const authorId = request.authorId;
+  const bookId = request.bookId;
+  const editionId = request.editionId;
+  const hasLibrary =
+    (seriesId != null && seriesId > 0) ||
+    (movieId != null && movieId > 0) ||
+    (artistId != null && artistId > 0) ||
+    (albumId != null && albumId > 0) ||
+    (authorId != null && authorId > 0) ||
+    (bookId != null && bookId > 0) ||
+    (editionId != null && editionId > 0);
 
-  const searchType = request.type || (movieId ? 'movie' : 'tvsearch');
+  const searchType =
+    request.type ||
+    (editionId || bookId ? 'book' : artistId || albumId ? 'music' : movieId ? 'movie' : 'tvsearch');
   const [query] = useState(request.query || request.contextLabel || '');
   const [results, setResults] = useState<ReleaseResult[]>([]);
   const [searching, setSearching] = useState(false);
@@ -28,7 +42,7 @@ export const InteractiveSearchModal: React.FC<InteractiveSearchModalProps> = ({
 
   useEffect(() => {
     if (!hasLibrary || !query.trim()) {
-      onNotify('Interactive Search requires a library series or movie', true);
+      onNotify('Interactive Search requires a library item', true);
       onClose();
       return;
     }
@@ -41,6 +55,11 @@ export const InteractiveSearchModal: React.FC<InteractiveSearchModalProps> = ({
           episode: request.episode,
           tvdbId: request.tvdbId,
           tmdbId: request.tmdbId,
+          artistId,
+          albumId,
+          authorId,
+          bookId,
+          editionId,
         });
         if (!cancelled) setResults(res);
       } catch (err) {
@@ -56,11 +75,20 @@ export const InteractiveSearchModal: React.FC<InteractiveSearchModalProps> = ({
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [request.query, request.seriesId, request.movieId, request.tvdbId, request.tmdbId]);
+  }, [request.query, request.seriesId, request.movieId, request.artistId, request.albumId, request.bookId, request.editionId]);
 
   const handleGrab = async (rel: ReleaseResult) => {
     setGrabbingGuid(rel.guid || rel.title);
     const label = request.contextLabel || query;
+    const mediaType = editionId || bookId
+      ? searchType === 'audiobook'
+        ? 'audiobook'
+        : 'ebook'
+      : artistId || albumId
+        ? 'music'
+        : movieId
+          ? 'movie'
+          : 'tv';
     try {
       await api.grabRelease({
         title: rel.title,
@@ -68,11 +96,16 @@ export const InteractiveSearchModal: React.FC<InteractiveSearchModalProps> = ({
         protocol: rel.protocol || 'torrent',
         indexer: rel.indexer || 'Replacearr',
         size: rel.size || 1500000000,
-        mediaType: movieId ? 'movie' : 'tv',
+        mediaType,
         seriesId,
         movieId,
         episodeId: request.episodeId,
         seasonNumber: request.season,
+        artistId,
+        albumId,
+        authorId,
+        bookId,
+        editionId,
       });
       onNotify(`Queued "${rel.title}" for ${label}`);
       await onRefresh();
@@ -147,84 +180,123 @@ export const InteractiveSearchModal: React.FC<InteractiveSearchModalProps> = ({
         </div>
 
         <div className="flex-1 overflow-auto">
-          <table className="w-full text-left border-collapse">
-            <thead className="sticky top-0 bg-slate-950/95">
-              <tr className="border-b border-slate-800 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
-                <th className="py-3 px-4">Protocol</th>
-                <th className="py-3 px-4">Release Title</th>
-                <th className="py-3 px-4">Indexer</th>
-                <th className="py-3 px-4">Quality</th>
-                <th className="py-3 px-4">Size</th>
-                <th className="py-3 px-4">Peers</th>
-                <th className="py-3 px-4 text-right">Action</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-800/70 text-xs">
-              {results.length === 0 ? (
-                <tr>
-                  <td colSpan={7} className="py-10 text-center text-slate-400">
-                    {searching ? 'Searching…' : 'No releases found for this item.'}
-                  </td>
-                </tr>
-              ) : (
-                results.map((rel, i) => (
-                  <tr
-                    key={`${rel.guid || i}-${rel.title}`}
-                    className="hover:bg-slate-800/40 transition"
-                  >
-                    <td className="py-3 px-4 whitespace-nowrap">
-                      <span
-                        className={`text-[10px] font-mono uppercase px-2 py-0.5 rounded font-semibold ${
-                          rel.protocol === 'usenet'
-                            ? 'bg-amber-500/15 text-amber-300 border border-amber-500/30'
-                            : 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30'
-                        }`}
-                      >
-                        {rel.protocol || 'torrent'}
-                      </span>
-                    </td>
-                    <td className="py-3 px-4 font-medium text-slate-100 max-w-md truncate">
-                      {rel.title}
-                    </td>
-                    <td className="py-3 px-4 whitespace-nowrap">
-                      <span className="px-2 py-0.5 rounded bg-slate-950 border border-slate-800 text-slate-300 font-mono text-[11px]">
-                        {rel.indexer}
-                      </span>
-                    </td>
-                    <td className="py-3 px-4 whitespace-nowrap">
-                      <span className="px-2 py-0.5 rounded bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 font-mono text-[11px]">
-                        {rel.quality || '—'}
-                      </span>
-                    </td>
-                    <td className="py-3 px-4 whitespace-nowrap font-mono text-slate-300">
-                      {formatBytes(rel.size)}
-                    </td>
-                    <td className="py-3 px-4 whitespace-nowrap font-mono">
-                      {rel.protocol === 'usenet' ? (
-                        <span className="text-amber-400">NZB</span>
-                      ) : (
-                        <span className="text-emerald-400">
-                          {rel.seeders ?? 0} S / {rel.peers ?? 0} P
+          {results.length === 0 ? (
+            <p className="py-10 text-center text-sm text-slate-400">
+              {searching ? 'Searching…' : 'No releases found for this item.'}
+            </p>
+          ) : (
+            <>
+              <ul className="sm:hidden divide-y divide-slate-800/70">
+                {results.map((rel, i) => {
+                  const key = `${rel.guid || i}-${rel.title}`;
+                  const busy = grabbingGuid === (rel.guid || rel.title);
+                  return (
+                    <li key={key} className="p-4 space-y-2">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span
+                          className={`text-[10px] font-mono uppercase px-2 py-0.5 rounded font-semibold ${
+                            rel.protocol === 'usenet'
+                              ? 'bg-amber-500/15 text-amber-300 border border-amber-500/30'
+                              : 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30'
+                          }`}
+                        >
+                          {rel.protocol || 'torrent'}
                         </span>
-                      )}
-                    </td>
-                    <td className="py-3 px-4 whitespace-nowrap text-right">
-                      <button
-                        onClick={() => void handleGrab(rel)}
-                        disabled={grabbingGuid === (rel.guid || rel.title)}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-semibold transition"
-                      >
-                        <Download className="w-3.5 h-3.5" />
-                        <span>
-                          {grabbingGuid === (rel.guid || rel.title) ? 'Grabbing...' : 'Grab'}
+                        <span className="px-2 py-0.5 rounded bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 font-mono text-[11px]">
+                          {rel.quality || '—'}
                         </span>
-                      </button>
-                    </td>
+                        <span className="text-[11px] font-mono text-slate-400">{formatBytes(rel.size)}</span>
+                      </div>
+                      <p className="text-sm font-medium text-slate-100 break-words">{rel.title}</p>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[11px] font-mono text-slate-400 truncate">{rel.indexer}</span>
+                        <button
+                          type="button"
+                          onClick={() => void handleGrab(rel)}
+                          disabled={busy}
+                          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-semibold shrink-0"
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                          {busy ? 'Grabbing…' : 'Grab'}
+                        </button>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+              <table className="hidden sm:table w-full text-left border-collapse">
+                <thead className="sticky top-0 bg-slate-950/95">
+                  <tr className="border-b border-slate-800 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                    <th className="py-3 px-4">Protocol</th>
+                    <th className="py-3 px-4">Release Title</th>
+                    <th className="py-3 px-4">Indexer</th>
+                    <th className="py-3 px-4">Quality</th>
+                    <th className="py-3 px-4">Size</th>
+                    <th className="py-3 px-4">Peers</th>
+                    <th className="py-3 px-4 text-right">Action</th>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+                </thead>
+                <tbody className="divide-y divide-slate-800/70 text-xs">
+                  {results.map((rel, i) => (
+                    <tr
+                      key={`${rel.guid || i}-${rel.title}`}
+                      className="hover:bg-slate-800/40 transition"
+                    >
+                      <td className="py-3 px-4 whitespace-nowrap">
+                        <span
+                          className={`text-[10px] font-mono uppercase px-2 py-0.5 rounded font-semibold ${
+                            rel.protocol === 'usenet'
+                              ? 'bg-amber-500/15 text-amber-300 border border-amber-500/30'
+                              : 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30'
+                          }`}
+                        >
+                          {rel.protocol || 'torrent'}
+                        </span>
+                      </td>
+                      <td className="py-3 px-4 font-medium text-slate-100 max-w-md truncate">
+                        {rel.title}
+                      </td>
+                      <td className="py-3 px-4 whitespace-nowrap">
+                        <span className="px-2 py-0.5 rounded bg-slate-950 border border-slate-800 text-slate-300 font-mono text-[11px]">
+                          {rel.indexer}
+                        </span>
+                      </td>
+                      <td className="py-3 px-4 whitespace-nowrap">
+                        <span className="px-2 py-0.5 rounded bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 font-mono text-[11px]">
+                          {rel.quality || '—'}
+                        </span>
+                      </td>
+                      <td className="py-3 px-4 whitespace-nowrap font-mono text-slate-300">
+                        {formatBytes(rel.size)}
+                      </td>
+                      <td className="py-3 px-4 whitespace-nowrap font-mono">
+                        {rel.protocol === 'usenet' ? (
+                          <span className="text-amber-400">NZB</span>
+                        ) : (
+                          <span className="text-emerald-400">
+                            {rel.seeders ?? 0} S / {rel.peers ?? 0} P
+                          </span>
+                        )}
+                      </td>
+                      <td className="py-3 px-4 whitespace-nowrap text-right">
+                        <button
+                          type="button"
+                          onClick={() => void handleGrab(rel)}
+                          disabled={grabbingGuid === (rel.guid || rel.title)}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-semibold transition"
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                          <span>
+                            {grabbingGuid === (rel.guid || rel.title) ? 'Grabbing...' : 'Grab'}
+                          </span>
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </>
+          )}
         </div>
       </div>
     </div>

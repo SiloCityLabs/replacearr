@@ -143,19 +143,21 @@ REPLACEARR ARCHITECTURE (1 Process, 1 Unified SQLite DB, Zero-Copy In-Memory Sea
 
 ### 4.2 Unified SQLite Schema (`internal/db/migrations/001_init.sql`)
 Replacearr stores all shared and media-specific state in a single WAL-mode SQLite database (`internal/db/sqlite.go`):
-* **Shared Authentication & RBAC**: `roles`, `users`, `api_keys` (with `scope` supporting `all`, `sonarr`, `radarr`, `prowlarr` so ecosystem clients can use scoped or global API keys).
+* **Shared Authentication & RBAC**: `roles`, `users`, `api_keys` (with `scope` supporting `all`, `sonarr`, `radarr`, `lidarr`, `readarr`, `prowlarr` so ecosystem clients can use scoped or global API keys).
 * **Shared Configuration Tables**:
-  * `tags` (`id`, `label`): Single tag namespace across TV, Movies, Indexers, and Download Clients.
-  * `root_folders` (`id`, `path`, `media_type`, `accessible`, `free_space`, `total_space`): Filtered by `media_type` (`tv` for Sonarr endpoints, `movie` for Radarr endpoints, or `all`).
-  * `quality_profiles` (`id`, `name`, `upgrade_allowed`, `cutoff`, `items_json`, `min_format_score`, `cutoff_format_score`): Shared across media modules.
+  * `tags` (`id`, `label`): Single tag namespace across TV, Movies, Music, Books, Indexers, and Download Clients.
+  * `root_folders` (`id`, `path`, `media_type`, `accessible`, `free_space`, `total_space`): Filtered by `media_type` (`tv`, `movie`, `music`, `ebook`, `audiobook`, or `all`).
+  * `quality_profiles` (`id`, `name`, `media_type`, `upgrade_allowed`, `cutoff`, `items_json`, `min_format_score`, `cutoff_format_score`): Shared table with `media_type` discriminator (`video` | `music` | `ebook` | `audiobook`).
   * `indexers` (`id`, `name`, `implementation`, `protocol`, `privacy`, `enable`, `priority`, `base_url`, `definition_file`, `plugin_id`, `categories_json`, `fields_json`, `tags_json`): Single source of truth for all indexers.
   * `download_clients` (`id`, `name`, `implementation`, `protocol`, `enable`, `priority`, `base_url`, `category`, `fields_json`, `tags_json`): Single pool of download clients. `base_url` is the full connection URL (scheme, host, port, optional path); legacy `host`/`port`/`use_ssl` columns are kept in sync for older rows.
 * **Discriminator-Backed Operational Tables**:
-  * `queue_items` (`media_type` = `'tv'` | `'movie'`, `series_id`, `episode_id`, `movie_id`, `status`, `tracked_download_status`, `tracked_download_state`, `size`, `sizeleft`, `timeleft`, `protocol`, `download_client`, `download_id`, `indexer`, `output_path`).
-  * `history_records` (`media_type` = `'tv'` | `'movie'`, `series_id`, `episode_id`, `movie_id`, `source_title`, `quality_json`, `date`, `event_type`, `data_json`).
+  * `queue_items` (`media_type` = `'tv'` | `'movie'` | `'music'` | `'ebook'` | `'audiobook'`, plus `series_id`/`episode_id`/`movie_id`/`artist_id`/`album_id`/`author_id`/`book_id`/`edition_id`, status/progress fields).
+  * `history_records` (same media_type + FK columns as queue).
 * **Media Domain Tables**:
   * `series` and `episodes` (with `ON DELETE CASCADE` foreign key).
   * `movies`.
+  * `artists`, `albums`, `tracks` (MusicBrainz; see `05-music-module.md`).
+  * `authors`, `books`, `editions` (OpenLibrary ebook/audiobook; see `06-books-module.md`).
 
 ### 4.3 Two “searches”: metadata lookup vs release search
 
@@ -163,8 +165,8 @@ Replacearr mirrors Sonarr/Radarr’s split (native SPA labels match):
 
 | Concern | When | Native UI | API | Backend |
 | :--- | :--- | :--- | :--- | :--- |
-| **Add to library (metadata)** | Before the item exists | **Add Series / Add Movie** | `GET /api/v1/series/lookup`, `GET /api/v1/movies/lookup` (compat: `/series/lookup`, `/movie/lookup*`) | `internal/metadata` — SkyHook (`skyhook.sonarr.tv`, TVDB-backed) for series; `api.radarr.video` (TMDB/IMDb-backed) for movies. Supports free-text and `tvdb:` / `tmdb:` / `imdb:` terms. |
-| **Find releases (indexers)** | After the item is in the library | **Interactive Search** modal only (opened from a series/movie/episode card — not a sidebar tab) | `GET /api/v1/search` then `POST /api/v1/releases/grab` with `seriesId`/`movieId` | In-process Cardigann + indexer plugins; Grab associates the queue row; CDH imports into the library folder via qBittorrent monitor. |
+| **Add to library (metadata)** | Before the item exists | **Add Series / Movie / Artist / Book** | `GET /api/v1/{series,movies,artists,authors,books}/lookup` | `internal/metadata` — SkyHook (TV), `api.radarr.video` (movies), MusicBrainz (artists), OpenLibrary (books). |
+| **Find releases (indexers)** | After the item is in the library | **Interactive Search** modal only (opened from a library card — not a sidebar tab) | `GET /api/v1/search` then `POST /api/v1/releases/grab` with library IDs | In-process Cardigann + indexer plugins (`t=tvsearch|movie|music|book`); Grab associates the queue row; CDH imports into the library folder via download monitor. |
 
 There is no free-form “Releases” sidebar destination. Prowlarr-style federated search must not be used as Add New / IMDb title discovery.
 

@@ -1,11 +1,16 @@
 import type {
+  Album,
   APIKey,
   AppConfig,
+  Artist,
   AuthResponse,
+  Author,
+  Book,
   CardigannDefinition,
   DiscoveredPlugin,
   DomainClearance,
   DownloadClient,
+  Edition,
   Episode,
   FlareSolverrHealth,
   Indexer,
@@ -21,6 +26,7 @@ import type {
   Series,
   Tag,
   TagDetails,
+  Track,
   User,
 } from './types';
 
@@ -188,6 +194,96 @@ export const api = {
     await request(`/api/v1/movies/${id}`, { method: 'DELETE' });
   },
 
+  // Music
+  async getArtists(): Promise<Artist[]> {
+    const res = await request<unknown>('/api/v1/artists');
+    return unwrapArray<Artist>(res);
+  },
+
+  async lookupArtists(term: string): Promise<Artist[]> {
+    const res = await request<unknown>(`/api/v1/artists/lookup?term=${encodeURIComponent(term)}`);
+    return unwrapArray<Artist>(res);
+  },
+
+  async addArtist(payload: Partial<Artist>): Promise<Artist> {
+    return request<Artist>('/api/v1/artists', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async deleteArtist(id: number): Promise<void> {
+    await request(`/api/v1/artists/${id}`, { method: 'DELETE' });
+  },
+
+  async getAlbums(artistId?: number): Promise<Album[]> {
+    const q = artistId ? `?artistId=${artistId}` : '';
+    const res = await request<unknown>(`/api/v1/albums${q}`);
+    return unwrapArray<Album>(res);
+  },
+
+  async getTracks(opts?: { albumId?: number; artistId?: number }): Promise<Track[]> {
+    const params = new URLSearchParams();
+    if (opts?.albumId) params.set('albumId', String(opts.albumId));
+    if (opts?.artistId) params.set('artistId', String(opts.artistId));
+    const qs = params.toString();
+    const res = await request<unknown>(`/api/v1/tracks${qs ? `?${qs}` : ''}`);
+    return unwrapArray<Track>(res);
+  },
+
+  // Books
+  async getAuthors(): Promise<Author[]> {
+    const res = await request<unknown>('/api/v1/authors');
+    return unwrapArray<Author>(res);
+  },
+
+  async lookupAuthors(term: string): Promise<Author[]> {
+    const res = await request<unknown>(`/api/v1/authors/lookup?term=${encodeURIComponent(term)}`);
+    return unwrapArray<Author>(res);
+  },
+
+  async addAuthor(payload: Partial<Author>): Promise<Author> {
+    return request<Author>('/api/v1/authors', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async deleteAuthor(id: number): Promise<void> {
+    await request(`/api/v1/authors/${id}`, { method: 'DELETE' });
+  },
+
+  async getBooks(authorId?: number): Promise<Book[]> {
+    const q = authorId ? `?authorId=${authorId}` : '';
+    const res = await request<unknown>(`/api/v1/books${q}`);
+    return unwrapArray<Book>(res);
+  },
+
+  async lookupBooks(term: string): Promise<Book[]> {
+    const res = await request<unknown>(`/api/v1/books/lookup?term=${encodeURIComponent(term)}`);
+    return unwrapArray<Book>(res);
+  },
+
+  async addBook(payload: Record<string, unknown>): Promise<{ book: Book; edition: Edition; authorId: number }> {
+    return request('/api/v1/books', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async deleteBook(id: number): Promise<void> {
+    await request(`/api/v1/books/${id}`, { method: 'DELETE' });
+  },
+
+  async getEditions(opts?: { bookId?: number; format?: string }): Promise<Edition[]> {
+    const params = new URLSearchParams();
+    if (opts?.bookId) params.set('bookId', String(opts.bookId));
+    if (opts?.format) params.set('format', opts.format);
+    const qs = params.toString();
+    const res = await request<unknown>(`/api/v1/editions${qs ? `?${qs}` : ''}`);
+    return unwrapArray<Edition>(res);
+  },
+
   // Indexers & Unified Search (Prowlarr)
   async getIndexers(): Promise<Indexer[]> {
     const res = await request<unknown>('/api/v1/indexers');
@@ -271,6 +367,11 @@ export const api = {
       episode?: number;
       tvdbId?: number;
       tmdbId?: number;
+      artistId?: number;
+      albumId?: number;
+      authorId?: number;
+      bookId?: number;
+      editionId?: number;
     }
   ): Promise<ReleaseResult[]> {
     const params = new URLSearchParams({ q: query, type });
@@ -286,6 +387,11 @@ export const api = {
     if (opts?.tmdbId != null && opts.tmdbId > 0) {
       params.set('tmdbId', String(opts.tmdbId));
     }
+    if (opts?.artistId) params.set('artistId', String(opts.artistId));
+    if (opts?.albumId) params.set('albumId', String(opts.albumId));
+    if (opts?.authorId) params.set('authorId', String(opts.authorId));
+    if (opts?.bookId) params.set('bookId', String(opts.bookId));
+    if (opts?.editionId) params.set('editionId', String(opts.editionId));
     const res = await request<unknown>(`/api/v1/search?${params.toString()}`);
     return unwrapArray<ReleaseResult>(res, 'results');
   },
@@ -301,6 +407,11 @@ export const api = {
     movieId?: number;
     episodeId?: number;
     seasonNumber?: number;
+    artistId?: number;
+    albumId?: number;
+    authorId?: number;
+    bookId?: number;
+    editionId?: number;
   }): Promise<QueueItem> {
     return request<QueueItem>('/api/v1/releases/grab', {
       method: 'POST',

@@ -2,9 +2,9 @@
 
 ## 1. Executive Summary
 
-While Replacearr Phase 1 unifies **Sonarr** (TV), **Radarr** (Movies), and **Prowlarr** (Indexers) into a single binary and SQLite database, the broader *arr media automation ecosystem includes four additional specialized applications:
-1. **Lidarr** (Music: Artists, Albums, Tracks, TrackFiles)
-2. **Readarr** (Books & Audiobooks: Authors, Books, Editions, BookFiles)
+While Replacearr Phase 1 unified **Sonarr** (TV), **Radarr** (Movies), and **Prowlarr** (Indexers), **Music** and **Books** (ebook + audiobook) are now first-class native modules — see `05-music-module.md` and `06-books-module.md` (MusicBrainz / OpenLibrary; thin `/lidarr` and `/readarr` mounts only). Remaining specialized applications:
+1. ~~**Lidarr**~~ → native Music module (`05-music-module.md`)
+2. ~~**Readarr**~~ → native Books module (`06-books-module.md`)
 3. **Bazarr** (Subtitles: Subtitle Providers, Language Profiles, Embedded Track Extraction & Sync)
 4. **Whisparr** (Adult Video: Studios, Scenes, SceneFiles)
 

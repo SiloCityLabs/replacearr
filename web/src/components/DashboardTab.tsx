@@ -2,6 +2,8 @@ import React from 'react';
 import {
   Tv,
   Film,
+  Music,
+  BookOpen,
   Radio,
   DownloadCloud,
   Puzzle,
@@ -23,6 +25,8 @@ interface DashboardTabProps {
   onNavigate: (tab: NavTab) => void;
   onAddSeries: () => void;
   onAddMovie: () => void;
+  onAddArtist?: () => void;
+  onAddBook?: () => void;
   appUi?: AppConfig['ui'] | null;
 }
 
@@ -33,6 +37,8 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
   onNavigate,
   onAddSeries,
   onAddMovie,
+  onAddArtist,
+  onAddBook,
   appUi,
 }) => {
 
@@ -40,6 +46,8 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
     series: 0,
     episodes: 0,
     movies: 0,
+    artists: 0,
+    books: 0,
     indexers: 0,
     activeDownloads: 0,
     plugins: 0,
@@ -63,28 +71,46 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
               Welcome to Replacearr
             </h2>
             <p className="text-sm text-slate-400 max-w-2xl">
-              Add series and movies from TVDB / TMDB / IMDb. Use Interactive Search on a library item to find releases.
+              Add series, movies, music, and books. Use Interactive Search on a library item to find releases.
             </p>
           </div>
-          <div className="flex flex-wrap gap-2 sm:pt-2">
+          <div className="grid grid-cols-2 sm:flex sm:flex-wrap gap-2 sm:pt-2">
             <button
               type="button"
               onClick={onAddSeries}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-lg transition"
+              className="inline-flex items-center justify-center gap-1.5 px-3 py-2.5 sm:px-3.5 sm:py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-lg transition"
             >
               Add Series
             </button>
             <button
               type="button"
               onClick={onAddMovie}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-lg transition"
+              className="inline-flex items-center justify-center gap-1.5 px-3 py-2.5 sm:px-3.5 sm:py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-lg transition"
             >
               Add Movie
             </button>
+            {onAddArtist && (
+              <button
+                type="button"
+                onClick={onAddArtist}
+                className="inline-flex items-center justify-center gap-1.5 px-3 py-2.5 sm:px-3.5 sm:py-2 bg-fuchsia-600 hover:bg-fuchsia-500 text-white text-xs font-semibold rounded-lg transition"
+              >
+                Add Artist
+              </button>
+            )}
+            {onAddBook && (
+              <button
+                type="button"
+                onClick={onAddBook}
+                className="inline-flex items-center justify-center gap-1.5 px-3 py-2.5 sm:px-3.5 sm:py-2 bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold rounded-lg transition"
+              >
+                Add Book
+              </button>
+            )}
             <button
               type="button"
               onClick={() => onNavigate('series')}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold rounded-lg transition"
+              className="col-span-2 sm:col-span-1 inline-flex items-center justify-center gap-1.5 px-3 py-2.5 sm:px-3.5 sm:py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold rounded-lg transition"
             >
               Browse TV
             </button>
@@ -93,7 +119,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
       </div>
 
       {/* Unified Metric Cards — compact 2-col tiles on mobile */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 sm:gap-2.5">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 sm:gap-2.5">
         <button
           type="button"
           onClick={() => onNavigate('series')}
@@ -127,6 +153,42 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
           <div className="mt-1 flex items-center justify-between gap-1 text-[10px] sm:text-xs text-slate-400">
             <span className="truncate">In library</span>
             <ArrowUpRight className="w-3 h-3 text-emerald-400 opacity-0 group-hover:opacity-100 transition shrink-0" />
+          </div>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => onNavigate('music')}
+          className="text-left group bg-slate-900/90 hover:bg-slate-900 border border-slate-800 hover:border-fuchsia-500/40 rounded-xl p-2.5 sm:p-3 transition"
+        >
+          <div className="flex items-center justify-between gap-1 mb-1.5">
+            <span className="text-[11px] sm:text-xs font-medium text-slate-400 truncate">Music</span>
+            <div className="p-1 rounded-md bg-fuchsia-500/10 text-fuchsia-400 border border-fuchsia-500/20 group-hover:scale-105 transition shrink-0">
+              <Music className="w-3.5 h-3.5" />
+            </div>
+          </div>
+          <div className="text-xl sm:text-2xl font-bold text-white leading-none">{counts.artists ?? 0}</div>
+          <div className="mt-1 flex items-center justify-between gap-1 text-[10px] sm:text-xs text-slate-400">
+            <span className="truncate">Artists</span>
+            <ArrowUpRight className="w-3 h-3 text-fuchsia-400 opacity-0 group-hover:opacity-100 transition shrink-0" />
+          </div>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => onNavigate('books')}
+          className="text-left group bg-slate-900/90 hover:bg-slate-900 border border-slate-800 hover:border-amber-500/40 rounded-xl p-2.5 sm:p-3 transition"
+        >
+          <div className="flex items-center justify-between gap-1 mb-1.5">
+            <span className="text-[11px] sm:text-xs font-medium text-slate-400 truncate">Books</span>
+            <div className="p-1 rounded-md bg-amber-500/10 text-amber-400 border border-amber-500/20 group-hover:scale-105 transition shrink-0">
+              <BookOpen className="w-3.5 h-3.5" />
+            </div>
+          </div>
+          <div className="text-xl sm:text-2xl font-bold text-white leading-none">{counts.books ?? 0}</div>
+          <div className="mt-1 flex items-center justify-between gap-1 text-[10px] sm:text-xs text-slate-400">
+            <span className="truncate">In library</span>
+            <ArrowUpRight className="w-3 h-3 text-amber-400 opacity-0 group-hover:opacity-100 transition shrink-0" />
           </div>
         </button>
 
@@ -283,6 +345,9 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
                   <div className="flex items-center gap-2 min-w-0">
                     <FolderGit2 className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
                     <code className="font-mono text-slate-200 truncate">{rf.path}</code>
+                    <span className="text-[10px] font-mono uppercase px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 shrink-0">
+                      {rf.mediaType}
+                    </span>
                   </div>
                   <span
                     className={`text-[11px] font-mono shrink-0 ${

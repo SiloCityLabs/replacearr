@@ -9,7 +9,7 @@
 # UI (Vite HMR):  http://localhost:5173
 # API:            http://localhost:8989
 #
-# Path layout matches production: /config, /data/TV, /data/Movies, /data/downloads
+# Path layout matches production: /config, /data/TV, /data/Movies, /data/Music, /data/Books, /data/Audiobooks, /data/downloads
 # ==============================================================================
 
 services:

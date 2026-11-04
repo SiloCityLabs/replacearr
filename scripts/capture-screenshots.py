@@ -39,26 +39,29 @@ REDACT = r"""
 # kind: "main" opens mobile hamburger first; "settings" prefers settings sidebar buttons
 PAGES = [
     ("00-login.png", None, "Sign In", "main"),
-    ("01-dashboard.png", "Dashboard", "Welcome to Replacearr", "main"),
+    # Prefer "Add Series" — the Welcome hero copy is hidden below the sm breakpoint.
+    ("01-dashboard.png", "Dashboard", "Add Series", "main"),
     ("02-series.png", "TV Series", "TV Library", "main"),
     ("03-movies.png", "Movies", "Movies Library", "main"),
-    ("04-indexers-search.png", "Indexers", "YAML Definitions", "main"),
-    ("05-queue.png", "Queue & Clients", "Live Download Queue", "main"),
-    ("06-plugins.png", "Go Plugins", "Go Plugin System", "main"),
-    ("07-users.png", "Users & RBAC", "Users & Access Control", "main"),
-    ("08-settings.png", "Settings", "Episode and movie naming", "main"),
-    ("09-settings-general.png", "General", "Bind Address", "settings"),
-    ("10-settings-ui.png", "UI", "First Day of Week", "settings"),
-    ("11-settings-media.png", "Media Management", "Episode Naming", "settings"),
-    ("12-settings-profiles.png", "Profiles", "Quality Profiles", "settings"),
-    ("13-settings-quality.png", "Quality", "MB per minute", "settings"),
-    ("14-settings-indexers.png", "Indexers", "Indexer rows save", "settings"),
-    ("15-settings-download-clients.png", "Download Clients", "Client records are live", "settings"),
-    ("16-settings-import-lists.png", "Import Lists", "List sync options", "settings"),
-    ("17-settings-system.png", "System", "Compat endpoints", "settings"),
-    ("18-settings-metadata.png", "Metadata", "Preferred language", "settings"),
-    ("19-settings-tags.png", "Tags", "Add Tag", "settings"),
-    ("20-compatibility.png", "Go Plugins", "Overseerr", "main"),
+    ("04-music.png", "Music", "MusicBrainz", "main"),
+    ("05-books.png", "Books", "OpenLibrary", "main"),
+    ("06-indexers-search.png", "Indexers", "YAML Definitions", "main"),
+    ("07-queue.png", "Queue & Clients", "Live Download Queue", "main"),
+    ("08-plugins.png", "Go Plugins", "Go Plugin System", "main"),
+    ("09-users.png", "Users & RBAC", "Users & Access Control", "main"),
+    ("10-settings.png", "Settings", "Episode and movie naming", "main"),
+    ("11-settings-general.png", "General", "Bind Address", "settings"),
+    ("12-settings-ui.png", "UI", "First Day of Week", "settings"),
+    ("13-settings-media.png", "Media Management", "Episode Naming", "settings"),
+    ("14-settings-profiles.png", "Profiles", "Quality Profiles", "settings"),
+    ("15-settings-quality.png", "Quality", "MB per minute", "settings"),
+    ("16-settings-indexers.png", "Indexers", "Indexer rows save", "settings"),
+    ("17-settings-download-clients.png", "Download Clients", "Client records are live", "settings"),
+    ("18-settings-import-lists.png", "Import Lists", "List sync options", "settings"),
+    ("19-settings-system.png", "System", "Compat endpoints", "settings"),
+    ("20-settings-metadata.png", "Metadata", "Preferred language", "settings"),
+    ("21-settings-tags.png", "Tags", "Add Tag", "settings"),
+    ("22-compatibility.png", "Go Plugins", "Overseerr", "main"),
 ]
 
 
@@ -195,10 +198,10 @@ def main():
     out_dir.mkdir(parents=True, exist_ok=True)
     token = login_token()
 
-    # Drop stale Connect captures replaced by System.
-    for stale in ("17-settings-connect.png",):
-        old = out_dir / stale
-        if old.exists():
+    # Drop captures no longer in PAGES (renumbers / retired Connect shot).
+    keep = {name for name, *_ in PAGES}
+    for old in out_dir.glob("*.png"):
+        if old.name not in keep:
             old.unlink()
             print(f"removed {old.relative_to(REPO)}")
 
@@ -239,7 +242,7 @@ def main():
 
         cdp.eval("localStorage.setItem('replacearr_token', %s); 'set'" % json.dumps(token))
         cdp.call("Page.reload", {"ignoreCache": True})
-        wait_text(cdp, "Welcome to Replacearr")
+        wait_text(cdp, "Add Series")
         time.sleep(0.5)
 
         for filename, nav_label, needle, kind in PAGES:
@@ -252,7 +255,7 @@ def main():
             wait_text(cdp, needle)
             # Compatibility gallery shot: scroll to *arr shim cards with client base URLs
             # so it differs from the top-of-page plugins overview.
-            if filename == "20-compatibility.png":
+            if filename == "22-compatibility.png":
                 cdp.eval(
                     """
                     (() => {

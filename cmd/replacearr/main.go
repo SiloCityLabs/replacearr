@@ -11,8 +11,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/replacearr/replacearr/internal/api/compat/lidarr"
 	"github.com/replacearr/replacearr/internal/api/compat/prowlarr"
 	"github.com/replacearr/replacearr/internal/api/compat/radarr"
+	"github.com/replacearr/replacearr/internal/api/compat/readarr"
 	"github.com/replacearr/replacearr/internal/api/compat/sonarr"
 	"github.com/replacearr/replacearr/internal/api/native"
 	"github.com/replacearr/replacearr/internal/auth"
@@ -68,6 +70,8 @@ func main() {
 	// so enable/disable takes effect without restart.
 	sonarrHandler := sonarr.NewHandler(store, cfg, nativeSrv.SearchReleases)
 	radarrHandler := radarr.NewHandler(store, cfg, nativeSrv.SearchReleases)
+	lidarrHandler := lidarr.NewHandler(store, cfg, nativeSrv.SearchReleases)
+	readarrHandler := readarr.NewHandler(store, cfg, nativeSrv.SearchReleases)
 	prowlarrHandler := prowlarr.NewHandler(store, cfg, nativeSrv.SearchReleases)
 	sonarrHandler.SetCoverStore(nativeSrv.CoverStore())
 	radarrHandler.SetCoverStore(nativeSrv.CoverStore())
@@ -77,6 +81,8 @@ func main() {
 	mux.Handle("/sonarr/", authSvc.Middleware("sonarr", "", pluginMgr.Gate(pluginsdk.CompatPluginSonarr, sonarrHandler)))
 	mux.Handle("/api/v3/", authSvc.Middleware("sonarr", "", pluginMgr.Gate(pluginsdk.CompatPluginSonarr, sonarrHandler)))
 	mux.Handle("/radarr/", authSvc.Middleware("radarr", "", pluginMgr.Gate(pluginsdk.CompatPluginRadarr, radarrHandler)))
+	mux.Handle("/lidarr/", authSvc.Middleware("lidarr", "", pluginMgr.Gate(pluginsdk.CompatPluginLidarr, lidarrHandler)))
+	mux.Handle("/readarr/", authSvc.Middleware("readarr", "", pluginMgr.Gate(pluginsdk.CompatPluginReadarr, readarrHandler)))
 	mux.Handle("/prowlarr/", authSvc.Middleware("prowlarr", "", pluginMgr.Gate(pluginsdk.CompatPluginProwlarr, prowlarrHandler)))
 
 	// 4. Embedded React SPA

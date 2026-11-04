@@ -23,6 +23,14 @@ export default defineConfig({
         target: 'http://localhost:8989',
         changeOrigin: true,
       },
+      '/lidarr': {
+        target: 'http://localhost:8989',
+        changeOrigin: true,
+      },
+      '/readarr': {
+        target: 'http://localhost:8989',
+        changeOrigin: true,
+      },
     },
   },
   build: {

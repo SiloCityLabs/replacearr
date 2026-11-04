@@ -89,6 +89,8 @@ func NewManager(store *db.Store, pluginDir string, definitionsDir string) *Manag
 	m.registerBuiltin(&builtinCompatSonarrPlugin{})
 	m.registerBuiltin(&builtinCompatRadarrPlugin{})
 	m.registerBuiltin(&builtinCompatProwlarrPlugin{})
+	m.registerBuiltin(&builtinCompatLidarrPlugin{})
+	m.registerBuiltin(&builtinCompatReadarrPlugin{})
 
 	return m
 }
@@ -140,6 +142,8 @@ func (m *Manager) migrateCompatModulesFromAppConfig() {
 	seed(pluginsdk.CompatPluginSonarr, sonarr)
 	seed(pluginsdk.CompatPluginRadarr, radarr)
 	seed(pluginsdk.CompatPluginProwlarr, prowlarr)
+	seed(pluginsdk.CompatPluginLidarr, true)
+	seed(pluginsdk.CompatPluginReadarr, true)
 }
 
 // ActiveProxyURL returns the first enabled network proxy plugin URL, if any.
@@ -1492,6 +1496,48 @@ func (b *builtinCompatProwlarrPlugin) Manifest() pluginsdk.Manifest {
 }
 
 func (b *builtinCompatProwlarrPlugin) Configure(_ map[string]any) error { return nil }
+
+type builtinCompatLidarrPlugin struct{}
+
+func (b *builtinCompatLidarrPlugin) Manifest() pluginsdk.Manifest {
+	return pluginsdk.Manifest{
+		ID:          pluginsdk.CompatPluginLidarr,
+		Name:        "Lidarr v1 Compatibility",
+		Version:     "1.0.0",
+		Author:      "Replacearr Core",
+		Description: "Thin Lidarr-compatible API at /lidarr for migration tools. Native Music UI is preferred.",
+		Types:       []pluginsdk.PluginType{pluginsdk.PluginTypeCompat},
+		ConfigSchema: []pluginsdk.ConfigFieldSchema{
+			{
+				Name: "basePath", Label: "Base path", Type: "text", Default: "/lidarr", Required: false,
+				HelpText: "Disable to return HTTP 404 on /lidarr routes.",
+			},
+		},
+	}
+}
+
+func (b *builtinCompatLidarrPlugin) Configure(_ map[string]any) error { return nil }
+
+type builtinCompatReadarrPlugin struct{}
+
+func (b *builtinCompatReadarrPlugin) Manifest() pluginsdk.Manifest {
+	return pluginsdk.Manifest{
+		ID:          pluginsdk.CompatPluginReadarr,
+		Name:        "Readarr v1 Compatibility",
+		Version:     "1.0.0",
+		Author:      "Replacearr Core",
+		Description: "Thin Readarr-compatible API at /readarr for migration tools. Native Books UI is preferred.",
+		Types:       []pluginsdk.PluginType{pluginsdk.PluginTypeCompat},
+		ConfigSchema: []pluginsdk.ConfigFieldSchema{
+			{
+				Name: "basePath", Label: "Base path", Type: "text", Default: "/readarr", Required: false,
+				HelpText: "Disable to return HTTP 404 on /readarr routes.",
+			},
+		},
+	}
+}
+
+func (b *builtinCompatReadarrPlugin) Configure(_ map[string]any) error { return nil }
 
 // --- Helpers ---
 

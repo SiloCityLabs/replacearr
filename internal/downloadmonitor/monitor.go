@@ -158,7 +158,7 @@ func (m *Monitor) tick(ctx context.Context) {
 		if !cdh {
 			continue
 		}
-		if q.SeriesID == 0 && q.MovieID == 0 {
+		if q.SeriesID == 0 && q.MovieID == 0 && q.AlbumID == 0 && q.ArtistID == 0 && q.EditionID == 0 && q.BookID == 0 {
 			q.TrackedDownloadStatus = "warning"
 			q.TrackedDownloadState = "importBlocked"
 			_ = m.store.UpdateQueueItem(q)
@@ -200,18 +200,30 @@ func (m *Monitor) importCompleted(ctx context.Context, appCfg domain.AppConfig, 
 	if srcRoot == "" {
 		return fmt.Errorf("no output path")
 	}
-	video, err := findPrimaryVideo(srcRoot)
+
+	var src string
+	var err error
+	switch strings.ToLower(q.MediaType) {
+	case "music":
+		src, err = findPrimaryMedia(srcRoot, isAudio)
+	case "ebook":
+		src, err = findPrimaryMedia(srcRoot, isEbook)
+	case "audiobook":
+		src, err = findPrimaryMedia(srcRoot, isAudiobook)
+	default:
+		src, err = findPrimaryVideo(srcRoot)
+	}
 	if err != nil {
 		return err
 	}
-	dest, err := m.destinationPath(appCfg, q, filepath.Ext(video))
+	dest, err := m.destinationPath(appCfg, q, filepath.Ext(src))
 	if err != nil {
 		return err
 	}
 	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 		return err
 	}
-	if err := importFile(video, dest, appCfg.MediaManagement.CopyUsingHardlinks); err != nil {
+	if err := importFile(src, dest, appCfg.MediaManagement.CopyUsingHardlinks); err != nil {
 		return err
 	}
 
@@ -231,17 +243,35 @@ func (m *Monitor) importCompleted(ctx context.Context, appCfg domain.AppConfig, 
 			_ = m.store.MarkEpisodeHasFileByNumbers(q.SeriesID, season, ep, true)
 		}
 	}
+	if q.AlbumID > 0 {
+		_ = m.store.MarkAlbumTracksHasFile(q.AlbumID, true)
+	} else if q.ArtistID > 0 && q.AlbumID == 0 {
+		// Best-effort: mark no specific album; import still lands under artist path.
+	}
+	if q.EditionID > 0 {
+		_ = m.store.MarkEditionHasFile(q.EditionID, true)
+		if ed, err := m.store.GetEditionByID(q.EditionID); err == nil && ed != nil {
+			ed.HasFile = true
+			ed.Path = dest
+			_, _ = m.store.UpdateEdition(*ed)
+		}
+	}
 
 	_ = m.store.CreateHistory(domain.HistoryRecord{
 		MediaType:   q.MediaType,
 		SeriesID:    q.SeriesID,
 		EpisodeID:   q.EpisodeID,
 		MovieID:     q.MovieID,
+		ArtistID:    q.ArtistID,
+		AlbumID:     q.AlbumID,
+		AuthorID:    q.AuthorID,
+		BookID:      q.BookID,
+		EditionID:   q.EditionID,
 		SourceTitle: q.Title,
 		Quality:     map[string]any{"quality": map[string]any{"name": "Unknown"}},
 		EventType:   "downloadFolderImported",
 		Data: map[string]any{
-			"sourcePath": video,
+			"sourcePath": src,
 			"destPath":   dest,
 			"downloadId": q.DownloadID,
 		},
@@ -252,7 +282,7 @@ func (m *Monitor) importCompleted(ctx context.Context, appCfg domain.AppConfig, 
 			"title": q.Title, "queueId": q.ID, "path": dest, "mediaType": q.MediaType,
 		})
 		m.notify.EmitDownloadMoved(ctx, map[string]any{
-			"title": q.Title, "queueId": q.ID, "sourcePath": video, "destPath": dest,
+			"title": q.Title, "queueId": q.ID, "sourcePath": src, "destPath": dest,
 		})
 	}
 	return nil
@@ -302,6 +332,65 @@ func (m *Monitor) destinationPath(appCfg domain.AppConfig, q domain.QueueItem, e
 		seasonDir := fmt.Sprintf("Season %02d", season)
 		file := fmt.Sprintf("%s - S%02dE%02d%s", sanitizeName(sr.Title), season, ep, ext)
 		return filepath.Join(base, seasonDir, file), nil
+	}
+	if q.AlbumID > 0 || q.ArtistID > 0 {
+		artistID := q.ArtistID
+		albumTitle := sanitizeName(q.Title)
+		if q.AlbumID > 0 {
+			if al, err := m.store.GetAlbumByID(q.AlbumID); err == nil && al != nil {
+				artistID = al.ArtistID
+				albumTitle = sanitizeName(al.Title)
+			}
+		}
+		ar, err := m.store.GetArtistByID(artistID)
+		if err != nil || ar == nil {
+			return "", fmt.Errorf("artist %d not found", artistID)
+		}
+		base := strings.TrimSpace(ar.Path)
+		if base == "" {
+			root := firstRoot(appCfg, m.store, "music")
+			base = filepath.Join(root, sanitizeName(ar.Title))
+		}
+		return filepath.Join(base, albumTitle, sanitizeName(q.Title)+ext), nil
+	}
+	if q.EditionID > 0 || q.BookID > 0 {
+		var ed *domain.Edition
+		if q.EditionID > 0 {
+			ed, _ = m.store.GetEditionByID(q.EditionID)
+		}
+		title := sanitizeName(q.Title)
+		rootType := "ebook"
+		base := ""
+		if ed != nil {
+			title = sanitizeName(ed.Title)
+			if ed.Format == "audiobook" {
+				rootType = "audiobook"
+			}
+			if ed.Path != "" {
+				base = strings.TrimSpace(filepath.Dir(ed.Path))
+			}
+			if (base == "" || base == ".") && ed.RootFolderPath != "" {
+				base = filepath.Join(ed.RootFolderPath, sanitizeName(ed.Title))
+			}
+		}
+		if base == "" {
+			authorID := q.AuthorID
+			if ed != nil {
+				authorID = ed.AuthorID
+			}
+			if authorID > 0 {
+				if au, err := m.store.GetAuthorByID(authorID); err == nil && au != nil {
+					base = filepath.Join(strings.TrimSpace(au.Path), title)
+					if au.Path == "" {
+						base = filepath.Join(firstRoot(appCfg, m.store, rootType), sanitizeName(au.Title), title)
+					}
+				}
+			}
+		}
+		if base == "" {
+			base = filepath.Join(firstRoot(appCfg, m.store, rootType), title)
+		}
+		return filepath.Join(base, title+ext), nil
 	}
 	return "", fmt.Errorf("no library association")
 }
@@ -376,6 +465,69 @@ func isVideo(path string) bool {
 	default:
 		return false
 	}
+}
+
+func isAudio(path string) bool {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".flac", ".mp3", ".aac", ".m4a", ".alac", ".wav", ".ogg", ".opus":
+		return true
+	default:
+		return false
+	}
+}
+
+func isEbook(path string) bool {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".epub", ".mobi", ".azw", ".azw3", ".pdf", ".cbz", ".cbr":
+		return true
+	default:
+		return false
+	}
+}
+
+func isAudiobook(path string) bool {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".m4b", ".mp3", ".flac", ".m4a", ".aac":
+		return true
+	default:
+		return false
+	}
+}
+
+func findPrimaryMedia(root string, match func(string) bool) (string, error) {
+	info, err := os.Stat(root)
+	if err != nil {
+		return "", err
+	}
+	if !info.IsDir() {
+		if match(root) {
+			return root, nil
+		}
+		return "", fmt.Errorf("unsupported media file: %s", root)
+	}
+	var best string
+	var bestSize int64
+	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		if !match(path) {
+			return nil
+		}
+		fi, err := d.Info()
+		if err != nil {
+			return nil
+		}
+		if fi.Size() > bestSize {
+			bestSize = fi.Size()
+			best = path
+		}
+		return nil
+	})
+	if best == "" {
+		return "", fmt.Errorf("no matching media files under %s", root)
+	}
+	return best, nil
 }
 
 func importFile(src, dest string, hardlink bool) error {

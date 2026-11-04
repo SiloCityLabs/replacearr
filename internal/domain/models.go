@@ -17,6 +17,12 @@ const (
 	PermMoviesRead     = "movies:read"
 	PermMoviesWrite    = "movies:write"
 	PermMoviesDelete   = "movies:delete"
+	PermMusicRead      = "music:read"
+	PermMusicWrite     = "music:write"
+	PermMusicDelete    = "music:delete"
+	PermBooksRead      = "books:read"
+	PermBooksWrite     = "books:write"
+	PermBooksDelete    = "books:delete"
 	PermIndexersRead   = "indexers:read"
 	PermIndexersWrite  = "indexers:write"
 	PermIndexersSearch = "indexers:search"
@@ -36,6 +42,8 @@ const (
 var AllPermissions = []string{
 	PermTVRead, PermTVWrite, PermTVDelete,
 	PermMoviesRead, PermMoviesWrite, PermMoviesDelete,
+	PermMusicRead, PermMusicWrite, PermMusicDelete,
+	PermBooksRead, PermBooksWrite, PermBooksDelete,
 	PermIndexersRead, PermIndexersWrite, PermIndexersSearch,
 	PermDownloadsRead, PermDownloadsWrite,
 	PermProfilesRead, PermProfilesWrite,
@@ -74,7 +82,7 @@ type APIKey struct {
 	KeyPrefix   string     `json:"keyPrefix"`
 	RawKey      string     `json:"rawKey,omitempty"` // Only returned on creation or for system compat key
 	UserID      int64      `json:"userId"`
-	Scope       string     `json:"scope"` // "all", "sonarr", "radarr", "prowlarr"
+	Scope       string     `json:"scope"` // "all", "sonarr", "radarr", "prowlarr", "lidarr", "readarr"
 	Permissions []string   `json:"permissions"`
 	LastUsedAt  *time.Time `json:"lastUsedAt,omitempty"`
 	CreatedAt   time.Time  `json:"createdAt"`
@@ -90,7 +98,7 @@ type Tag struct {
 type RootFolder struct {
 	ID              int64  `json:"id"`
 	Path            string `json:"path"`
-	MediaType       string `json:"mediaType"` // "tv", "movie", "all"
+	MediaType       string `json:"mediaType"` // "tv", "movie", "music", "ebook", "audiobook", "all"
 	Accessible      bool   `json:"accessible"`
 	FreeSpace       int64  `json:"freeSpace"`
 	TotalSpace      int64  `json:"totalSpace"`
@@ -108,6 +116,7 @@ type QualityItem struct {
 type QualityProfile struct {
 	ID                int64         `json:"id"`
 	Name              string        `json:"name"`
+	MediaType         string        `json:"mediaType"` // video, music, ebook, audiobook
 	UpgradeAllowed    bool          `json:"upgradeAllowed"`
 	Cutoff            int           `json:"cutoff"`
 	Items             []QualityItem `json:"items"`
@@ -221,6 +230,126 @@ type Movie struct {
 	Added               time.Time      `json:"added"`
 	SizeOnDisk          int64          `json:"sizeOnDisk"`
 	Statistics          map[string]any `json:"statistics,omitempty"`
+}
+
+// Music (Lidarr-like) Domain Models
+
+type Artist struct {
+	ID               int64          `json:"id"`
+	Title            string         `json:"title"`
+	SortTitle        string         `json:"sortTitle"`
+	Status           string         `json:"status"`
+	Overview         string         `json:"overview"`
+	Images           []MediaImage   `json:"images"`
+	Path             string         `json:"path"`
+	QualityProfileID int64          `json:"qualityProfileId"`
+	Monitored        bool           `json:"monitored"`
+	ForeignArtistID  string         `json:"foreignArtistId"` // MusicBrainz artist MBID
+	TitleSlug        string         `json:"titleSlug"`
+	CleanTitle       string         `json:"cleanTitle"`
+	RootFolderPath   string         `json:"rootFolderPath"`
+	Genres           []string       `json:"genres"`
+	Tags             []int64        `json:"tags"`
+	Disambiguation   string         `json:"disambiguation"`
+	Added            time.Time      `json:"added"`
+	Statistics       map[string]any `json:"statistics,omitempty"`
+}
+
+type Album struct {
+	ID             int64        `json:"id"`
+	ArtistID       int64        `json:"artistId"`
+	Title          string       `json:"title"`
+	ForeignAlbumID string       `json:"foreignAlbumId"` // MusicBrainz release-group MBID
+	ReleaseDate    string       `json:"releaseDate"`
+	AlbumType      string       `json:"albumType"` // Album, EP, Single, ...
+	Overview       string       `json:"overview"`
+	Images         []MediaImage `json:"images"`
+	Monitored      bool         `json:"monitored"`
+	HasFile        bool         `json:"hasFile"`
+	Path           string       `json:"path"`
+	Year           int          `json:"year"`
+	Genres         []string     `json:"genres"`
+}
+
+type Track struct {
+	ID                   int64  `json:"id"`
+	ArtistID             int64  `json:"artistId"`
+	AlbumID              int64  `json:"albumId"`
+	ForeignTrackID       string `json:"foreignTrackId"`
+	TrackNumber          int    `json:"trackNumber"`
+	AbsoluteTrackNumber  int    `json:"absoluteTrackNumber"`
+	Title                string `json:"title"`
+	DurationMs           int    `json:"durationMs"`
+	Explicit             bool   `json:"explicit"`
+	HasFile              bool   `json:"hasFile"`
+	Monitored            bool   `json:"monitored"`
+	MediumNumber         int    `json:"mediumNumber"`
+}
+
+// AlbumWithTracks pairs an album with its track list for MusicBrainz sync.
+type AlbumWithTracks struct {
+	Album  Album   `json:"album"`
+	Tracks []Track `json:"tracks"`
+}
+
+// Books (ebook + audiobook) Domain Models
+
+type Author struct {
+	ID               int64          `json:"id"`
+	Title            string         `json:"title"`
+	SortTitle        string         `json:"sortTitle"`
+	Status           string         `json:"status"`
+	Overview         string         `json:"overview"`
+	Images           []MediaImage   `json:"images"`
+	Path             string         `json:"path"`
+	QualityProfileID int64          `json:"qualityProfileId"`
+	Monitored        bool           `json:"monitored"`
+	ForeignAuthorID  string         `json:"foreignAuthorId"` // OpenLibrary author key
+	TitleSlug        string         `json:"titleSlug"`
+	CleanTitle       string         `json:"cleanTitle"`
+	RootFolderPath   string         `json:"rootFolderPath"`
+	Genres           []string       `json:"genres"`
+	Tags             []int64        `json:"tags"`
+	Added            time.Time      `json:"added"`
+	Statistics       map[string]any `json:"statistics,omitempty"`
+}
+
+type Book struct {
+	ID            int64        `json:"id"`
+	AuthorID      int64        `json:"authorId"`
+	Title         string       `json:"title"`
+	ForeignBookID string       `json:"foreignBookId"` // OpenLibrary work key
+	TitleSlug     string       `json:"titleSlug"`
+	ReleaseDate   string       `json:"releaseDate"`
+	Overview      string       `json:"overview"`
+	Images        []MediaImage `json:"images"`
+	Monitored     bool         `json:"monitored"`
+	SeriesTitle   string       `json:"seriesTitle"`
+	SeriesPosition string      `json:"seriesPosition"`
+	Genres        []string     `json:"genres"`
+	PageCount     int          `json:"pageCount"`
+}
+
+type Edition struct {
+	ID               int64        `json:"id"`
+	BookID           int64        `json:"bookId"`
+	AuthorID         int64        `json:"authorId"`
+	ForeignEditionID string       `json:"foreignEditionId"`
+	Title            string       `json:"title"`
+	Format           string       `json:"format"` // ebook | audiobook
+	Isbn13           string       `json:"isbn13"`
+	Isbn10           string       `json:"isbn10"`
+	Asin             string       `json:"asin"`
+	Language         string       `json:"language"`
+	PageCount        int          `json:"pageCount"`
+	Monitored        bool         `json:"monitored"`
+	HasFile          bool         `json:"hasFile"`
+	Path             string       `json:"path"`
+	QualityProfileID int64        `json:"qualityProfileId"`
+	RootFolderPath   string       `json:"rootFolderPath"`
+	Images           []MediaImage `json:"images"`
+	Publisher        string       `json:"publisher"`
+	ReleaseDate      string       `json:"releaseDate"`
 }
 
 // Prowlarr Indexer & Search Models
@@ -380,10 +509,15 @@ func SplitDownloadClientBaseURL(base string) (host string, port int, useSSL bool
 
 type QueueItem struct {
 	ID                    int64     `json:"id"`
-	MediaType             string    `json:"mediaType"` // tv, movie
+	MediaType             string    `json:"mediaType"` // tv, movie, music, ebook, audiobook
 	SeriesID              int64     `json:"seriesId,omitempty"`
 	EpisodeID             int64     `json:"episodeId,omitempty"`
 	MovieID               int64     `json:"movieId,omitempty"`
+	ArtistID              int64     `json:"artistId,omitempty"`
+	AlbumID               int64     `json:"albumId,omitempty"`
+	AuthorID              int64     `json:"authorId,omitempty"`
+	BookID                int64     `json:"bookId,omitempty"`
+	EditionID             int64     `json:"editionId,omitempty"`
 	Title                 string    `json:"title"`
 	Status                string    `json:"status"`                // downloading, queued, completed, paused, warning
 	TrackedDownloadStatus string    `json:"trackedDownloadStatus"` // ok, warning, error
@@ -420,6 +554,11 @@ type HistoryRecord struct {
 	SeriesID    int64          `json:"seriesId,omitempty"`
 	EpisodeID   int64          `json:"episodeId,omitempty"`
 	MovieID     int64          `json:"movieId,omitempty"`
+	ArtistID    int64          `json:"artistId,omitempty"`
+	AlbumID     int64          `json:"albumId,omitempty"`
+	AuthorID    int64          `json:"authorId,omitempty"`
+	BookID      int64          `json:"bookId,omitempty"`
+	EditionID   int64          `json:"editionId,omitempty"`
 	SourceTitle string         `json:"sourceTitle"`
 	Quality     map[string]any `json:"quality"`
 	Date        time.Time      `json:"date"`

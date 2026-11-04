@@ -10,7 +10,7 @@ DEFINITIONS_DIR="${REPLACEARR_DEFINITIONS_DIR:-${CONFIG_DIR}/definitions}"
 # Bundled Replacearr-owned catalog (repo ./definitions, bind-mounted at /workspace).
 BUNDLED_DEFINITIONS="${REPLACEARR_BUNDLED_DEFINITIONS:-/workspace/definitions}"
 
-mkdir -p /data/TV /data/Movies /data/downloads \
+mkdir -p /data/TV /data/Movies /data/Music /data/Books /data/Audiobooks /data/downloads \
 	"${CONFIG_DIR}" \
 	"${PLUGIN_DIR}" \
 	"${DEFINITIONS_DIR}"

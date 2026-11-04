@@ -348,7 +348,9 @@ export const MediaManagementPage: React.FC<MediaManagementPageProps> = ({
       <section className="bg-slate-900/90 border border-slate-800 rounded-xl p-5 mt-4 space-y-4">
         <div>
           <h3 className="text-sm font-semibold text-white">Root Folders</h3>
-          <p className="text-xs text-slate-500 mt-1">Library paths for series and movies.</p>
+          <p className="text-xs text-slate-500 mt-1">
+            Library paths for TV, movies, music, ebooks, and audiobooks.
+          </p>
         </div>
         {rootFolders.length === 0 ? (
           <p className="text-xs text-slate-400">No root folders yet.</p>
@@ -394,6 +396,9 @@ export const MediaManagementPage: React.FC<MediaManagementPageProps> = ({
             options={[
               { value: 'tv', label: 'TV' },
               { value: 'movie', label: 'Movie' },
+              { value: 'music', label: 'Music' },
+              { value: 'ebook', label: 'Ebook' },
+              { value: 'audiobook', label: 'Audiobook' },
               { value: 'all', label: 'All' },
             ]}
           />

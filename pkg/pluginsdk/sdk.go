@@ -38,6 +38,8 @@ const (
 	CompatPluginSonarr   = "builtin-compat-sonarr"
 	CompatPluginRadarr   = "builtin-compat-radarr"
 	CompatPluginProwlarr = "builtin-compat-prowlarr"
+	CompatPluginLidarr   = "builtin-compat-lidarr"
+	CompatPluginReadarr  = "builtin-compat-readarr"
 )
 
 // Built-in notification channel that bridges Notify events to the SPA via SSE.

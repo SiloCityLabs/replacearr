@@ -255,8 +255,15 @@ export const ProfilesPage: React.FC<ProfilesPageProps> = ({
                 key={profile.id}
                 className="p-3 rounded-xl bg-slate-950 border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
               >
-                <div>
-                  <p className="text-sm font-medium text-white">{profile.name}</p>
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="text-sm font-medium text-white">{profile.name}</p>
+                    {profile.mediaType ? (
+                      <span className="text-[10px] font-mono uppercase px-1.5 py-0.5 rounded bg-slate-800 text-slate-400">
+                        {profile.mediaType}
+                      </span>
+                    ) : null}
+                  </div>
                   <p className="text-xs text-slate-400 mt-1">
                     Cutoff {profile.cutoff} · Upgrades {profile.upgradeAllowed ? 'allowed' : 'off'}
                   </p>

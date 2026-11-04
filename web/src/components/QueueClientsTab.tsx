@@ -336,6 +336,9 @@ export const QueueClientsTab: React.FC<QueueClientsTabProps> = ({
               <option value="all">all</option>
               <option value="tv">tv</option>
               <option value="movie">movie</option>
+              <option value="music">music</option>
+              <option value="ebook">ebook</option>
+              <option value="audiobook">audiobook</option>
             </select>
             <button
               type="submit"

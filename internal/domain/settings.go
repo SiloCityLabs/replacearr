@@ -383,6 +383,26 @@ func BuiltinQualityDefinitions() []QualityDefinition {
 		qdef(19, "WEBDL-2160p", "web", 2160),
 		qdef(20, "Bluray-2160p", "bluray", 2160),
 		qdef(21, "Bluray-2160p Remux", "bluray", 2160),
+		// Music (100+)
+		qdef(100, "Unknown Audio", "unknown", 0),
+		qdef(101, "MP3-192", "mp3", 0),
+		qdef(102, "MP3-320", "mp3", 0),
+		qdef(103, "AAC-256", "aac", 0),
+		qdef(104, "FLAC", "flac", 0),
+		qdef(105, "FLAC-24", "flac", 0),
+		qdef(106, "ALAC", "alac", 0),
+		// Ebook (120+)
+		qdef(120, "Unknown Ebook", "unknown", 0),
+		qdef(121, "EPUB", "ebook", 0),
+		qdef(122, "AZW3", "ebook", 0),
+		qdef(123, "MOBI", "ebook", 0),
+		qdef(124, "PDF", "ebook", 0),
+		qdef(125, "CBZ", "comic", 0),
+		// Audiobook (140+)
+		qdef(140, "Unknown Audiobook", "unknown", 0),
+		qdef(141, "M4B", "audiobook", 0),
+		qdef(142, "MP3 Audiobook", "audiobook", 0),
+		qdef(143, "FLAC Audiobook", "audiobook", 0),
 	}
 }
 

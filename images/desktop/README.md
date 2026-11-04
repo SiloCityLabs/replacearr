@@ -18,70 +18,78 @@ Captured at 1440×900. API keys are redacted in these images.
 
 ![Movies library](03-movies.png)
 
+## Music
+
+![Music library](04-music.png)
+
+## Books
+
+![Books library](05-books.png)
+
 ## Indexers and search
 
-![Indexers and unified search](04-indexers-search.png)
+![Indexers and unified search](06-indexers-search.png)
 
 ## Queue and download clients
 
-![Live download queue and clients](05-queue.png)
+![Live download queue and clients](07-queue.png)
 
 ## Plugins
 
-![Go plugin system](06-plugins.png)
+![Go plugin system](08-plugins.png)
 
 ## Users and RBAC
 
-![Users and access control](07-users.png)
+![Users and access control](09-users.png)
 
 ## Settings (home)
 
-![Settings category grid](08-settings.png)
+![Settings category grid](10-settings.png)
 
 ## Settings — General
 
-![General settings](09-settings-general.png)
+![General settings](11-settings-general.png)
 
 ## Settings — UI
 
-![UI settings](10-settings-ui.png)
+![UI settings](12-settings-ui.png)
 
 ## Settings — Media management
 
-![Media management](11-settings-media.png)
+![Media management](13-settings-media.png)
 
 ## Settings — Profiles
 
-![Quality, delay, and release profiles](12-settings-profiles.png)
+![Quality, delay, and release profiles](14-settings-profiles.png)
 
 ## Settings — Quality
 
-![Quality definitions](13-settings-quality.png)
+![Quality definitions](15-settings-quality.png)
 
 ## Settings — Indexers
 
-![Indexer and proxy settings](14-settings-indexers.png)
+![Indexer and proxy settings](16-settings-indexers.png)
 
 ## Settings — Download clients
 
-![Download clients and path mappings](15-settings-download-clients.png)
+![Download clients and path mappings](17-settings-download-clients.png)
 
 ## Settings — Import lists
 
-![Import lists](16-settings-import-lists.png)
+![Import lists](18-settings-import-lists.png)
 
 ## Settings — System
 
-![System status and compat endpoints](17-settings-system.png)
+![System status and compat endpoints](19-settings-system.png)
 
 ## Settings — Metadata
 
-![Metadata options](18-settings-metadata.png)
+![Metadata options](20-settings-metadata.png)
 
 ## Settings — Tags
 
-![Tags](19-settings-tags.png)
+![Tags](21-settings-tags.png)
 
 ## Compatibility (*arr clients)
 
-![Connect Overseerr, Bazarr, and nzb360 via built-in *arr plugins](20-compatibility.png)
+![Connect Overseerr, Bazarr, and nzb360 via built-in *arr plugins](22-compatibility.png)

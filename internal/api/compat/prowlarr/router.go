@@ -49,6 +49,8 @@ func NewHandler(store *db.Store, cfg *config.Config, searchFn sonarr.SearchFunc)
 	prowlarrURL := fmt.Sprintf("http://localhost:%d/prowlarr", port)
 	sonarrURL := fmt.Sprintf("http://localhost:%d/sonarr", port)
 	radarrURL := fmt.Sprintf("http://localhost:%d/radarr", port)
+	lidarrURL := fmt.Sprintf("http://localhost:%d/lidarr", port)
+	readarrURL := fmt.Sprintf("http://localhost:%d/readarr", port)
 
 	defaultApps := []ApplicationProfile{
 		{
@@ -81,6 +83,36 @@ func NewHandler(store *db.Store, cfg *config.Config, searchFn sonarr.SearchFunc)
 			},
 			Tags: []int64{},
 		},
+		{
+			ID:                 3,
+			Name:               "Replacearr Lidarr (Internal)",
+			Implementation:     "Lidarr",
+			ImplementationName: "Lidarr",
+			ConfigContract:     "LidarrSettings",
+			SyncLevel:          "fullSync",
+			Fields: []domain.ConfigField{
+				{Name: "prowlarrUrl", Label: "Prowlarr Server", Type: "textbox", Value: prowlarrURL},
+				{Name: "baseUrl", Label: "Lidarr Server", Type: "textbox", Value: lidarrURL},
+				{Name: "apiKey", Label: "API Key", Type: "password", Value: "replacearr-internal-key"},
+				{Name: "syncCategories", Label: "Sync Categories", Type: "select", Value: []int{3000, 3010, 3030, 3040}},
+			},
+			Tags: []int64{},
+		},
+		{
+			ID:                 4,
+			Name:               "Replacearr Readarr (Internal)",
+			Implementation:     "Readarr",
+			ImplementationName: "Readarr",
+			ConfigContract:     "ReadarrSettings",
+			SyncLevel:          "fullSync",
+			Fields: []domain.ConfigField{
+				{Name: "prowlarrUrl", Label: "Prowlarr Server", Type: "textbox", Value: prowlarrURL},
+				{Name: "baseUrl", Label: "Readarr Server", Type: "textbox", Value: readarrURL},
+				{Name: "apiKey", Label: "API Key", Type: "password", Value: "replacearr-internal-key"},
+				{Name: "syncCategories", Label: "Sync Categories", Type: "select", Value: []int{7000, 7020, 7030, 3030}},
+			},
+			Tags: []int64{},
+		},
 	}
 
 	return &Handler{
@@ -89,7 +121,7 @@ func NewHandler(store *db.Store, cfg *config.Config, searchFn sonarr.SearchFunc)
 		searchFn: searchFn,
 		start:    time.Now().UTC(),
 		apps:     defaultApps,
-		nextApp:  3,
+		nextApp:  5,
 	}
 }
 
@@ -394,10 +426,15 @@ func (h *Handler) handleSearch(w http.ResponseWriter, r *http.Request) {
 	}
 	searchType := strings.ToLower(strings.TrimSpace(q.Get("type")))
 	mediaType := "tv"
-	if searchType == "movie" || searchType == "moviesearch" {
+	switch searchType {
+	case "movie", "moviesearch":
 		mediaType = "movie"
-	} else if searchType == "tv" || searchType == "tvsearch" {
+	case "tv", "tvsearch":
 		mediaType = "tv"
+	case "music", "musicsearch":
+		mediaType = "music"
+	case "book", "booksearch":
+		mediaType = "ebook"
 	}
 	tvdbID, _ := strconv.Atoi(q.Get("tvdbId"))
 	tmdbID, _ := strconv.Atoi(q.Get("tmdbId"))
@@ -625,10 +662,14 @@ func (h *Handler) handleTorznab(w http.ResponseWriter, r *http.Request, indexerI
 					"search":       map[string]any{"available": "yes", "supportedParams": "q"},
 					"tv-search":    map[string]any{"available": "yes", "supportedParams": "q,season,ep,tvdbid,rid"},
 					"movie-search": map[string]any{"available": "yes", "supportedParams": "q,imdbid,tmdbid"},
+					"music-search": map[string]any{"available": "yes", "supportedParams": "q,artist,album,label,year"},
+					"book-search":  map[string]any{"available": "yes", "supportedParams": "q,author,title,publisher,year"},
 				},
 				"categories": []map[string]any{
 					{"id": 2000, "name": "Movies"},
+					{"id": 3000, "name": "Audio"},
 					{"id": 5000, "name": "TV"},
+					{"id": 7000, "name": "Books"},
 				},
 			})
 			return
@@ -642,6 +683,8 @@ func (h *Handler) handleTorznab(w http.ResponseWriter, r *http.Request, indexerI
     <search available="yes" supportedParams="q" />
     <tv-search available="yes" supportedParams="q,season,ep,tvdbid,rid" />
     <movie-search available="yes" supportedParams="q,imdbid,tmdbid" />
+    <music-search available="yes" supportedParams="q,artist,album,label,year" />
+    <book-search available="yes" supportedParams="q,author,title,publisher,year" />
   </searching>
   <categories>
     <category id="2000" name="Movies">
@@ -649,10 +692,19 @@ func (h *Handler) handleTorznab(w http.ResponseWriter, r *http.Request, indexerI
       <subcat id="2040" name="Movies/HD" />
       <subcat id="2045" name="Movies/UHD" />
     </category>
+    <category id="3000" name="Audio">
+      <subcat id="3010" name="Audio/MP3" />
+      <subcat id="3030" name="Audio/Audiobook" />
+      <subcat id="3040" name="Audio/Lossless" />
+    </category>
     <category id="5000" name="TV">
       <subcat id="5030" name="TV/SD" />
       <subcat id="5040" name="TV/HD" />
       <subcat id="5045" name="TV/UHD" />
+    </category>
+    <category id="7000" name="Books">
+      <subcat id="7020" name="Books/EBook" />
+      <subcat id="7030" name="Books/Comics" />
     </category>
   </categories>
 </caps>`, xmlEscape(indexerName))
@@ -668,11 +720,45 @@ func (h *Handler) handleTorznab(w http.ResponseWriter, r *http.Request, indexerI
 		mediaType = "movie"
 	case "tvsearch", "tv":
 		mediaType = "tv"
+	case "music", "musicsearch":
+		mediaType = "music"
+	case "book", "booksearch":
+		mediaType = "ebook"
 	}
 
 	query := strings.TrimSpace(q.Get("q"))
 	if query == "" {
 		query = strings.TrimSpace(q.Get("query"))
+	}
+	if mediaType == "music" {
+		artist := strings.TrimSpace(q.Get("artist"))
+		album := strings.TrimSpace(q.Get("album"))
+		parts := []string{}
+		if artist != "" {
+			parts = append(parts, artist)
+		}
+		if album != "" {
+			parts = append(parts, album)
+		}
+		if query != "" {
+			parts = append(parts, query)
+		}
+		query = strings.Join(parts, " ")
+	}
+	if mediaType == "ebook" {
+		author := strings.TrimSpace(q.Get("author"))
+		title := strings.TrimSpace(q.Get("title"))
+		parts := []string{}
+		if author != "" {
+			parts = append(parts, author)
+		}
+		if title != "" {
+			parts = append(parts, title)
+		}
+		if query != "" {
+			parts = append(parts, query)
+		}
+		query = strings.Join(parts, " ")
 	}
 	tvdbID, _ := strconv.Atoi(q.Get("tvdbid"))
 	tmdbID, _ := strconv.Atoi(q.Get("tmdbid"))

@@ -293,9 +293,35 @@ func normalizeMediaType(mediaType string) string {
 	switch strings.ToLower(strings.TrimSpace(mediaType)) {
 	case "movie", "movies", "film":
 		return "movie"
+	case "music", "artist", "album":
+		return "music"
+	case "book", "books", "ebook", "audiobook", "author":
+		return "book"
 	default:
 		return "tv"
 	}
+}
+
+// CacheKeyMusic builds a stable on-disk key for an artist (MBID or internal id).
+func CacheKeyMusic(foreignArtistID string, fallbackID int64) string {
+	if id := strings.TrimSpace(foreignArtistID); id != "" {
+		return "mbid-" + sanitizeKey(id)
+	}
+	if fallbackID > 0 {
+		return strconv.FormatInt(fallbackID, 10)
+	}
+	return ""
+}
+
+// CacheKeyBook builds a stable on-disk key for a book/author (OL key or internal id).
+func CacheKeyBook(foreignID string, fallbackID int64) string {
+	if id := strings.TrimSpace(foreignID); id != "" {
+		return "ol-" + sanitizeKey(id)
+	}
+	if fallbackID > 0 {
+		return strconv.FormatInt(fallbackID, 10)
+	}
+	return ""
 }
 
 // allowPrivateCoverHosts is set by tests to exercise Ensure against httptest.

@@ -2,19 +2,26 @@ export type NavTab =
   | 'dashboard'
   | 'series'
   | 'movies'
+  | 'music'
+  | 'books'
   | 'indexers'
   | 'queue'
   | 'plugins'
   | 'users'
   | 'settings';
 
-/** Interactive Search payload — must target a library series or movie. */
+/** Interactive Search payload — must target a library entity. */
 export interface ReleaseSearchRequest {
   query: string;
   type?: string;
   seriesId?: number;
   movieId?: number;
   episodeId?: number;
+  artistId?: number;
+  albumId?: number;
+  authorId?: number;
+  bookId?: number;
+  editionId?: number;
   tvdbId?: number;
   tmdbId?: number;
   season?: number;
@@ -255,12 +262,127 @@ export interface DownloadClient {
   tags: number[];
 }
 
+export interface Artist {
+  id: number;
+  title: string;
+  sortTitle: string;
+  status: string;
+  overview: string;
+  images: MediaImage[];
+  path: string;
+  qualityProfileId: number;
+  monitored: boolean;
+  foreignArtistId: string;
+  titleSlug: string;
+  cleanTitle: string;
+  rootFolderPath: string;
+  genres: string[];
+  tags: number[];
+  disambiguation?: string;
+  added: string;
+  statistics?: Record<string, unknown>;
+}
+
+export interface Album {
+  id: number;
+  artistId: number;
+  title: string;
+  foreignAlbumId: string;
+  releaseDate: string;
+  albumType: string;
+  overview: string;
+  images: MediaImage[];
+  monitored: boolean;
+  hasFile: boolean;
+  path: string;
+  year: number;
+  genres: string[];
+}
+
+export interface Track {
+  id: number;
+  artistId: number;
+  albumId: number;
+  foreignTrackId: string;
+  trackNumber: number;
+  absoluteTrackNumber: number;
+  title: string;
+  durationMs: number;
+  explicit: boolean;
+  hasFile: boolean;
+  monitored: boolean;
+  mediumNumber: number;
+}
+
+export interface Author {
+  id: number;
+  title: string;
+  sortTitle: string;
+  status: string;
+  overview: string;
+  images: MediaImage[];
+  path: string;
+  qualityProfileId: number;
+  monitored: boolean;
+  foreignAuthorId: string;
+  titleSlug: string;
+  cleanTitle: string;
+  rootFolderPath: string;
+  genres: string[];
+  tags: number[];
+  added: string;
+  statistics?: Record<string, unknown>;
+}
+
+export interface Book {
+  id: number;
+  authorId: number;
+  title: string;
+  foreignBookId: string;
+  titleSlug: string;
+  releaseDate: string;
+  overview: string;
+  images: MediaImage[];
+  monitored: boolean;
+  seriesTitle?: string;
+  seriesPosition?: string;
+  genres: string[];
+  pageCount: number;
+}
+
+export interface Edition {
+  id: number;
+  bookId: number;
+  authorId: number;
+  foreignEditionId: string;
+  title: string;
+  format: 'ebook' | 'audiobook' | string;
+  isbn13: string;
+  isbn10: string;
+  asin: string;
+  language: string;
+  pageCount: number;
+  monitored: boolean;
+  hasFile: boolean;
+  path: string;
+  qualityProfileId: number;
+  rootFolderPath: string;
+  images: MediaImage[];
+  publisher: string;
+  releaseDate: string;
+}
+
 export interface QueueItem {
   id: number;
-  mediaType: 'tv' | 'movie' | string;
+  mediaType: 'tv' | 'movie' | 'music' | 'ebook' | 'audiobook' | string;
   seriesId?: number;
   episodeId?: number;
   movieId?: number;
+  artistId?: number;
+  albumId?: number;
+  authorId?: number;
+  bookId?: number;
+  editionId?: number;
   title: string;
   status: string;
   trackedDownloadStatus: string;
@@ -301,6 +423,7 @@ export interface QualityItem {
 export interface QualityProfile {
   id: number;
   name: string;
+  mediaType?: string; // video | music | ebook | audiobook
   upgradeAllowed: boolean;
   cutoff: number;
   items: QualityItem[];
@@ -352,6 +475,11 @@ export interface OverviewResponse {
     series: number;
     episodes: number;
     movies: number;
+    artists?: number;
+    albums?: number;
+    authors?: number;
+    books?: number;
+    editions?: number;
     indexers: number;
     indexerProxies?: number;
     activeDownloads: number;

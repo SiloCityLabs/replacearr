@@ -176,6 +176,66 @@ func episodeAirTime(ep Episode) time.Time {
 	return time.Time{}
 }
 
+// BuildMusicSearchQueries returns indexer query strings for artist/album searches.
+func BuildMusicSearchQueries(artist, album, fallback string) []string {
+	artist = strings.TrimSpace(artist)
+	album = strings.TrimSpace(album)
+	fallback = strings.TrimSpace(fallback)
+	seen := map[string]struct{}{}
+	var out []string
+	add := func(q string) {
+		q = strings.TrimSpace(q)
+		if q == "" {
+			return
+		}
+		key := strings.ToLower(q)
+		if _, ok := seen[key]; ok {
+			return
+		}
+		seen[key] = struct{}{}
+		out = append(out, q)
+	}
+	if artist != "" && album != "" {
+		add(artist + " " + album)
+		add(album)
+	} else if artist != "" {
+		add(artist)
+	} else if album != "" {
+		add(album)
+	}
+	add(fallback)
+	return out
+}
+
+// BuildBookSearchQueries returns indexer query strings for author/title searches.
+func BuildBookSearchQueries(author, title string) []string {
+	author = strings.TrimSpace(author)
+	title = strings.TrimSpace(title)
+	seen := map[string]struct{}{}
+	var out []string
+	add := func(q string) {
+		q = strings.TrimSpace(q)
+		if q == "" {
+			return
+		}
+		key := strings.ToLower(q)
+		if _, ok := seen[key]; ok {
+			return
+		}
+		seen[key] = struct{}{}
+		out = append(out, q)
+	}
+	if author != "" && title != "" {
+		add(author + " " + title)
+		add(title)
+	} else if title != "" {
+		add(title)
+	} else if author != "" {
+		add(author)
+	}
+	return out
+}
+
 func ordinal(n int) string {
 	if n%100 >= 11 && n%100 <= 13 {
 		return fmt.Sprintf("%dth", n)

@@ -29,11 +29,13 @@ var (
 	imdbIDRe  = regexp.MustCompile(`(?i)^tt\d{7,}$`)
 )
 
-// Service looks up series and movies for Add New flows.
+// Service looks up series, movies, artists, and books for Add New flows.
 type Service struct {
 	httpClient  *http.Client
 	skyHookBase string
 	radarrBase  string
+	mbBase      string
+	olBase      string
 }
 
 // Option configures Service.
@@ -66,12 +68,32 @@ func WithRadarrBase(base string) Option {
 	}
 }
 
-// New returns a Service pointed at the public SkyHook and Radarr metadata APIs.
+// WithMusicBrainzBase overrides the MusicBrainz WS2 base URL (tests).
+func WithMusicBrainzBase(base string) Option {
+	return func(s *Service) {
+		if base != "" {
+			s.mbBase = strings.TrimRight(base, "/")
+		}
+	}
+}
+
+// WithOpenLibraryBase overrides the OpenLibrary base URL (tests).
+func WithOpenLibraryBase(base string) Option {
+	return func(s *Service) {
+		if base != "" {
+			s.olBase = strings.TrimRight(base, "/")
+		}
+	}
+}
+
+// New returns a Service pointed at the public SkyHook, Radarr, MusicBrainz, and OpenLibrary APIs.
 func New(opts ...Option) *Service {
 	s := &Service{
 		httpClient:  &http.Client{Timeout: defaultTimeout},
 		skyHookBase: defaultSkyHookBase,
 		radarrBase:  defaultRadarrBase,
+		mbBase:      defaultMusicBrainzBase,
+		olBase:      defaultOpenLibraryBase,
 	}
 	for _, opt := range opts {
 		opt(s)

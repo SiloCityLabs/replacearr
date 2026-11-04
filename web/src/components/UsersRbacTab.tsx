@@ -29,6 +29,12 @@ const DEFAULT_PERMISSIONS = [
   'movies:read',
   'movies:write',
   'movies:delete',
+  'music:read',
+  'music:write',
+  'music:delete',
+  'books:read',
+  'books:write',
+  'books:delete',
   'indexers:read',
   'indexers:write',
   'indexers:search',
@@ -391,7 +397,8 @@ export const UsersRbacTab: React.FC<UsersRbacTabProps> = ({
               <h3 className="text-base font-bold text-white">Scoped API Keys</h3>
               <p className="text-xs text-slate-400">
                 Create keys scoped to <code className="font-mono">all</code>,{' '}
-                <code className="font-mono">sonarr</code>, <code className="font-mono">radarr</code>, or{' '}
+                <code className="font-mono">sonarr</code>, <code className="font-mono">radarr</code>,{' '}
+                <code className="font-mono">lidarr</code>, <code className="font-mono">readarr</code>, or{' '}
                 <code className="font-mono">prowlarr</code>
               </p>
             </div>
@@ -414,6 +421,8 @@ export const UsersRbacTab: React.FC<UsersRbacTabProps> = ({
                 <option value="all">scope: all</option>
                 <option value="sonarr">scope: sonarr</option>
                 <option value="radarr">scope: radarr</option>
+                <option value="lidarr">scope: lidarr</option>
+                <option value="readarr">scope: readarr</option>
                 <option value="prowlarr">scope: prowlarr</option>
               </select>
             </div>

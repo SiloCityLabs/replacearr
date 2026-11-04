@@ -41,7 +41,8 @@ Replacearr is a single-binary Go replacement for Sonarr, Radarr, and Prowlarr. O
 - New permissions go in `internal/domain` and the built-in role seed, then the UI permission list.
 - Compat routes must stay compatible with upstream Sonarr/Radarr/Prowlarr JSON. Read `docs/discovery/01`–`03` and the matching upstream controller on GitHub before changing a response, then update the discovery note.
 - Keep search in-process. Do not add HTTP sync from a Prowlarr module into Sonarr or Radarr modules.
-- Auth stays JWT (`Authorization: Bearer`, `replacearr_token` cookie) plus `*arr` keys (`X-Api-Key`, `?apikey=`). Key scopes are `all`, `sonarr`, `radarr`, or `prowlarr`.
+- Auth stays JWT (`Authorization: Bearer`, `replacearr_token` cookie) plus `*arr` keys (`X-Api-Key`, `?apikey=`). Key scopes are `all`, `sonarr`, `radarr`, `lidarr`, `readarr`, or `prowlarr`.
+- Music (MusicBrainz) and Books/ebook+audiobook (OpenLibrary) are native modules (`docs/discovery/05` / `06`). Thin `/lidarr` and `/readarr` mounts are for migration only.
 
 ## Still open from the architecture plan
 

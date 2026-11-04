@@ -3,6 +3,8 @@ import {
   LayoutDashboard,
   Tv,
   Film,
+  Music,
+  BookOpen,
   Radio,
   DownloadCloud,
   Puzzle,
@@ -18,9 +20,13 @@ import {
 } from 'lucide-react';
 import type {
   APIKey,
+  Artist,
+  Author,
+  Book,
   CardigannDefinition,
   DiscoveredPlugin,
   DownloadClient,
+  Edition,
   Indexer,
   Movie,
   NavTab,
@@ -41,6 +47,8 @@ import { LoginView } from './components/LoginView';
 import { DashboardTab } from './components/DashboardTab';
 import { SeriesTab } from './components/SeriesTab';
 import { MoviesTab } from './components/MoviesTab';
+import { MusicTab } from './components/MusicTab';
+import { BooksTab } from './components/BooksTab';
 import { IndexersSearchTab } from './components/IndexersSearchTab';
 import { InteractiveSearchModal } from './components/InteractiveSearchModal';
 import { SetupWizard } from './components/SetupWizard';
@@ -62,6 +70,10 @@ export const App: React.FC = () => {
   const [overview, setOverview] = useState<OverviewResponse | null>(null);
   const [series, setSeries] = useState<Series[]>([]);
   const [movies, setMovies] = useState<Movie[]>([]);
+  const [artists, setArtists] = useState<Artist[]>([]);
+  const [authors, setAuthors] = useState<Author[]>([]);
+  const [books, setBooks] = useState<Book[]>([]);
+  const [editions, setEditions] = useState<Edition[]>([]);
   const [indexers, setIndexers] = useState<Indexer[]>([]);
   const [definitions, setDefinitions] = useState<CardigannDefinition[]>([]);
   const [queue, setQueue] = useState<QueueItem[]>([]);
@@ -111,6 +123,10 @@ export const App: React.FC = () => {
         ov,
         sr,
         mv,
+        ar,
+        au,
+        bk,
+        ed,
         idx,
         defs,
         q,
@@ -127,6 +143,10 @@ export const App: React.FC = () => {
         api.getOverview().catch(() => null),
         api.getSeries().catch(() => []),
         api.getMovies().catch(() => []),
+        api.getArtists().catch(() => []),
+        api.getAuthors().catch(() => []),
+        api.getBooks().catch(() => []),
+        api.getEditions().catch(() => []),
         api.getIndexers().catch(() => []),
         api.getCardigannDefinitions().catch(() => []),
         api.getQueue().catch(() => []),
@@ -144,6 +164,10 @@ export const App: React.FC = () => {
       if (ov) setOverview(ov);
       setSeries(sr);
       setMovies(mv);
+      setArtists(ar);
+      setAuthors(au);
+      setBooks(bk);
+      setEditions(ed);
       setIndexers(idx);
       setDefinitions(defs);
       setQueue(q);
@@ -223,7 +247,7 @@ export const App: React.FC = () => {
     setInteractiveSearch(req);
   };
 
-  const handleOpenAddLibrary = (tab: 'series' | 'movies') => {
+  const handleOpenAddLibrary = (tab: 'series' | 'movies' | 'music' | 'books') => {
     setPendingOpenAdd(true);
     setAddPanelNonce((n) => n + 1);
     setActiveTab(tab);
@@ -265,6 +289,20 @@ export const App: React.FC = () => {
       badge: movies.length,
       accent: 'text-emerald-400',
       icon: Film,
+    },
+    {
+      id: 'music',
+      label: 'Music',
+      badge: artists.length,
+      accent: 'text-fuchsia-400',
+      icon: Music,
+    },
+    {
+      id: 'books',
+      label: 'Books',
+      badge: books.length,
+      accent: 'text-amber-300',
+      icon: BookOpen,
     },
     {
       id: 'indexers',
@@ -595,6 +633,8 @@ export const App: React.FC = () => {
               onNavigate={setActiveTab}
               onAddSeries={() => handleOpenAddLibrary('series')}
               onAddMovie={() => handleOpenAddLibrary('movies')}
+              onAddArtist={() => handleOpenAddLibrary('music')}
+              onAddBook={() => handleOpenAddLibrary('books')}
               appUi={appConfig?.ui}
             />
           )}
@@ -623,6 +663,36 @@ export const App: React.FC = () => {
               onSearchReleases={handleInteractiveSearch}
               onNotify={notify}
               openAddPanel={pendingOpenAdd && activeTab === 'movies'}
+              openAddNonce={addPanelNonce}
+              onAddPanelOpened={() => setPendingOpenAdd(false)}
+            />
+          )}
+
+          {activeTab === 'music' && (
+            <MusicTab
+              artists={artists}
+              profiles={profiles}
+              rootFolders={rootFolders}
+              onRefresh={loadAllData}
+              onSearchReleases={handleInteractiveSearch}
+              onNotify={notify}
+              openAddPanel={pendingOpenAdd && activeTab === 'music'}
+              openAddNonce={addPanelNonce}
+              onAddPanelOpened={() => setPendingOpenAdd(false)}
+            />
+          )}
+
+          {activeTab === 'books' && (
+            <BooksTab
+              authors={authors}
+              books={books}
+              editions={editions}
+              profiles={profiles}
+              rootFolders={rootFolders}
+              onRefresh={loadAllData}
+              onSearchReleases={handleInteractiveSearch}
+              onNotify={notify}
+              openAddPanel={pendingOpenAdd && activeTab === 'books'}
               openAddNonce={addPanelNonce}
               onAddPanelOpened={() => setPendingOpenAdd(false)}
             />

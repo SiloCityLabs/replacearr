@@ -78,8 +78,11 @@ func TestCompatBuiltinPluginsAndGate(t *testing.T) {
 			found++
 		}
 	}
-	if found != 3 {
-		t.Fatalf("expected 3 compat plugins in ListPlugins, got %d", found)
+	if found != 5 {
+		t.Fatalf("expected 5 compat plugins in ListPlugins, got %d", found)
+	}
+	if !mgr.IsEnabled(pluginsdk.CompatPluginLidarr) || !mgr.IsEnabled(pluginsdk.CompatPluginReadarr) {
+		t.Fatal("expected lidarr and readarr compat enabled by default")
 	}
 }
 

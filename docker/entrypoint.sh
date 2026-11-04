@@ -38,7 +38,7 @@ if ! getent passwd replacearr >/dev/null 2>&1; then
 fi
 
 # Ensure runtime directories exist
-mkdir -p "${CONFIG_DIR}" "${PLUGIN_DIR}" "${DEFINITIONS_DIR}" /data/TV /data/Movies /data/downloads 2>/dev/null || true
+mkdir -p "${CONFIG_DIR}" "${PLUGIN_DIR}" "${DEFINITIONS_DIR}" /data/TV /data/Movies /data/Music /data/Books /data/Audiobooks /data/downloads 2>/dev/null || true
 
 # Seed any image-bundled plugins into /config/plugins (none by default; examples stay in-repo).
 if [ -d "${BUNDLED_PLUGINS}" ]; then

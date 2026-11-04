@@ -118,58 +118,89 @@ func (s *Server) activeFlareSolverrHost() string {
 }
 
 func (s *Server) SearchReleases(query string, mediaType string, tvdbID int, tmdbID int, season int, episode int) ([]domain.ReleaseResult, error) {
+	return s.SearchReleasesEx(query, mediaType, tvdbID, tmdbID, season, episode, "", "")
+}
+
+// SearchReleasesEx extends SearchReleases with optional artist/album or author/title hints for music/books.
+func (s *Server) SearchReleasesEx(query string, mediaType string, tvdbID int, tmdbID int, season int, episode int, artist, albumOrAuthor string) ([]domain.ReleaseResult, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 
 	now := time.Now().UTC()
 	baseTitle := strings.TrimSpace(query)
-	var aliases []domain.SeriesAlias
-	var eps []domain.Episode
-	var series domain.Series
-	if tvdbID > 0 {
-		if all, err := s.store.ListSeries(); err == nil {
-			for _, sr := range all {
-				if sr.TvdbID != tvdbID {
-					continue
+	mediaType = strings.ToLower(strings.TrimSpace(mediaType))
+	if mediaType == "" || mediaType == "search" {
+		mediaType = "tv"
+	}
+
+	type queryVariant struct {
+		Query   string
+		Season  int
+		Episode int
+		Mode    string
+	}
+	var variants []queryVariant
+
+	switch mediaType {
+	case "music":
+		for _, q := range domain.BuildMusicSearchQueries(artist, albumOrAuthor, baseTitle) {
+			variants = append(variants, queryVariant{Query: q, Mode: "music"})
+		}
+	case "ebook", "audiobook", "book":
+		author := albumOrAuthor
+		title := baseTitle
+		if title == "" {
+			title = artist // allow artist field reuse as title when only one string passed
+		}
+		for _, q := range domain.BuildBookSearchQueries(author, title) {
+			mode := "book"
+			if mediaType == "audiobook" {
+				mode = "book"
+			}
+			variants = append(variants, queryVariant{Query: q, Mode: mode})
+		}
+	default:
+		var aliases []domain.SeriesAlias
+		var eps []domain.Episode
+		var series domain.Series
+		if tvdbID > 0 {
+			if all, err := s.store.ListSeries(); err == nil {
+				for _, sr := range all {
+					if sr.TvdbID != tvdbID {
+						continue
+					}
+					series = sr
+					if baseTitle == "" {
+						baseTitle = sr.Title
+					}
+					if listed, aErr := s.store.ListSeriesAliases(sr.ID); aErr == nil {
+						aliases = listed
+					}
+					if listedEps, eErr := s.store.ListEpisodes(sr.ID); eErr == nil {
+						eps = listedEps
+					}
+					break
 				}
-				series = sr
-				if baseTitle == "" {
-					baseTitle = sr.Title
-				}
-				if listed, aErr := s.store.ListSeriesAliases(sr.ID); aErr == nil {
-					aliases = listed
-				}
-				if listedEps, eErr := s.store.ListEpisodes(sr.ID); eErr == nil {
-					eps = listedEps
-				}
-				break
 			}
 		}
+		if baseTitle == "" {
+			baseTitle = strings.TrimSpace(query)
+		}
+		preferPack := false
+		if season > 0 {
+			preferPack = domain.PreferSeasonPackQuery(series, eps, season, now)
+		}
+		for _, v := range domain.BuildTVSearchVariants(baseTitle, aliases, eps, season, episode, preferPack, now) {
+			variants = append(variants, queryVariant{Query: v.Query, Season: v.Season, Episode: v.Episode, Mode: mediaType})
+		}
 	}
-	if baseTitle == "" {
-		baseTitle = strings.TrimSpace(query)
-	}
-
-	preferPack := false
-	if season > 0 {
-		preferPack = domain.PreferSeasonPackQuery(series, eps, season, now)
-	}
-
-	variants := domain.BuildTVSearchVariants(baseTitle, aliases, eps, season, episode, preferPack, now)
 	if len(variants) == 0 {
-		variants = []domain.TVSearchVariant{{Query: baseTitle, Season: season, Episode: episode}}
+		variants = []queryVariant{{Query: baseTitle, Season: season, Episode: episode, Mode: mediaType}}
 	}
 
 	proxyURL := ""
 	if s.pluginMgr != nil {
 		proxyURL = s.pluginMgr.ActiveProxyURL()
-	}
-
-	aliasTitles := make([]string, 0, len(aliases))
-	for _, a := range aliases {
-		if a.Title != "" {
-			aliasTitles = append(aliasTitles, a.Title)
-		}
 	}
 
 	results := []domain.ReleaseResult{}
@@ -198,12 +229,11 @@ func (s *Server) SearchReleases(query string, mediaType string, tvdbID int, tmdb
 		}
 		req := pluginsdk.SearchRequest{
 			Query:           v.Query,
-			Type:            mediaType,
+			Type:            v.Mode,
 			TvdbID:          tvdbID,
 			TmdbID:          tmdbID,
 			Season:          v.Season,
 			Episode:         v.Episode,
-			Aliases:         aliasTitles,
 			Limit:           50,
 			FlareSolverrURL: s.activeFlareSolverrHost(),
 			ProxyURL:        proxyURL,
@@ -216,7 +246,7 @@ func (s *Server) SearchReleases(query string, mediaType string, tvdbID int, tmdb
 				addResults(pluginResults)
 			}
 		}
-		cardigannResults, cardigannErrs := s.searchCardigannIndexers(ctx, v.Query, v.Season, v.Episode, proxyURL)
+		cardigannResults, cardigannErrs := s.searchCardigannIndexers(ctx, v.Query, v.Season, v.Episode, proxyURL, v.Mode)
 		addResults(cardigannResults)
 		searchErrs = append(searchErrs, cardigannErrs...)
 	}
@@ -227,7 +257,7 @@ func (s *Server) SearchReleases(query string, mediaType string, tvdbID int, tmdb
 	return results, nil
 }
 
-func (s *Server) searchCardigannIndexers(ctx context.Context, query string, season, episode int, proxyURL string) ([]domain.ReleaseResult, []string) {
+func (s *Server) searchCardigannIndexers(ctx context.Context, query string, season, episode int, proxyURL, searchMode string) ([]domain.ReleaseResult, []string) {
 	indexers, err := s.store.ListIndexers()
 	if err != nil {
 		return nil, []string{err.Error()}
@@ -285,6 +315,7 @@ func (s *Server) searchCardigannIndexers(ctx context.Context, query string, seas
 			Query:          query,
 			Season:         season,
 			Episode:        episode,
+			SearchMode:     searchMode,
 			Categories:     idx.Categories,
 			HTTPClient:     client,
 			ProxyURL:       proxyURL,
@@ -328,6 +359,8 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/movies", s.authSvc.RequirePermission(domain.PermMoviesWrite, s.handleCreateMovie))
 	mux.HandleFunc("DELETE /api/v1/movies/{id}", s.authSvc.RequirePermission(domain.PermMoviesDelete, s.handleDeleteMovie))
 	mux.HandleFunc("GET /api/v1/movies/lookup", s.authSvc.RequirePermission(domain.PermMoviesRead, s.handleLookupMovies))
+
+	s.registerMusicBooksRoutes(mux)
 
 	// Indexers & Search (Prowlarr)
 	mux.HandleFunc("GET /api/v1/indexers", s.authSvc.RequirePermission(domain.PermIndexersRead, s.handleListIndexers))
@@ -388,6 +421,11 @@ func (s *Server) handleOverview(w http.ResponseWriter, _ *http.Request) {
 	series, _ := s.store.ListSeries()
 	episodes, _ := s.store.ListEpisodes(0)
 	movies, _ := s.store.ListMovies()
+	artists, _ := s.store.ListArtists()
+	albums, _ := s.store.ListAlbums(0)
+	authors, _ := s.store.ListAuthors()
+	books, _ := s.store.ListBooks(0)
+	editions, _ := s.store.ListEditions(0, "")
 	indexers, _ := s.store.ListIndexers()
 	proxies, _ := s.store.ListIndexerProxies()
 	queue, _ := s.store.ListQueueItems("")
@@ -400,6 +438,12 @@ func (s *Server) handleOverview(w http.ResponseWriter, _ *http.Request) {
 			"series":               len(series),
 			"episodes":             len(episodes),
 			"movies":               len(movies),
+			"artists":              len(artists),
+			"albums":               len(albums),
+			"authors":              len(authors),
+			"books":                len(books),
+			"editions":             len(editions),
+			"history":              len(history),
 			"indexers":             len(indexers),
 			"indexerProxies":       len(proxies),
 			"activeDownloads":      len(queue),
@@ -414,6 +458,8 @@ func (s *Server) handleOverview(w http.ResponseWriter, _ *http.Request) {
 			"compatEndpoints": map[string]string{
 				"sonarr":       "/sonarr/api/v3",
 				"radarr":       "/radarr/api/v3",
+				"lidarr":       "/lidarr/api/v1",
+				"readarr":      "/readarr/api/v1",
 				"prowlarr":     "/prowlarr/api/v1",
 				"indexerProxy": "/prowlarr/api/v1/indexerproxy",
 				"torznab":      "/prowlarr/1/api?t=caps",
@@ -619,7 +665,70 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	if episode == 0 {
 		episode, _ = strconv.Atoi(r.URL.Query().Get("episode"))
 	}
-	results, err := s.SearchReleases(q, searchType, tvdbID, tmdbID, season, episode)
+	artist := r.URL.Query().Get("artist")
+	album := r.URL.Query().Get("album")
+	author := r.URL.Query().Get("author")
+	if author == "" {
+		author = album
+	}
+	// Resolve library IDs into query strings when provided.
+	if artistID, _ := strconv.ParseInt(r.URL.Query().Get("artistId"), 10, 64); artistID > 0 {
+		if a, err := s.store.GetArtistByID(artistID); err == nil && a != nil {
+			artist = a.Title
+			if q == "" {
+				q = a.Title
+			}
+		}
+	}
+	if albumID, _ := strconv.ParseInt(r.URL.Query().Get("albumId"), 10, 64); albumID > 0 {
+		if al, err := s.store.GetAlbumByID(albumID); err == nil && al != nil {
+			album = al.Title
+			if artist == "" {
+				if a, err := s.store.GetArtistByID(al.ArtistID); err == nil && a != nil {
+					artist = a.Title
+				}
+			}
+			q = strings.TrimSpace(artist + " " + album)
+			searchType = "music"
+		}
+	}
+	if authorID, _ := strconv.ParseInt(r.URL.Query().Get("authorId"), 10, 64); authorID > 0 {
+		if a, err := s.store.GetAuthorByID(authorID); err == nil && a != nil {
+			author = a.Title
+			if q == "" {
+				q = a.Title
+			}
+		}
+	}
+	if bookID, _ := strconv.ParseInt(r.URL.Query().Get("bookId"), 10, 64); bookID > 0 {
+		if b, err := s.store.GetBookByID(bookID); err == nil && b != nil {
+			q = b.Title
+			if author == "" {
+				if a, err := s.store.GetAuthorByID(b.AuthorID); err == nil && a != nil {
+					author = a.Title
+				}
+			}
+			if searchType == "" || searchType == "search" {
+				searchType = "book"
+			}
+		}
+	}
+	if editionID, _ := strconv.ParseInt(r.URL.Query().Get("editionId"), 10, 64); editionID > 0 {
+		if e, err := s.store.GetEditionByID(editionID); err == nil && e != nil {
+			q = e.Title
+			searchType = e.Format
+			if author == "" {
+				if a, err := s.store.GetAuthorByID(e.AuthorID); err == nil && a != nil {
+					author = a.Title
+				}
+			}
+		}
+	}
+	second := album
+	if searchType == "book" || searchType == "ebook" || searchType == "audiobook" {
+		second = author
+	}
+	results, err := s.SearchReleasesEx(q, searchType, tvdbID, tmdbID, season, episode, artist, second)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
@@ -639,6 +748,11 @@ func (s *Server) handleGrabRelease(w http.ResponseWriter, r *http.Request) {
 		MovieID      int64  `json:"movieId"`
 		EpisodeID    int64  `json:"episodeId"`
 		SeasonNumber int    `json:"seasonNumber"`
+		ArtistID     int64  `json:"artistId"`
+		AlbumID      int64  `json:"albumId"`
+		AuthorID     int64  `json:"authorId"`
+		BookID       int64  `json:"bookId"`
+		EditionID    int64  `json:"editionId"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, http.StatusBadRequest, err)
@@ -655,9 +769,24 @@ func (s *Server) handleGrabRelease(w http.ResponseWriter, r *http.Request) {
 		req.Protocol = "torrent"
 	}
 	if req.MediaType == "" {
-		if req.MovieID > 0 {
+		switch {
+		case req.EditionID > 0:
+			if e, err := s.store.GetEditionByID(req.EditionID); err == nil && e != nil {
+				req.MediaType = e.Format
+				if req.BookID == 0 {
+					req.BookID = e.BookID
+				}
+				if req.AuthorID == 0 {
+					req.AuthorID = e.AuthorID
+				}
+			}
+		case req.AlbumID > 0 || req.ArtistID > 0:
+			req.MediaType = "music"
+		case req.BookID > 0 || req.AuthorID > 0:
+			req.MediaType = "ebook"
+		case req.MovieID > 0:
 			req.MediaType = "movie"
-		} else {
+		default:
 			req.MediaType = "tv"
 		}
 	}
@@ -673,6 +802,11 @@ func (s *Server) handleGrabRelease(w http.ResponseWriter, r *http.Request) {
 		SeriesID:              req.SeriesID,
 		EpisodeID:             req.EpisodeID,
 		MovieID:               req.MovieID,
+		ArtistID:              req.ArtistID,
+		AlbumID:               req.AlbumID,
+		AuthorID:              req.AuthorID,
+		BookID:                req.BookID,
+		EditionID:             req.EditionID,
 		Title:                 req.Title,
 		Status:                "queued",
 		TrackedDownloadStatus: "ok",
@@ -696,6 +830,11 @@ func (s *Server) handleGrabRelease(w http.ResponseWriter, r *http.Request) {
 		SeriesID:    req.SeriesID,
 		EpisodeID:   req.EpisodeID,
 		MovieID:     req.MovieID,
+		ArtistID:    req.ArtistID,
+		AlbumID:     req.AlbumID,
+		AuthorID:    req.AuthorID,
+		BookID:      req.BookID,
+		EditionID:   req.EditionID,
 		SourceTitle: req.Title,
 		Quality:     map[string]any{"quality": map[string]any{"name": "Unknown"}},
 		EventType:   "grabbed",

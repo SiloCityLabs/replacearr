@@ -28,6 +28,7 @@ type SearchRequest struct {
 	Query          string
 	Season         int
 	Episode        int
+	SearchMode     string // search|tvsearch|movie|music|book (Cardigann Query.Type)
 	Categories     []int
 	HTTPClient     *http.Client // optional; when nil a default client is used
 	ProxyURL       string
@@ -113,8 +114,22 @@ func Search(ctx context.Context, req SearchRequest) ([]domain.ReleaseResult, err
 	}
 
 	provider := cengine.NewAuthenticatedProvider(def, baseURL, cfg, client)
+	mode := strings.ToLower(strings.TrimSpace(req.SearchMode))
+	switch mode {
+	case "tv", "tvsearch":
+		mode = "tvsearch"
+	case "movie", "movies":
+		mode = "movie"
+	case "music":
+		mode = "music"
+	case "book", "ebook", "audiobook":
+		mode = "book"
+	case "":
+		mode = "search"
+	}
 	q := cengine.Query{
 		Keywords:   strings.TrimSpace(req.Query),
+		Type:       mode,
 		Categories: req.Categories,
 	}
 	if req.Season > 0 {

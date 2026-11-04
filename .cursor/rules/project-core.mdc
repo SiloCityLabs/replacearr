@@ -36,4 +36,6 @@ make build            # embedded SPA + plugins + bin/replacearr
 
 Root `Dockerfile` + `docker-compose.yml` are local development. Production is `docker/Dockerfile` + `docker/docker-compose.prod.yml` + `docker/entrypoint.sh`.
 
-Agents: use `make start` for local UI/API checks so root folders match production (`/data/TV`, `/data/Movies`). After Go or plugin changes, restart the compose service — `go run` does not hot-reload. Frontend-only edits usually need no restart (Vite HMR).
+Agents: use `make start` for local UI/API checks so root folders match production (`/data/TV`, `/data/Movies`, `/data/Music`, `/data/Books`, `/data/Audiobooks`). After Go or plugin changes, restart the compose service — `go run` does not hot-reload. Frontend-only edits usually need no restart (Vite HMR).
+
+Music and Books are native modules (MusicBrainz / OpenLibrary). See `docs/discovery/05-music-module.md` and `06-books-module.md`. Thin `/lidarr` and `/readarr` mounts exist for migration only.
