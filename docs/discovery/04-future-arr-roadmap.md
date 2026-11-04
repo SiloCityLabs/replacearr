@@ -2,15 +2,15 @@
 
 ## 1. Executive Summary
 
-While Replacearr Phase 1 unified **Sonarr** (TV), **Radarr** (Movies), and **Prowlarr** (Indexers), **Music** and **Books** (ebook + audiobook) are now first-class native modules — see `05-music-module.md` and `06-books-module.md` (MusicBrainz / OpenLibrary; thin `/lidarr` and `/readarr` mounts only). Remaining specialized applications:
+While Replacearr Phase 1 unified **Sonarr** (TV), **Radarr** (Movies), and **Prowlarr** (Indexers), **Music** and **Books** (ebook + audiobook) are now first-class native modules — see `05-music-module.md` and `06-books-module.md` (MusicBrainz / OpenLibrary; thin `/lidarr` and `/readarr` mounts only). **Subtitles** are also native (in-house OpenSubtitles pipeline under Series/Movies + Settings — no Bazarr process or `/bazarr` API). Remaining specialized applications:
 1. ~~**Lidarr**~~ → native Music module (`05-music-module.md`)
 2. ~~**Readarr**~~ → native Books module (`06-books-module.md`)
-3. **Bazarr** (Subtitles: Subtitle Providers, Language Profiles, Embedded Track Extraction & Sync)
+3. ~~**Bazarr**~~ → native Subtitles (`internal/subtitles`, Settings → Subtitles; embedded in Movie/Series detail)
 4. **Whisparr** (Adult Video: Studios, Scenes, SceneFiles)
 
 As evidenced in `Prowlarr/src/NzbDrone.Core/Applications/` (`Lidarr/`, `Readarr/`, `Whisparr/`) and `Prowlarr/src/NzbDrone.Core/Indexers/NewznabStandardCategory.cs` (categories `3000 Audio`, `6000 XXX`, `7000 Books`), Replacearr's indexer, decision, and download client engine already speaks the Torznab/Newznab search modes (`music-search`, `book-search`, `tv-search`, `movie-search`) required by all of these applications.
 
-This document provides the architectural blueprint for adding **Lidarr**, **Readarr**, **Bazarr**, and **Whisparr** into Replacearr—either as native domain modules or via Replacearr's `MediaModulePlugin` interface in `pkg/pluginsdk`.
+This document provides the architectural blueprint for adding remaining *arr capabilities into Replacearr—either as native domain modules or via Replacearr's `MediaModulePlugin` interface in `pkg/pluginsdk`.
 
 ---
 
@@ -70,18 +70,18 @@ This document provides the architectural blueprint for adding **Lidarr**, **Read
 
 ---
 
-### 2.3 Bazarr (Subtitle Management & Sync — `/bazarr/api`)
-* **Architectural Role**: Unlike Lidarr/Readarr (which are forks of `NzbDrone.Core`), **Bazarr** is a Python companion daemon that polls Sonarr (`/api/v3/series`, `/api/v3/episode`, `/api/v3/episodefile`) and Radarr (`/api/v3/movie`, `/api/v3/moviefile`) to discover video files on disk, inspect their embedded audio/subtitle streams, and download missing `.srt`/`.ass` subtitles from external subtitle providers.
-* **Why Native Integration in Replacearr is Transformative**:
-  * In a traditional stack, Bazarr must poll Sonarr and Radarr over HTTP or wait for SignalR events to learn when an `EpisodeFile` or `MovieFile` is imported.
-  * Inside Replacearr, the Subtitle Module subscribes directly to the internal `EpisodeImported` and `MovieImported` domain events! The moment `CompletedDownloadService` imports a file into `/data/TV` or `/data/Movies`, Replacearr's subtitle pipeline already knows the exact `path`, `sceneName`, `releaseGroup`, `imdbId`, `tvdbId`, `tmdbId`, and `mediaInfo` audio/subtitle tracks.
-* **Core Subsystems Required**:
-  1. **Language Profiles (`subtitle_profiles`)**: Target subtitle languages (`en`, `es`, `fr`, etc.), `forced` vs. `normal` vs. `hi` (Hearing Impaired) preferences, and minimum match score thresholds.
-  2. **Embedded Track Extraction & Inspection**: `ffprobe` / MKV header parser (`matroska`) to detect existing embedded text (`subrip`, `ass`, `webvtt`) and bitmap (`hdmv_pgs_subtitle`, `dvd_subtitle`) tracks, optionally extracting embedded subtitles to sidecar `.srt` files.
-  3. **Subtitle Provider Plugin Interface (`SubtitleProviderPlugin`)**:
-     * Providers: OpenSubtitles.com (REST API + file hash matching), Subdl, Podnapisi, Addic7ed, Gestdown, AnimeTosho, Whisper/AI transcription.
-     * Scoring matches by video file hash, `sceneName` (`Series` + `Season` + `Episode` + `ReleaseGroup` + `Source` + `Resolution` + `VideoCodec`).
-  4. **Audio-to-Subtitle Synchronization**: Optional `ffsubsync` / `alass` integration to align subtitle timestamps to the video's audio stream.
+### 2.3 Native Subtitles (replaces Bazarr — no `/bazarr` API)
+* **Product decision**: Fully **in-house**. There is no external Bazarr process, no `/bazarr` mount, and no work aimed at keeping a separate Bazarr container happy. OpenSubtitles.com is an upstream **catalog** (credentials in Settings), not a companion app.
+* **UX**: Subtitles attach to existing video — shown on **Movie** and **Series** detail (per downloaded episode). Global languages / OpenSubtitles API key live under **Settings → Subtitles**. No top-level Subtitles/Bazarr nav tab.
+* **Data**:
+  * `episode_files` / `movie_files` — absolute `path`, `size`, `scene_name`, `release_group` (required for OSHash matching), linked via `episode_file_id` / `movie_file_id`.
+  * `subtitle_profiles` — seeded Default profile; languages also mirrored in `AppConfig.subtitles`.
+  * `subtitle_tracks` — downloaded / discovered sidecar rows.
+* **Pipeline** (`internal/subtitles`):
+  1. On CDH import, download monitor upserts the media file row and calls `OnMovieImported` / `OnEpisodeImported`.
+  2. OSHash + OpenSubtitles REST (`/subtitles`, `POST /download`) → write `{videoBase}.{lang}.srt` beside the video.
+  3. Native API: `GET/POST /api/v1/movies/{id}/subtitles…`, `…/episodes/{id}/subtitles…`.
+* **Later (not required for v1)**: additional providers (Subdl, Addic7ed, …), ffprobe embedded-track inspection, ffsubsync/alass. Optional `SubtitleProviderPlugin` only when a second provider lands.
 
 ---
 
@@ -113,7 +113,7 @@ import (
 
 // PluginMetadata identifies any Replacearr plugin.
 type PluginMetadata struct {
-	ID          string `json:"id"`          // e.g., "lidarr-music", "bazarr-subtitles"
+	ID          string `json:"id"`          // e.g., "lidarr-music", "opensubtitles-extra"
 	Name        string `json:"name"`        // e.g., "Lidarr Music Module"
 	Version     string `json:"version"`     // e.g., "1.0.0"
 	Author      string `json:"author"`
@@ -146,7 +146,7 @@ type CompletedDownloadEvent struct {
 	Size           int64
 }
 
-// MediaModulePlugin allows a new *arr domain (e.g., Lidarr, Readarr, Whisparr, Bazarr)
+// MediaModulePlugin allows a new *arr domain (e.g., Lidarr, Readarr, Whisparr)
 // to plug into Replacearr's shared SQLite database, Torznab search engine, and download queue.
 type MediaModulePlugin interface {
 	Metadata() PluginMetadata
@@ -176,12 +176,12 @@ type MediaModulePlugin interface {
 ### 3.2 Pathway B: Native Domain Module Integration Checklist
 When promoting a module into Replacearr's built-in core (`internal/`), follow this 5-step pattern:
 1. **RBAC Permissions (`internal/domain/models.go`)**:
-   Add module permission constants (e.g., `PermMusicRead = "music:read"`, `PermMusicWrite = "music:write"`, `PermBooksRead = "books:read"`, `PermSubtitlesRead = "subtitles:read"`) and include them in the built-in `admin`, `manager`, and `integration` roles in `internal/db/sqlite.go`.
-2. **SQLite Migration (`internal/db/migrations/002_<module>.sql`)**:
-   Create the domain tables (e.g., `artists`, `albums`, `tracks`, `track_files` for Lidarr; `authors`, `books`, `book_files` for Readarr; `subtitle_tracks` for Bazarr). No changes are needed for `tags`, `root_folders`, `quality_profiles`, `indexers`, `download_clients`, `queue_items`, or `history_records`, as those tables already use a `media_type` discriminator (`'tv'`, `'movie'`, `'music'`, `'book'`, `'adult'`).
+   Add module permission constants (e.g., `PermMusicRead = "music:read"`, `PermMusicWrite = "music:write"`, `PermBooksRead = "books:read"`) and include them in the built-in `admin`, `manager`, and `integration` roles in `internal/db/sqlite.go`. Subtitles reuse `tv:*` / `movies:*` (no separate Bazarr section).
+2. **SQLite Migration (`internal/db/migrations/00N_<module>.sql`)**:
+   Create the domain tables (e.g., `artists`, `albums`, `tracks`, `track_files` for Lidarr; `authors`, `books`, `book_files` for Readarr). Subtitle tables (`episode_files`, `movie_files`, `subtitle_profiles`, `subtitle_tracks`) are already native in `007_media_files_subtitles.sql`. No changes are needed for `tags`, `root_folders`, `quality_profiles`, `indexers`, `download_clients`, `queue_items`, or `history_records`, as those tables already use a `media_type` discriminator (`'tv'`, `'movie'`, `'music'`, `'book'`, `'adult'`).
 3. **Torznab Query Builder**:
    Dispatch searches using the existing `NewznabRequest` parameters (`t=music` with `artist`/`album` or `t=book` with `author`/`title`) against Replacearr's in-memory Cardigann and Plugin indexers.
 4. **Compatibility Router**:
-   Mount the compatibility handler group at `/<app>/api/v1` (or `/<app>/api/v3` for Whisparr), reusing the shared middleware for `X-Api-Key` / `?apikey=` authentication and shared handlers for `/system/status`, `/qualityprofile`, `/rootfolder`, `/tag`, `/downloadclient`, `/indexer`, `/queue`, and `/history`.
+   Mount the compatibility handler group at `/<app>/api/v1` (or `/<app>/api/v3` for Whisparr), reusing the shared middleware for `X-Api-Key` / `?apikey=` authentication and shared handlers for `/system/status`, `/qualityprofile`, `/rootfolder`, `/tag`, `/downloadclient`, `/indexer`, `/queue`, and `/history`. Native subtitles have no `/bazarr` compat mount.
 5. **Prowlarr Virtual Application Registration**:
-   Expose the module in `GET /prowlarr/api/v1/applications` as a built-in `fullSync` application so users and dashboards see unified indexer coverage across TV, Movies, Music, Books, and Subtitles.
+   Expose the module in `GET /prowlarr/api/v1/applications` as a built-in `fullSync` application so users and dashboards see unified indexer coverage across TV, Movies, Music, and Books.

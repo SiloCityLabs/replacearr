@@ -17,7 +17,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -78,13 +77,8 @@ func NewManager(store *db.Store, pluginDir string, definitionsDir string) *Manag
 	// Seed compat plugin_configs from legacy AppConfig.compatModules before register.
 	m.migrateCompatModulesFromAppConfig()
 
-	// Register default built-in Go plugins so Replacearr works immediately out of the box.
-	m.registerBuiltin(&builtinTorznabIndexerPlugin{})
-	m.registerBuiltin(&builtinFlareSolverrPlugin{})
-	m.registerBuiltin(&builtinMetadataPlugin{svc: metaSvc})
-	m.registerBuiltin(&builtinDownloadClientPlugin{})
-	m.registerBuiltin(&builtinHTTPProxyPlugin{})
-	m.registerBuiltin(&builtinOpenVPNProxyPlugin{})
+	// Built-ins kept in-process: browser notifications + *arr compat Gate mounts.
+	// Optional proxies/notifiers/indexers install from the marketplace catalog.
 	m.registerBuiltin(newBuiltinBrowserNotifications(m.browserHub))
 	m.registerBuiltin(&builtinCompatSonarrPlugin{})
 	m.registerBuiltin(&builtinCompatRadarrPlugin{})
@@ -492,7 +486,20 @@ func defaultPluginEnabled(manifest pluginsdk.Manifest) bool {
 	return !manifest.DisabledByDefault
 }
 
+// RegisterBuiltinForTest registers an in-process plugin. Intended for unit tests.
+func (m *Manager) RegisterBuiltinForTest(p pluginsdk.Plugin) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.registerBuiltinLocked(p)
+}
+
 func (m *Manager) registerBuiltin(p pluginsdk.Plugin) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.registerBuiltinLocked(p)
+}
+
+func (m *Manager) registerBuiltinLocked(p pluginsdk.Plugin) {
 	manifest := p.Manifest()
 	settings := defaultSettingsFromSchema(manifest.ConfigSchema)
 	enabled := defaultPluginEnabled(manifest)
@@ -600,6 +607,32 @@ func (m *Manager) DiscoverAndStart() error {
 		binPaths = append(binPaths, fullPath)
 	}
 	sort.Strings(binPaths)
+
+	// Drop external entries whose binaries disappeared (e.g. marketplace uninstall).
+	seenBins := make(map[string]struct{}, len(binPaths))
+	for _, p := range binPaths {
+		seenBins[p] = struct{}{}
+	}
+	var keepOrder []string
+	for _, id := range m.order {
+		entry, ok := m.entries[id]
+		if !ok {
+			continue
+		}
+		if entry.builtin != nil {
+			keepOrder = append(keepOrder, id)
+			continue
+		}
+		if _, stillThere := seenBins[entry.info.BinaryPath]; stillThere {
+			keepOrder = append(keepOrder, id)
+			continue
+		}
+		if entry.proc != nil {
+			entry.proc.stop()
+		}
+		delete(m.entries, id)
+	}
+	m.order = keepOrder
 
 	for _, binPath := range binPaths {
 		proc := newPluginProcess(binPath)
@@ -714,6 +747,47 @@ func (m *Manager) ListPlugins() []DiscoveredPlugin {
 		}
 	}
 	return out
+}
+
+// RemoveExternalPlugin stops an external plugin subprocess, removes it from the
+// manager, and deletes its plugin_configs row. Built-ins cannot be removed.
+func (m *Manager) RemoveExternalPlugin(pluginID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	entry, ok := m.entries[pluginID]
+	if !ok {
+		return nil
+	}
+	if entry.builtin != nil {
+		return fmt.Errorf("cannot uninstall built-in plugin %q", pluginID)
+	}
+	if entry.proc != nil {
+		entry.proc.stop()
+	}
+	delete(m.entries, pluginID)
+	filtered := m.order[:0]
+	for _, id := range m.order {
+		if id != pluginID {
+			filtered = append(filtered, id)
+		}
+	}
+	m.order = filtered
+	if m.store != nil {
+		_ = m.store.DeletePluginConfig(pluginID)
+	}
+	return nil
+}
+
+// PluginSettings returns whether pluginID is known, its enabled flag, and a copy of settings.
+func (m *Manager) PluginSettings(pluginID string) (enabled bool, settings map[string]any, ok bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	entry, found := m.entries[pluginID]
+	if !found {
+		return false, nil, false
+	}
+	return entry.info.Enabled, cloneSettings(entry.info.Settings), true
 }
 
 // ConfigurePlugin updates a plugin's enabled state and settings, persists them to SQLite,
@@ -1083,341 +1157,6 @@ func (p *pluginProcess) callOnceLocked(ctx context.Context, method string, param
 		}
 		return nil
 	}
-}
-
-// --- Built-in In-Process Plugins ---
-
-type builtinTorznabIndexerPlugin struct {
-	mu       sync.RWMutex
-	settings map[string]any
-}
-
-func (b *builtinTorznabIndexerPlugin) Manifest() pluginsdk.Manifest {
-	return pluginsdk.Manifest{
-		ID:          "builtin-torznab-cardigann",
-		Name:        "Replacearr Built-in Torznab & Cardigann Engine",
-		Version:     "1.0.0",
-		Author:      "Replacearr Core",
-		Description: "Built-in multi-tracker Torznab, Newznab, and Cardigann YAML search engine.",
-		Types:       []pluginsdk.PluginType{pluginsdk.PluginTypeIndexer},
-		ConfigSchema: []pluginsdk.ConfigFieldSchema{
-			{
-				Name:     "default_protocol",
-				Label:    "Default Protocol",
-				Type:     "select",
-				Default:  "torrent",
-				Required: false,
-				HelpText: "Preferred release protocol (torrent or usenet).",
-			},
-		},
-	}
-}
-
-func (b *builtinTorznabIndexerPlugin) Configure(settings map[string]any) error {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.settings = settings
-	return nil
-}
-
-func (b *builtinTorznabIndexerPlugin) Search(_ context.Context, _ pluginsdk.SearchRequest) ([]pluginsdk.Release, error) {
-	// Cardigann/Torznab execution is not implemented yet — do not invent releases.
-	return []pluginsdk.Release{}, nil
-}
-
-type builtinMetadataPlugin struct {
-	svc      *metadata.Service
-	language string
-}
-
-func (b *builtinMetadataPlugin) Manifest() pluginsdk.Manifest {
-	return pluginsdk.Manifest{
-		ID:          "builtin-media-metadata",
-		Name:        "Replacearr Unified Metadata Agent (TVDB & TMDB)",
-		Version:     "1.0.0",
-		Author:      "Replacearr Core",
-		Description: "Looks up TV series via SkyHook (TVDB) and movies via api.radarr.video (TMDB/IMDb).",
-		Types:       []pluginsdk.PluginType{pluginsdk.PluginTypeMetadata},
-		ConfigSchema: []pluginsdk.ConfigFieldSchema{
-			{
-				Name:     "language",
-				Label:    "Metadata Language",
-				Type:     "text",
-				Default:  "en-US",
-				Required: false,
-			},
-		},
-	}
-}
-
-func (b *builtinMetadataPlugin) Configure(settings map[string]any) error {
-	if settings == nil {
-		return nil
-	}
-	if lang, ok := settings["language"].(string); ok && strings.TrimSpace(lang) != "" {
-		b.language = lang
-	}
-	return nil
-}
-
-func (b *builtinMetadataPlugin) LookupMedia(ctx context.Context, mediaType, query string) ([]map[string]any, error) {
-	query = strings.TrimSpace(query)
-	if query == "" || b.svc == nil {
-		return []map[string]any{}, nil
-	}
-	lang := b.language
-	if lang == "" {
-		lang = "en-US"
-	}
-	switch strings.ToLower(strings.TrimSpace(mediaType)) {
-	case "series", "tv", "tvsearch":
-		items, err := b.svc.SearchSeries(ctx, query, lang)
-		if err != nil {
-			return nil, err
-		}
-		return structsToMaps(items), nil
-	case "movie", "movies":
-		items, err := b.svc.SearchMovies(ctx, query)
-		if err != nil {
-			return nil, err
-		}
-		return structsToMaps(items), nil
-	default:
-		// Try series first, then movies, for untyped plugin calls.
-		series, err := b.svc.SearchSeries(ctx, query, lang)
-		if err != nil {
-			return nil, err
-		}
-		if len(series) > 0 {
-			return structsToMaps(series), nil
-		}
-		movies, err := b.svc.SearchMovies(ctx, query)
-		if err != nil {
-			return nil, err
-		}
-		return structsToMaps(movies), nil
-	}
-}
-
-func structsToMaps[T any](items []T) []map[string]any {
-	out := make([]map[string]any, 0, len(items))
-	for _, item := range items {
-		raw, err := json.Marshal(item)
-		if err != nil {
-			continue
-		}
-		var m map[string]any
-		if err := json.Unmarshal(raw, &m); err != nil {
-			continue
-		}
-		out = append(out, m)
-	}
-	return out
-}
-
-type builtinDownloadClientPlugin struct{}
-
-func (b *builtinDownloadClientPlugin) Manifest() pluginsdk.Manifest {
-	return pluginsdk.Manifest{
-		ID:          "builtin-download-bridge",
-		Name:        "Replacearr Download Client Bridge (qBittorrent / SABnzbd)",
-		Version:     "1.0.0",
-		Author:      "Replacearr Core",
-		Description: "Placeholder until real qBittorrent/SABnzbd clients are implemented. Does not accept downloads.",
-		Types:       []pluginsdk.PluginType{pluginsdk.PluginTypeDownloadClient},
-		ConfigSchema: []pluginsdk.ConfigFieldSchema{
-			{
-				Name:     "category",
-				Label:    "Default Category",
-				Type:     "text",
-				Default:  "replacearr",
-				Required: false,
-			},
-		},
-	}
-}
-
-func (b *builtinDownloadClientPlugin) Configure(_ map[string]any) error {
-	return nil
-}
-
-func (b *builtinDownloadClientPlugin) EnqueueDownload(_ context.Context, _, _, _ string) (string, error) {
-	return "", errors.New("builtin download bridge cannot send torrents; configure an enabled download client with a working integration")
-}
-
-type builtinFlareSolverrPlugin struct {
-	mu       sync.RWMutex
-	settings map[string]any
-}
-
-func (b *builtinFlareSolverrPlugin) Manifest() pluginsdk.Manifest {
-	return pluginsdk.Manifest{
-		ID:          "builtin-flaresolverr-proxy",
-		Name:        "FlareSolverr Cloudflare & DDoS-Guard Bypass",
-		Version:     "3.3.21",
-		Author:      "Replacearr Core",
-		Description: "Bypasses Cloudflare IUAM, Turnstile, and DDoS-Guard challenges for Cardigann & Torznab indexers via FlareSolverr v1 API and caches cf_clearance cookies.",
-		Types:       []pluginsdk.PluginType{pluginsdk.PluginTypeIndexer},
-		ConfigSchema: []pluginsdk.ConfigFieldSchema{
-			{
-				Name:     "host",
-				Label:    "FlareSolverr Host URL",
-				Type:     "text",
-				Default:  "http://localhost:8191/",
-				Required: true,
-				HelpText: "Base URL of your FlareSolverr service (e.g. http://flaresolverr:8191/).",
-			},
-			{
-				Name:     "request_timeout",
-				Label:    "Max Challenge Timeout (seconds)",
-				Type:     "number",
-				Default:  60,
-				Required: true,
-				HelpText: "Maximum time in seconds for headless Chrome to solve a Cloudflare challenge (1-180).",
-			},
-			{
-				Name:     "session_ttl_minutes",
-				Label:    "Browser Session TTL (minutes)",
-				Type:     "number",
-				Default:  15,
-				Required: false,
-				HelpText: "Reuse FlareSolverr browser sessions and rotate after TTL minutes.",
-			},
-		},
-	}
-}
-
-func (b *builtinFlareSolverrPlugin) Configure(settings map[string]any) error {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.settings = settings
-	return nil
-}
-
-func (b *builtinFlareSolverrPlugin) Search(_ context.Context, _ pluginsdk.SearchRequest) ([]pluginsdk.Release, error) {
-	// Acts as proxy middleware for protected trackers rather than a standalone release feed.
-	return nil, nil
-}
-
-type builtinHTTPProxyPlugin struct {
-	mu       sync.RWMutex
-	settings map[string]any
-}
-
-func (b *builtinHTTPProxyPlugin) Manifest() pluginsdk.Manifest {
-	return pluginsdk.Manifest{
-		ID:          "builtin-http-proxy",
-		Name:        "HTTP / HTTPS / SOCKS Proxy",
-		Version:     "1.0.0",
-		Author:      "Replacearr Core",
-		Description: "Routes outbound indexer and metadata HTTP through a standard proxy.",
-		Types:       []pluginsdk.PluginType{pluginsdk.PluginTypeNetworkProxy},
-		ConfigSchema: []pluginsdk.ConfigFieldSchema{
-			{Name: "enabled", Label: "Enabled", Type: "checkbox", Default: false, Required: false},
-			{Name: "type", Label: "Proxy Type", Type: "select", Default: "http", Required: false, HelpText: "http, https, or socks5"},
-			{Name: "hostname", Label: "Hostname", Type: "text", Default: "127.0.0.1", Required: false},
-			{Name: "port", Label: "Port", Type: "number", Default: 8080, Required: false},
-			{Name: "username", Label: "Username", Type: "text", Default: "", Required: false},
-			{Name: "password", Label: "Password", Type: "password", Default: "", Required: false},
-		},
-	}
-}
-
-func (b *builtinHTTPProxyPlugin) Configure(settings map[string]any) error {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.settings = settings
-	return nil
-}
-
-func (b *builtinHTTPProxyPlugin) ProxyURL() string {
-	b.mu.RLock()
-	defer b.mu.RUnlock()
-	if b.settings == nil {
-		return ""
-	}
-	enabled, _ := b.settings["enabled"].(bool)
-	if !enabled {
-		if s, ok := b.settings["enabled"].(string); !ok || !strings.EqualFold(s, "true") {
-			if n, ok := b.settings["enabled"].(float64); !ok || n == 0 {
-				if !enabled {
-					return ""
-				}
-			}
-		}
-	}
-	host, _ := b.settings["hostname"].(string)
-	if host == "" {
-		return ""
-	}
-	scheme, _ := b.settings["type"].(string)
-	if scheme == "" {
-		scheme = "http"
-	}
-	port := 8080
-	switch v := b.settings["port"].(type) {
-	case float64:
-		port = int(v)
-	case int:
-		port = v
-	case string:
-		if p, err := strconv.Atoi(v); err == nil {
-			port = p
-		}
-	}
-	user, _ := b.settings["username"].(string)
-	pass, _ := b.settings["password"].(string)
-	auth := ""
-	if user != "" {
-		if pass != "" {
-			auth = url.UserPassword(user, pass).String() + "@"
-		} else {
-			auth = url.User(user).String() + "@"
-		}
-	}
-	return fmt.Sprintf("%s://%s%s:%d", scheme, auth, host, port)
-}
-
-type builtinOpenVPNProxyPlugin struct {
-	mu       sync.RWMutex
-	settings map[string]any
-}
-
-func (b *builtinOpenVPNProxyPlugin) Manifest() pluginsdk.Manifest {
-	return pluginsdk.Manifest{
-		ID:          "builtin-openvpn-proxy",
-		Name:        "OpenVPN Local SOCKS Bridge",
-		Version:     "1.0.0",
-		Author:      "Replacearr Core",
-		Description: "Exposes a local SOCKS/HTTP proxy URL typically fronted by OpenVPN (see examples/plugins/openvpn-proxy).",
-		Types:       []pluginsdk.PluginType{pluginsdk.PluginTypeNetworkProxy},
-		ConfigSchema: []pluginsdk.ConfigFieldSchema{
-			{Name: "enabled", Label: "Enabled", Type: "checkbox", Default: false, Required: false},
-			{Name: "proxyUrl", Label: "Local Proxy URL", Type: "text", Default: "socks5://127.0.0.1:1080", Required: false,
-				HelpText: "SOCKS/HTTP URL exposed by your OpenVPN sidecar or openvpn-proxy plugin."},
-		},
-	}
-}
-
-func (b *builtinOpenVPNProxyPlugin) Configure(settings map[string]any) error {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.settings = settings
-	return nil
-}
-
-func (b *builtinOpenVPNProxyPlugin) ProxyURL() string {
-	b.mu.RLock()
-	defer b.mu.RUnlock()
-	if b.settings == nil {
-		return ""
-	}
-	enabled, _ := b.settings["enabled"].(bool)
-	if !enabled {
-		return ""
-	}
-	u, _ := b.settings["proxyUrl"].(string)
-	return strings.TrimSpace(u)
 }
 
 // --- Built-in *arr compatibility shims (in-process HTTP mounts) ---

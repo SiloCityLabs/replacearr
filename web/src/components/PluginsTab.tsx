@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Puzzle,
   RefreshCw,
@@ -17,8 +17,12 @@ import {
   Radio,
   ChevronDown,
   FlaskConical,
+  Download,
+  Trash2,
+  Store,
+  ExternalLink,
 } from 'lucide-react';
-import type { DiscoveredPlugin } from '../types';
+import type { CatalogPlugin, DiscoveredPlugin } from '../types';
 import { api } from '../api';
 import { isBrowserNotificationPlugin, notifyBrowser, requestPermission } from '../notifications';
 
@@ -103,9 +107,59 @@ export const PluginsTab: React.FC<PluginsTabProps> = ({
   const [copiedSnippet, setCopiedSnippet] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [sdkExpanded, setSdkExpanded] = useState(false);
+  const [catalog, setCatalog] = useState<CatalogPlugin[]>([]);
+  const [catalogUrl, setCatalogUrl] = useState('');
+  const [catalogLoading, setCatalogLoading] = useState(false);
+  const [catalogBusyId, setCatalogBusyId] = useState<string | null>(null);
 
   const isNotificationPlugin = (p: DiscoveredPlugin | null) =>
     Boolean(p?.manifest.types?.includes('notification'));
+
+  const loadCatalog = async (refresh = false) => {
+    setCatalogLoading(true);
+    try {
+      const res = refresh ? await api.refreshPluginCatalog() : await api.getPluginCatalog();
+      setCatalog(res.plugins || []);
+      setCatalogUrl(res.catalogUrl || '');
+    } catch (err) {
+      onNotify(err instanceof Error ? err.message : 'Failed to load plugin marketplace', true);
+    } finally {
+      setCatalogLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadCatalog(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- load once on mount
+  }, []);
+
+  const handleInstallCatalog = async (entry: CatalogPlugin) => {
+    setCatalogBusyId(entry.id);
+    try {
+      await api.installCatalogPlugin(entry.id);
+      onNotify(`Installed "${entry.name}" v${entry.version}`);
+      await onRefresh();
+      await loadCatalog(true);
+    } catch (err) {
+      onNotify(err instanceof Error ? err.message : 'Install failed', true);
+    } finally {
+      setCatalogBusyId(null);
+    }
+  };
+
+  const handleUninstallCatalog = async (entry: CatalogPlugin) => {
+    setCatalogBusyId(entry.id);
+    try {
+      await api.uninstallCatalogPlugin(entry.id);
+      onNotify(`Uninstalled "${entry.name}"`);
+      await onRefresh();
+      await loadCatalog(true);
+    } catch (err) {
+      onNotify(err instanceof Error ? err.message : 'Uninstall failed', true);
+    } finally {
+      setCatalogBusyId(null);
+    }
+  };
 
   const origin =
     typeof window !== 'undefined' && window.location.origin
@@ -470,8 +524,134 @@ export const PluginsTab: React.FC<PluginsTabProps> = ({
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-        {sortedPlugins.map(renderPluginCard)}
+      <div>
+        <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-400 mb-3">
+          Installed
+        </h2>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+          {sortedPlugins.map(renderPluginCard)}
+        </div>
+      </div>
+
+      <div className="space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <Store className="w-4 h-4 text-indigo-400" />
+            <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-400">
+              Marketplace
+            </h2>
+          </div>
+          <button
+            type="button"
+            onClick={() => void loadCatalog(true)}
+            disabled={catalogLoading}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs text-slate-200 font-medium transition disabled:opacity-50"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${catalogLoading ? 'animate-spin' : ''}`} />
+            Refresh catalog
+          </button>
+        </div>
+        {catalogUrl ? (
+          <p className="text-[11px] font-mono text-slate-500 truncate">
+            Index: {catalogUrl}
+          </p>
+        ) : null}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+          {catalog.map((entry) => {
+            const busy = catalogBusyId === entry.id;
+            return (
+              <div
+                key={entry.id}
+                className="bg-slate-900/90 border border-slate-800 rounded-xl p-5 space-y-3"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="text-base font-bold text-white">{entry.name}</h3>
+                      <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-slate-950 border border-slate-800 text-indigo-300">
+                        v{entry.version}
+                      </span>
+                      {entry.installed ? (
+                        <span className="text-[10px] font-mono uppercase px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                          installed{entry.installedVersion ? ` ${entry.installedVersion}` : ''}
+                        </span>
+                      ) : null}
+                      {entry.updateAvailable ? (
+                        <span className="text-[10px] font-mono uppercase px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30">
+                          update available
+                        </span>
+                      ) : null}
+                    </div>
+                    <p className="text-xs text-slate-400 mt-1">{entry.description}</p>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {(entry.types || []).map((t) => (
+                        <span
+                          key={t}
+                          className="text-[10px] font-mono uppercase px-2 py-0.5 rounded bg-indigo-500/15 text-indigo-300 border border-indigo-500/30"
+                        >
+                          {t}
+                        </span>
+                      ))}
+                      <span className="text-[11px] font-mono text-slate-500">
+                        {entry.author} • {entry.id}
+                      </span>
+                    </div>
+                  </div>
+                  {entry.homepage ? (
+                    <a
+                      href={entry.homepage}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="p-2 rounded-lg border border-slate-800 text-slate-400 hover:text-white shrink-0"
+                      title="Open homepage"
+                    >
+                      <ExternalLink className="w-4 h-4" />
+                    </a>
+                  ) : null}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {!entry.installed || entry.updateAvailable ? (
+                    <button
+                      type="button"
+                      disabled={busy || !entry.hasPlatformAsset}
+                      onClick={() => void handleInstallCatalog(entry)}
+                      title={
+                        entry.hasPlatformAsset
+                          ? undefined
+                          : 'No release binary for this platform yet'
+                      }
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-xs text-white font-semibold transition disabled:opacity-40"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      {entry.installed ? 'Update' : 'Install'}
+                    </button>
+                  ) : null}
+                  {entry.installed ? (
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => void handleUninstallCatalog(entry)}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-rose-900/40 text-xs text-slate-200 font-semibold transition disabled:opacity-40"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      Uninstall
+                    </button>
+                  ) : null}
+                  {!entry.hasPlatformAsset ? (
+                    <span className="text-[11px] text-amber-400/90 self-center">
+                      No checksummed asset for this OS/arch yet — tag a marketplace release.
+                    </span>
+                  ) : null}
+                </div>
+              </div>
+            );
+          })}
+          {!catalogLoading && catalog.length === 0 ? (
+            <p className="text-sm text-slate-500 col-span-full">
+              Marketplace index is empty or unreachable.
+            </p>
+          ) : null}
+        </div>
       </div>
 
       <div className="bg-slate-900/90 border border-slate-800 rounded-xl overflow-hidden">
@@ -488,8 +668,9 @@ export const PluginsTab: React.FC<PluginsTabProps> = ({
                 Write a Go Plugin in 1 File (`pkg/pluginsdk`)
               </h3>
               <p className="text-xs text-slate-400">
-                Compile any Go binary with{' '}
-                <code className="font-mono text-purple-300">pluginsdk.Serve(...)</code> into{' '}
+                Publish to{' '}
+                <code className="font-mono text-indigo-300">replacearr-plugins</code> or drop a
+                binary into{' '}
                 <code className="font-mono text-slate-300">./config/plugins/</code> and click Re-Scan
               </p>
             </div>

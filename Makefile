@@ -70,11 +70,9 @@ build-web: ## Build static React frontend and copy into Go embed directory
 	@touch $(EMBED_DIST)/.gitkeep
 	@echo "==> Static frontend embedded in $(EMBED_DIST)"
 
-build-plugins: ## Build local example Go plugins into bin/plugins (excludes sample-indexer demo)
-	@echo "==> Building Go plugins..."
+build-plugins: ## Optional plugins install from the marketplace (SiloCityLabs/replacearr-plugins); keeps bin/plugins/ ready
+	@echo "==> No in-tree plugins to build — install from Plugins → Marketplace (SiloCityLabs/replacearr-plugins)"
 	@mkdir -p $(PLUGINS_DIR)
-	CGO_ENABLED=0 go build -buildvcs=false -ldflags="$(LDFLAGS)" -o $(PLUGINS_DIR)/openvpn-proxy ./examples/plugins/openvpn-proxy
-	CGO_ENABLED=0 go build -buildvcs=false -ldflags="$(LDFLAGS)" -o $(PLUGINS_DIR)/webhook-notifier ./examples/plugins/webhook-notifier
 
 build-backend: ## Build Replacearr Go binary (assumes build-web has been run)
 	@echo "==> Building Replacearr binary..."
@@ -83,8 +81,8 @@ build-backend: ## Build Replacearr Go binary (assumes build-web has been run)
 	@touch $(EMBED_DIST)/.gitkeep
 	CGO_ENABLED=0 go build -buildvcs=false -ldflags="$(LDFLAGS)" -o $(BIN_DIR)/$(APP_NAME) ./cmd/replacearr
 
-build: build-web build-plugins build-backend ## Full production build: static React UI + plugins + single Go binary
-	@echo "==> Build complete: $(BIN_DIR)/$(APP_NAME) and $(PLUGINS_DIR)/*"
+build: build-web build-plugins build-backend ## Full production build: static React UI + single Go binary
+	@echo "==> Build complete: $(BIN_DIR)/$(APP_NAME)"
 
 test: test-go test-web ## Run all backend and frontend tests
 

@@ -9,19 +9,20 @@ import (
 )
 
 type Config struct {
-	Host            string `json:"host"`
-	Port            int    `json:"port"`
-	ConfigDir       string `json:"configDir"`
-	DatabasePath    string `json:"databasePath"`
-	PluginDir       string `json:"pluginDir"`
-	DefinitionsDir  string `json:"definitionsDir"`
-	JWTSecret       string `json:"-"`
-	AdminUser       string `json:"adminUser"`
-	AdminPass       string `json:"-"`
-	DefaultAPIKey   string `json:"-"`
-	Environment     string `json:"environment"`
-	URLBase         string `json:"urlBase"`
-	FlareSolverrURL string `json:"flareSolverrUrl"`
+	Host             string `json:"host"`
+	Port             int    `json:"port"`
+	ConfigDir        string `json:"configDir"`
+	DatabasePath     string `json:"databasePath"`
+	PluginDir        string `json:"pluginDir"`
+	DefinitionsDir   string `json:"definitionsDir"`
+	PluginCatalogURL string `json:"pluginCatalogUrl"`
+	JWTSecret        string `json:"-"`
+	AdminUser        string `json:"adminUser"`
+	AdminPass        string `json:"-"`
+	DefaultAPIKey    string `json:"-"`
+	Environment      string `json:"environment"`
+	URLBase          string `json:"urlBase"`
+	FlareSolverrURL  string `json:"flareSolverrUrl"`
 }
 
 func Load() *Config {
@@ -56,19 +57,20 @@ func Load() *Config {
 	}
 
 	return &Config{
-		Host:            envOrDefault("REPLACEARR_HOST", "0.0.0.0"),
-		Port:            port,
-		ConfigDir:       cfgDir,
-		DatabasePath:    dbPath,
-		PluginDir:       pluginDir,
-		DefinitionsDir:  defDir,
-		JWTSecret:       jwtSecret,
-		AdminUser:       envOrDefault("REPLACEARR_ADMIN_USER", "admin"),
-		AdminPass:       envOrDefault("REPLACEARR_ADMIN_PASS", "replacearr"),
-		DefaultAPIKey:   os.Getenv("REPLACEARR_API_KEY"),
-		Environment:     envOrDefault("REPLACEARR_ENV", "development"),
-		URLBase:         envOrDefault("REPLACEARR_URL_BASE", ""),
-		FlareSolverrURL: envOrDefault("REPLACEARR_FLARESOLVERR_URL", "http://localhost:8191/"),
+		Host:             envOrDefault("REPLACEARR_HOST", "0.0.0.0"),
+		Port:             port,
+		ConfigDir:        cfgDir,
+		DatabasePath:     dbPath,
+		PluginDir:        pluginDir,
+		DefinitionsDir:   defDir,
+		PluginCatalogURL: envOrDefault("REPLACEARR_PLUGIN_CATALOG_URL", "https://raw.githubusercontent.com/SiloCityLabs/replacearr-plugins/main/index.json"),
+		JWTSecret:        jwtSecret,
+		AdminUser:        envOrDefault("REPLACEARR_ADMIN_USER", "admin"),
+		AdminPass:        envOrDefault("REPLACEARR_ADMIN_PASS", "replacearr"),
+		DefaultAPIKey:    os.Getenv("REPLACEARR_API_KEY"),
+		Environment:      envOrDefault("REPLACEARR_ENV", "development"),
+		URLBase:          envOrDefault("REPLACEARR_URL_BASE", ""),
+		FlareSolverrURL:  envOrDefault("REPLACEARR_FLARESOLVERR_URL", "http://localhost:8191/"),
 	}
 }
 

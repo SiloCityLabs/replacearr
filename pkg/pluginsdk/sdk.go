@@ -45,6 +45,10 @@ const (
 // Built-in notification channel that bridges Notify events to the SPA via SSE.
 const BuiltinBrowserNotifications = "builtin-browser-notifications"
 
+// JellyfinNotifierPluginID is the external notification plugin that refreshes Jellyfin
+// libraries and shares inbound_webhook_secret with POST /api/v1/webhooks/jellyfin.
+const JellyfinNotifierPluginID = "jellyfin-notifier"
+
 // Stable notification event types delivered to NotificationPlugin.Notify.
 const (
 	EventDownloadStarted  = "download.started"

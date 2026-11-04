@@ -56,7 +56,11 @@ func main() {
 
 	monitorCtx, monitorCancel := context.WithCancel(context.Background())
 	defer monitorCancel()
-	go downloadmonitor.New(store, pluginMgr, nativeSrv).Run(monitorCtx)
+	monitor := downloadmonitor.New(store, pluginMgr, nativeSrv)
+	if sub := nativeSrv.Subtitles(); sub != nil {
+		monitor.SetSubtitleHook(sub)
+	}
+	go monitor.Run(monitorCtx)
 
 	mux := http.NewServeMux()
 

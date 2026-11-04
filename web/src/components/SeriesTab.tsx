@@ -171,6 +171,7 @@ export const SeriesTab: React.FC<SeriesTabProps> = ({
           onDelete={() => void handleDeleteSeries(activeSeries)}
           onSearchReleases={onSearchReleases}
           onManualTorrent={setManualTarget}
+          onNotify={onNotify}
         />
         {manualTarget && (
           <ManualTorrentForm

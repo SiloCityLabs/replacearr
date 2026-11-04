@@ -1,6 +1,7 @@
 package db
 
 import (
+	"encoding/json"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -78,8 +79,24 @@ func TestSaveAppConfigRoundTripOmitsSecrets(t *testing.T) {
 	if err := store.DB().QueryRow(`SELECT value_json FROM app_config WHERE key = ?`, "app").Scan(&raw); err != nil {
 		t.Fatalf("read value_json: %v", err)
 	}
-	if strings.Contains(raw, "apiKey") {
-		t.Fatalf("value_json contains apiKey: %s", raw)
+	// Master key lives under security.apiKey and must never be persisted.
+	// Other nested apiKey fields (e.g. OpenSubtitles) are allowed.
+	compactCheck := strings.ReplaceAll(raw, " ", "")
+	if strings.Contains(compactCheck, `"security":{`) && strings.Contains(compactCheck, `"apiKey":"apiKey-should-not-persist"`) {
+		t.Fatalf("value_json still has security.apiKey: %s", raw)
+	}
+	var doc map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(raw), &doc); err != nil {
+		t.Fatalf("parse value_json: %v", err)
+	}
+	if secRaw, ok := doc["security"]; ok {
+		var sec map[string]any
+		if err := json.Unmarshal(secRaw, &sec); err != nil {
+			t.Fatalf("parse security: %v", err)
+		}
+		if _, exists := sec["apiKey"]; exists {
+			t.Fatalf("security.apiKey still present: %s", string(secRaw))
+		}
 	}
 	compact := strings.ReplaceAll(raw, " ", "")
 	if strings.Contains(compact, `"pendingRestart":true`) {

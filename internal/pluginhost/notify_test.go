@@ -34,6 +34,37 @@ func (s *stubNotifier) Notify(_ context.Context, eventType string, _ map[string]
 	return nil
 }
 
+func TestPluginSettings(t *testing.T) {
+	tmpDir := t.TempDir()
+	store, err := db.Open(filepath.Join(tmpDir, "test.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer store.Close()
+
+	mgr := NewManager(store, filepath.Join(tmpDir, "plugins"), "")
+	defer mgr.StopAll()
+
+	if _, _, ok := mgr.PluginSettings("missing-plugin"); ok {
+		t.Fatal("expected missing plugin")
+	}
+
+	stub := &stubNotifier{}
+	mgr.registerBuiltin(stub)
+	if _, err := mgr.ConfigurePlugin("test-notifier", true, map[string]any{"k": "v"}); err != nil {
+		t.Fatalf("configure: %v", err)
+	}
+	enabled, settings, ok := mgr.PluginSettings("test-notifier")
+	if !ok || !enabled || settings["k"] != "v" {
+		t.Fatalf("PluginSettings = %v %v %v", enabled, settings, ok)
+	}
+	settings["k"] = "mutated"
+	_, settings2, _ := mgr.PluginSettings("test-notifier")
+	if settings2["k"] != "v" {
+		t.Fatalf("settings should be cloned, got %#v", settings2)
+	}
+}
+
 func TestNotifyAllBuiltinAndStub(t *testing.T) {
 	tmpDir := t.TempDir()
 	store, err := db.Open(filepath.Join(tmpDir, "test.db"))

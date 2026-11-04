@@ -113,8 +113,9 @@ func TestManagerExternalPluginDiscoveryConfigureAndSearch(t *testing.T) {
 	}
 
 	plugins := mgr.ListPlugins()
-	if len(plugins) < 4 {
-		t.Fatalf("expected at least 4 plugins (3 built-in + 1 external), got %d", len(plugins))
+	// 5 compat + browser notifications + 1 external sample indexer
+	if len(plugins) < 7 {
+		t.Fatalf("expected at least 7 plugins (6 built-in + 1 external), got %d", len(plugins))
 	}
 
 	var sample *DiscoveredPlugin
@@ -153,7 +154,7 @@ func TestManagerExternalPluginDiscoveryConfigureAndSearch(t *testing.T) {
 		t.Fatalf("expected base_url=%q, got %v", customURL, updated.Settings["base_url"])
 	}
 
-	// Verify SearchAllIndexers executes JSON-RPC search against external plugin and built-in indexer
+	// Verify SearchAllIndexers executes JSON-RPC search against the external plugin
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 

@@ -23,6 +23,24 @@ type AppConfig struct {
 	Metadata              MetadataConfig        `json:"metadata"`
 	MetadataConsumers     []MetadataConsumer    `json:"metadataConsumers"`
 	RemotePathMappings    []RemotePathMapping   `json:"remotePathMappings"`
+	Subtitles             SubtitlesConfig       `json:"subtitles"`
+}
+
+// SubtitlesConfig holds native in-house subtitle settings (OpenSubtitles + defaults).
+type SubtitlesConfig struct {
+	Enabled             bool                 `json:"enabled"`
+	AutoDownload        bool                 `json:"autoDownload"`
+	Languages           []string             `json:"languages"`
+	PreferHearingImpaired bool               `json:"preferHearingImpaired"`
+	IncludeForced       bool                 `json:"includeForced"`
+	OpenSubtitles       OpenSubtitlesConfig  `json:"openSubtitles"`
+}
+
+// OpenSubtitlesConfig is credentials for api.opensubtitles.com.
+type OpenSubtitlesConfig struct {
+	APIKey   string `json:"apiKey"`
+	Username string `json:"username"`
+	Password string `json:"password"`
 }
 
 type HostConfig struct {
@@ -354,6 +372,13 @@ func DefaultAppConfig() AppConfig {
 		},
 		MetadataConsumers:  []MetadataConsumer{},
 		RemotePathMappings: []RemotePathMapping{},
+		Subtitles: SubtitlesConfig{
+			Enabled:      true,
+			AutoDownload: true,
+			Languages:    []string{"en"},
+			IncludeForced: true,
+			OpenSubtitles: OpenSubtitlesConfig{},
+		},
 	}
 }
 
@@ -452,6 +477,9 @@ func (c *AppConfig) Normalize() {
 	}
 	if c.RemotePathMappings == nil {
 		c.RemotePathMappings = []RemotePathMapping{}
+	}
+	if c.Subtitles.Languages == nil {
+		c.Subtitles.Languages = []string{"en"}
 	}
 
 	c.Security.AuthenticationMethod = "forms"

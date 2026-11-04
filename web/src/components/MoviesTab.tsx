@@ -149,6 +149,7 @@ export const MoviesTab: React.FC<MoviesTabProps> = ({
           onDelete={() => void handleDeleteMovie(activeMovie)}
           onSearchReleases={onSearchReleases}
           onManualTorrent={setManualTarget}
+          onNotify={onNotify}
         />
         {manualTarget && (
           <ManualTorrentForm

@@ -16,6 +16,7 @@ import {
 import type { AppConfig, Episode, ReleaseSearchRequest, Series } from '../types';
 import { formatAppDate } from '../uiPrefs';
 import type { ManualTorrentTarget } from './ManualTorrentForm';
+import { SubtitlesPanel } from './SubtitlesPanel';
 
 interface SeriesDetailPanelProps {
   series: Series;
@@ -27,6 +28,7 @@ interface SeriesDetailPanelProps {
   onDelete: () => void;
   onSearchReleases: (req: ReleaseSearchRequest) => void;
   onManualTorrent: (target: ManualTorrentTarget) => void;
+  onNotify?: (msg: string, isError?: boolean) => void;
 }
 
 function seasonLabel(n: number): string {
@@ -43,6 +45,7 @@ export const SeriesDetailPanel: React.FC<SeriesDetailPanelProps> = ({
   onDelete,
   onSearchReleases,
   onManualTorrent,
+  onNotify,
 }) => {
   const seasons = useMemo(() => {
     const map = new Map<number, Episode[]>();
@@ -278,60 +281,73 @@ export const SeriesDetailPanel: React.FC<SeriesDetailPanelProps> = ({
                     {season.episodes.map((ep) => (
                       <div
                         key={ep.id}
-                        className="px-4 py-3 flex items-center justify-between gap-3 hover:bg-slate-900/40"
+                        className="px-4 py-3 hover:bg-slate-900/40"
                       >
-                        <div className="min-w-0 flex-1">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <span className="text-xs font-mono font-semibold text-indigo-300 w-8">
-                              {ep.episodeNumber}
-                            </span>
-                            <span className="text-sm font-medium text-white truncate">
-                              {ep.title || `Episode ${ep.episodeNumber}`}
-                            </span>
-                            {ep.hasFile ? (
-                              <span className="inline-flex items-center gap-1 text-[11px] text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded">
-                                <CheckCircle2 className="w-3 h-3" /> Downloaded
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="text-xs font-mono font-semibold text-indigo-300 w-8">
+                                {ep.episodeNumber}
                               </span>
-                            ) : (
-                              <span className="inline-flex items-center gap-1 text-[11px] text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded">
-                                <Clock className="w-3 h-3" /> Missing
+                              <span className="text-sm font-medium text-white truncate">
+                                {ep.title || `Episode ${ep.episodeNumber}`}
                               </span>
-                            )}
+                              {ep.hasFile ? (
+                                <span className="inline-flex items-center gap-1 text-[11px] text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded">
+                                  <CheckCircle2 className="w-3 h-3" /> Downloaded
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 text-[11px] text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded">
+                                  <Clock className="w-3 h-3" /> Missing
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-xs text-slate-500 mt-1 line-clamp-1 pl-8">
+                              {ep.overview ||
+                                (ep.airDate
+                                  ? `Aired ${formatAppDate(ep.airDate, appUi)}`
+                                  : 'Air date TBA')}
+                            </p>
                           </div>
-                          <p className="text-xs text-slate-500 mt-1 line-clamp-1 pl-8">
-                            {ep.overview ||
-                              (ep.airDate
-                                ? `Aired ${formatAppDate(ep.airDate, appUi)}`
-                                : 'Air date TBA')}
-                          </p>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <span className="text-xs font-mono text-slate-500 hidden md:inline-flex items-center gap-1">
+                              <Calendar className="w-3 h-3" />
+                              {ep.airDate ? formatAppDate(ep.airDate, appUi) : 'TBA'}
+                            </span>
+                            <button
+                              onClick={() => searchEpisode(ep)}
+                              className="px-2.5 py-1.5 rounded-lg bg-indigo-600/20 hover:bg-indigo-600 text-indigo-300 hover:text-white border border-indigo-500/30 text-xs font-medium transition"
+                            >
+                              Search
+                            </button>
+                            <button
+                              onClick={() =>
+                                onManualTorrent({
+                                  title: `${series.title} S${String(ep.seasonNumber).padStart(2, '0')}E${String(ep.episodeNumber).padStart(2, '0')}`,
+                                  mediaType: 'tv',
+                                  seriesId: series.id,
+                                  episodeId: ep.id,
+                                  seasonNumber: ep.seasonNumber,
+                                })
+                              }
+                              className="p-1.5 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30"
+                              title="Add torrent"
+                            >
+                              <Magnet className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
                         </div>
-                        <div className="flex items-center gap-2 shrink-0">
-                          <span className="text-xs font-mono text-slate-500 hidden md:inline-flex items-center gap-1">
-                            <Calendar className="w-3 h-3" />
-                            {ep.airDate ? formatAppDate(ep.airDate, appUi) : 'TBA'}
-                          </span>
-                          <button
-                            onClick={() => searchEpisode(ep)}
-                            className="px-2.5 py-1.5 rounded-lg bg-indigo-600/20 hover:bg-indigo-600 text-indigo-300 hover:text-white border border-indigo-500/30 text-xs font-medium transition"
-                          >
-                            Search
-                          </button>
-                          <button
-                            onClick={() =>
-                              onManualTorrent({
-                                title: `${series.title} S${String(ep.seasonNumber).padStart(2, '0')}E${String(ep.episodeNumber).padStart(2, '0')}`,
-                                mediaType: 'tv',
-                                seriesId: series.id,
-                                episodeId: ep.id,
-                                seasonNumber: ep.seasonNumber,
-                              })
-                            }
-                            className="p-1.5 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30"
-                            title="Add torrent"
-                          >
-                            <Magnet className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
+                        {ep.hasFile ? (
+                          <div className="pl-8">
+                            <SubtitlesPanel
+                              kind="episode"
+                              id={ep.id}
+                              hasFile={ep.hasFile}
+                              compact
+                              onNotify={onNotify}
+                            />
+                          </div>
+                        ) : null}
                       </div>
                     ))}
                   </div>

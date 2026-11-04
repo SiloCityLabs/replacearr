@@ -9,6 +9,7 @@ import type {
   CardigannDefinition,
   DiscoveredPlugin,
   DomainClearance,
+  PluginCatalogResponse,
   DownloadClient,
   Edition,
   Episode,
@@ -24,6 +25,9 @@ import type {
   Role,
   RootFolder,
   Series,
+  SubtitleCandidate,
+  SubtitlesStatus,
+  SubtitleTrack,
   Tag,
   TagDetails,
   Track,
@@ -514,6 +518,31 @@ export const api = {
     );
   },
 
+  async getPluginCatalog(refresh = false): Promise<PluginCatalogResponse> {
+    const q = refresh ? '?refresh=1' : '';
+    return request<PluginCatalogResponse>(`/api/v1/plugins/catalog${q}`);
+  },
+
+  async refreshPluginCatalog(): Promise<PluginCatalogResponse> {
+    return request<PluginCatalogResponse>('/api/v1/plugins/catalog/refresh', {
+      method: 'POST',
+    });
+  },
+
+  async installCatalogPlugin(id: string): Promise<{ ok: boolean; id: string }> {
+    return request<{ ok: boolean; id: string }>('/api/v1/plugins/catalog/install', {
+      method: 'POST',
+      body: JSON.stringify({ id }),
+    });
+  },
+
+  async uninstallCatalogPlugin(id: string): Promise<{ ok: boolean; id: string }> {
+    return request<{ ok: boolean; id: string }>('/api/v1/plugins/catalog/uninstall', {
+      method: 'POST',
+      body: JSON.stringify({ id }),
+    });
+  },
+
   // Users, Roles, API Keys, Permissions
   async getUsers(): Promise<User[]> {
     const res = await request<unknown>('/api/v1/users');
@@ -615,6 +644,64 @@ export const api = {
   async getQualities(): Promise<QualityDefinition[]> {
     const res = await request<unknown>('/api/v1/qualities');
     return unwrapArray<QualityDefinition>(res);
+  },
+
+  async getMovieSubtitles(movieId: number): Promise<SubtitlesStatus> {
+    return request<SubtitlesStatus>(`/api/v1/movies/${movieId}/subtitles`);
+  },
+
+  async searchMovieSubtitles(movieId: number, language?: string): Promise<SubtitleCandidate[]> {
+    const q = language ? `?language=${encodeURIComponent(language)}` : '';
+    const res = await request<unknown>(`/api/v1/movies/${movieId}/subtitles/search${q}`);
+    return unwrapArray<SubtitleCandidate>(res);
+  },
+
+  async downloadMovieSubtitle(
+    movieId: number,
+    fileId: number,
+    language: string
+  ): Promise<SubtitleTrack> {
+    return request<SubtitleTrack>(`/api/v1/movies/${movieId}/subtitles/download`, {
+      method: 'POST',
+      body: JSON.stringify({ fileId, language }),
+    });
+  },
+
+  async ensureMovieSubtitles(movieId: number): Promise<SubtitleTrack[]> {
+    const res = await request<unknown>(`/api/v1/movies/${movieId}/subtitles/ensure`, {
+      method: 'POST',
+      body: '{}',
+    });
+    return unwrapArray<SubtitleTrack>(res);
+  },
+
+  async getEpisodeSubtitles(episodeId: number): Promise<SubtitlesStatus> {
+    return request<SubtitlesStatus>(`/api/v1/episodes/${episodeId}/subtitles`);
+  },
+
+  async searchEpisodeSubtitles(episodeId: number, language?: string): Promise<SubtitleCandidate[]> {
+    const q = language ? `?language=${encodeURIComponent(language)}` : '';
+    const res = await request<unknown>(`/api/v1/episodes/${episodeId}/subtitles/search${q}`);
+    return unwrapArray<SubtitleCandidate>(res);
+  },
+
+  async downloadEpisodeSubtitle(
+    episodeId: number,
+    fileId: number,
+    language: string
+  ): Promise<SubtitleTrack> {
+    return request<SubtitleTrack>(`/api/v1/episodes/${episodeId}/subtitles/download`, {
+      method: 'POST',
+      body: JSON.stringify({ fileId, language }),
+    });
+  },
+
+  async ensureEpisodeSubtitles(episodeId: number): Promise<SubtitleTrack[]> {
+    const res = await request<unknown>(`/api/v1/episodes/${episodeId}/subtitles/ensure`, {
+      method: 'POST',
+      body: '{}',
+    });
+    return unwrapArray<SubtitleTrack>(res);
   },
 
   async createProfile(payload: Omit<QualityProfile, 'id'>): Promise<QualityProfile> {

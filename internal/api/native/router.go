@@ -19,20 +19,24 @@ import (
 	"github.com/replacearr/replacearr/internal/indexers/cardigann"
 	"github.com/replacearr/replacearr/internal/mediacover"
 	"github.com/replacearr/replacearr/internal/metadata"
+	"github.com/replacearr/replacearr/internal/plugincatalog"
 	"github.com/replacearr/replacearr/internal/pluginhost"
+	"github.com/replacearr/replacearr/internal/subtitles"
 	"github.com/replacearr/replacearr/pkg/pluginsdk"
 )
 
 type Server struct {
-	store       *db.Store
-	cfg         *config.Config
-	authSvc     *auth.Service
-	pluginMgr   *pluginhost.Manager
-	meta        *metadata.Service
-	flareClient *flaresolverr.Client
-	covers      *mediacover.Store
-	version     string
-	startedAt   time.Time
+	store         *db.Store
+	cfg           *config.Config
+	authSvc       *auth.Service
+	pluginMgr     *pluginhost.Manager
+	pluginCatalog *plugincatalog.Client
+	meta          *metadata.Service
+	flareClient   *flaresolverr.Client
+	covers        *mediacover.Store
+	subtitles     *subtitles.Service
+	version       string
+	startedAt     time.Time
 }
 
 func NewServer(store *db.Store, cfg *config.Config, authSvc *auth.Service, pluginMgr *pluginhost.Manager, version string) *Server {
@@ -56,22 +60,37 @@ func NewServer(store *db.Store, cfg *config.Config, authSvc *auth.Service, plugi
 	flare.SetHTTPClient(httpCli)
 
 	configDir := "./config"
-	if cfg != nil && cfg.ConfigDir != "" {
-		configDir = cfg.ConfigDir
+	pluginDir := ""
+	catalogURL := plugincatalog.DefaultCatalogURL
+	if cfg != nil {
+		if cfg.ConfigDir != "" {
+			configDir = cfg.ConfigDir
+		}
+		pluginDir = cfg.PluginDir
+		if cfg.PluginCatalogURL != "" {
+			catalogURL = cfg.PluginCatalogURL
+		}
 	}
 	s := &Server{
-		store:       store,
-		cfg:         cfg,
-		authSvc:     authSvc,
-		pluginMgr:   pluginMgr,
-		meta:        metaSvc,
-		flareClient: flare,
-		covers:      mediacover.NewStore(configDir, httpCli),
-		version:     version,
-		startedAt:   time.Now().UTC(),
+		store:         store,
+		cfg:           cfg,
+		authSvc:       authSvc,
+		pluginMgr:     pluginMgr,
+		pluginCatalog: plugincatalog.New(catalogURL, pluginDir),
+		meta:          metaSvc,
+		flareClient:   flare,
+		covers:        mediacover.NewStore(configDir, httpCli),
+		subtitles:     subtitles.NewService(store),
+		version:       version,
+		startedAt:     time.Now().UTC(),
 	}
 	s.seedInitialDemoData()
 	return s
+}
+
+// Subtitles exposes the native subtitle service for download-monitor hooks.
+func (s *Server) Subtitles() *subtitles.Service {
+	return s.subtitles
 }
 
 // Metadata exposes the shared Add New lookup service for compat mounts.
@@ -344,6 +363,9 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 		})
 	})
 
+	// Jellyfin Webhook plugin callback (shared secret from jellyfin-notifier settings; no JWT).
+	mux.HandleFunc("POST /api/v1/webhooks/jellyfin", s.handleJellyfinWebhook)
+
 	// Overview
 	mux.HandleFunc("GET /api/v1/overview", s.authSvc.RequirePermission(domain.PermSystemRead, s.handleOverview))
 
@@ -353,12 +375,22 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/v1/series/{id}", s.authSvc.RequirePermission(domain.PermTVDelete, s.handleDeleteSeries))
 	mux.HandleFunc("GET /api/v1/series/lookup", s.authSvc.RequirePermission(domain.PermTVRead, s.handleLookupSeries))
 	mux.HandleFunc("GET /api/v1/episodes", s.authSvc.RequirePermission(domain.PermTVRead, s.handleListEpisodes))
+	mux.HandleFunc("GET /api/v1/episodes/{id}/subtitles", s.authSvc.RequirePermission(domain.PermTVRead, s.handleEpisodeSubtitles))
+	mux.HandleFunc("GET /api/v1/episodes/{id}/subtitles/search", s.authSvc.RequirePermission(domain.PermTVRead, s.handleSearchEpisodeSubtitles))
+	mux.HandleFunc("POST /api/v1/episodes/{id}/subtitles/download", s.authSvc.RequirePermission(domain.PermTVWrite, s.handleDownloadEpisodeSubtitle))
+	mux.HandleFunc("POST /api/v1/episodes/{id}/subtitles/ensure", s.authSvc.RequirePermission(domain.PermTVWrite, s.handleEnsureEpisodeSubtitles))
 
 	// Movies (Radarr)
 	mux.HandleFunc("GET /api/v1/movies", s.authSvc.RequirePermission(domain.PermMoviesRead, s.handleListMovies))
 	mux.HandleFunc("POST /api/v1/movies", s.authSvc.RequirePermission(domain.PermMoviesWrite, s.handleCreateMovie))
 	mux.HandleFunc("DELETE /api/v1/movies/{id}", s.authSvc.RequirePermission(domain.PermMoviesDelete, s.handleDeleteMovie))
 	mux.HandleFunc("GET /api/v1/movies/lookup", s.authSvc.RequirePermission(domain.PermMoviesRead, s.handleLookupMovies))
+	mux.HandleFunc("GET /api/v1/movies/{id}/subtitles", s.authSvc.RequirePermission(domain.PermMoviesRead, s.handleMovieSubtitles))
+	mux.HandleFunc("GET /api/v1/movies/{id}/subtitles/search", s.authSvc.RequirePermission(domain.PermMoviesRead, s.handleSearchMovieSubtitles))
+	mux.HandleFunc("POST /api/v1/movies/{id}/subtitles/download", s.authSvc.RequirePermission(domain.PermMoviesWrite, s.handleDownloadMovieSubtitle))
+	mux.HandleFunc("POST /api/v1/movies/{id}/subtitles/ensure", s.authSvc.RequirePermission(domain.PermMoviesWrite, s.handleEnsureMovieSubtitles))
+	mux.HandleFunc("GET /api/v1/subtitleprofiles", s.authSvc.RequirePermission(domain.PermProfilesRead, s.handleListSubtitleProfiles))
+	mux.HandleFunc("PUT /api/v1/subtitleprofiles/{id}", s.authSvc.RequirePermission(domain.PermProfilesWrite, s.handleUpdateSubtitleProfile))
 
 	s.registerMusicBooksRoutes(mux)
 
@@ -414,6 +446,10 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/v1/plugins/{id}", s.authSvc.RequirePermission(domain.PermPluginsManage, s.handleUpdatePlugin))
 	mux.HandleFunc("POST /api/v1/plugins/reload", s.authSvc.RequirePermission(domain.PermPluginsManage, s.handleReloadPlugins))
 	mux.HandleFunc("POST /api/v1/plugins/{id}/test", s.authSvc.RequirePermission(domain.PermPluginsManage, s.handleTestNotificationPlugin))
+	mux.HandleFunc("GET /api/v1/plugins/catalog", s.authSvc.RequirePermission(domain.PermPluginsRead, s.handlePluginCatalog))
+	mux.HandleFunc("POST /api/v1/plugins/catalog/refresh", s.authSvc.RequirePermission(domain.PermPluginsManage, s.handlePluginCatalogRefresh))
+	mux.HandleFunc("POST /api/v1/plugins/catalog/install", s.authSvc.RequirePermission(domain.PermPluginsManage, s.handlePluginCatalogInstall))
+	mux.HandleFunc("POST /api/v1/plugins/catalog/uninstall", s.authSvc.RequirePermission(domain.PermPluginsManage, s.handlePluginCatalogUninstall))
 	mux.HandleFunc("GET /api/v1/notifications/stream", s.authSvc.RequirePermission(domain.PermSystemRead, s.handleNotificationStream))
 }
 
@@ -1120,6 +1156,128 @@ func (s *Server) handleReloadPlugins(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, s.pluginMgr.ListPlugins())
+}
+
+func (s *Server) installedCatalogInfos() []plugincatalog.InstalledInfo {
+	if s.pluginMgr == nil {
+		return nil
+	}
+	plugins := s.pluginMgr.ListPlugins()
+	out := make([]plugincatalog.InstalledInfo, 0, len(plugins))
+	for _, p := range plugins {
+		builtin := strings.HasPrefix(p.BinaryPath, "builtin://") || p.Status == "builtin"
+		out = append(out, plugincatalog.InstalledInfo{
+			ID:         p.Manifest.ID,
+			Version:    p.Manifest.Version,
+			BinaryPath: p.BinaryPath,
+			Builtin:    builtin,
+		})
+	}
+	return out
+}
+
+func (s *Server) handlePluginCatalog(w http.ResponseWriter, r *http.Request) {
+	if s.pluginCatalog == nil {
+		writeErr(w, http.StatusServiceUnavailable, fmt.Errorf("plugin catalog is not configured"))
+		return
+	}
+	force := r.URL.Query().Get("refresh") == "1" || r.URL.Query().Get("refresh") == "true"
+	entries, err := s.pluginCatalog.List(r.Context(), s.installedCatalogInfos(), force)
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"catalogUrl": s.pluginCatalog.CatalogURL(),
+		"plugins":    entries,
+	})
+}
+
+func (s *Server) handlePluginCatalogRefresh(w http.ResponseWriter, r *http.Request) {
+	if s.pluginCatalog == nil {
+		writeErr(w, http.StatusServiceUnavailable, fmt.Errorf("plugin catalog is not configured"))
+		return
+	}
+	s.pluginCatalog.Invalidate()
+	entries, err := s.pluginCatalog.List(r.Context(), s.installedCatalogInfos(), true)
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"catalogUrl": s.pluginCatalog.CatalogURL(),
+		"plugins":    entries,
+	})
+}
+
+func (s *Server) handlePluginCatalogInstall(w http.ResponseWriter, r *http.Request) {
+	if s.pluginCatalog == nil || s.pluginMgr == nil {
+		writeErr(w, http.StatusServiceUnavailable, fmt.Errorf("plugin catalog is not configured"))
+		return
+	}
+	var req struct {
+		ID string `json:"id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	req.ID = strings.TrimSpace(req.ID)
+	if req.ID == "" {
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("id is required"))
+		return
+	}
+	// Stop a previously installed copy before replacing the binary.
+	_ = s.pluginMgr.RemoveExternalPlugin(req.ID)
+	if err := s.pluginCatalog.Install(r.Context(), req.ID); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	if err := s.pluginMgr.DiscoverAndStart(); err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":      true,
+		"id":      req.ID,
+		"plugins": s.pluginMgr.ListPlugins(),
+	})
+}
+
+func (s *Server) handlePluginCatalogUninstall(w http.ResponseWriter, r *http.Request) {
+	if s.pluginCatalog == nil || s.pluginMgr == nil {
+		writeErr(w, http.StatusServiceUnavailable, fmt.Errorf("plugin catalog is not configured"))
+		return
+	}
+	var req struct {
+		ID string `json:"id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	req.ID = strings.TrimSpace(req.ID)
+	if req.ID == "" {
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("id is required"))
+		return
+	}
+	if err := s.pluginMgr.RemoveExternalPlugin(req.ID); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	if err := s.pluginCatalog.Uninstall(req.ID); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	if err := s.pluginMgr.DiscoverAndStart(); err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":      true,
+		"id":      req.ID,
+		"plugins": s.pluginMgr.ListPlugins(),
+	})
 }
 
 func (s *Server) handleListIndexerProxies(w http.ResponseWriter, _ *http.Request) {

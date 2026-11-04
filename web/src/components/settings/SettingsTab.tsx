@@ -11,6 +11,7 @@ import {
   SlidersHorizontal,
   Tags,
   Users,
+  Captions,
   Clapperboard,
 } from 'lucide-react';
 import type {
@@ -37,6 +38,7 @@ import { IndexersSettingsPage } from './IndexersSettingsPage';
 import { DownloadClientsPage } from './DownloadClientsPage';
 import { ImportListsPage } from './ImportListsPage';
 import { MetadataPage } from './MetadataPage';
+import { SubtitlesPage } from './SubtitlesPage';
 import { TagsPage } from './TagsPage';
 import { SystemInfoPage } from './SystemInfoPage';
 import { errorText } from './fields';
@@ -101,6 +103,12 @@ const CATEGORIES = [
     title: 'Metadata',
     description: 'Language and metadata consumers.',
     icon: Clapperboard,
+  },
+  {
+    id: 'subtitles',
+    title: 'Subtitles',
+    description: 'OpenSubtitles and language preferences.',
+    icon: Captions,
   },
   {
     id: 'tags',
@@ -314,6 +322,9 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
             ) : null}
             {view === 'metadata' ? (
               <MetadataPage config={localConfig} onSave={save} onDirtyChange={onDirtyChange} />
+            ) : null}
+            {view === 'subtitles' ? (
+              <SubtitlesPage config={localConfig} onSave={save} onDirtyChange={onDirtyChange} />
             ) : null}
             {view === 'tags' ? <TagsPage onNotify={onNotify} /> : null}
             {view === 'general' ? (

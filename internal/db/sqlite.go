@@ -832,6 +832,22 @@ func (s *Store) DeleteSeries(id int64) error {
 	return err
 }
 
+func (s *Store) GetEpisodeByID(id int64) (*domain.Episode, error) {
+	row := s.db.QueryRow(`
+		SELECT id, series_id, tvdb_id, episode_file_id, season_number, episode_number, title, air_date, air_date_utc,
+		       overview, has_file, monitored, absolute_episode_number
+		FROM episodes WHERE id = ?`, id)
+	var ep domain.Episode
+	var hasFile, mon int
+	if err := row.Scan(&ep.ID, &ep.SeriesID, &ep.TvdbID, &ep.EpisodeFileID, &ep.SeasonNumber, &ep.EpisodeNumber,
+		&ep.Title, &ep.AirDate, &ep.AirDateUtc, &ep.Overview, &hasFile, &mon, &ep.AbsoluteEpisodeNum); err != nil {
+		return nil, err
+	}
+	ep.HasFile = hasFile == 1
+	ep.Monitored = mon == 1
+	return &ep, nil
+}
+
 func (s *Store) ListEpisodes(seriesID int64) ([]domain.Episode, error) {
 	query := `SELECT id, series_id, tvdb_id, episode_file_id, season_number, episode_number, title, air_date, air_date_utc, overview, has_file, monitored, absolute_episode_number FROM episodes`
 	var args []any
@@ -1518,6 +1534,12 @@ func (s *Store) SavePluginConfig(pluginID string, enabled bool, settings map[str
 			updated_at = CURRENT_TIMESTAMP`,
 		pluginID, boolToInt(enabled), string(b),
 	)
+	return err
+}
+
+// DeletePluginConfig removes the plugin_configs row for pluginID (no-op if missing).
+func (s *Store) DeletePluginConfig(pluginID string) error {
+	_, err := s.db.Exec(`DELETE FROM plugin_configs WHERE plugin_id = ?`, pluginID)
 	return err
 }
 

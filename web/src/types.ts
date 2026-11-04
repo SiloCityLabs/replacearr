@@ -136,6 +136,69 @@ export interface Episode {
   absoluteEpisodeNumber?: number;
 }
 
+export interface MediaFileInfo {
+  id: number;
+  path: string;
+  relativePath: string;
+  size: number;
+  sceneName: string;
+  releaseGroup: string;
+  dateAdded: string;
+  seriesId?: number;
+  episodeId?: number;
+  movieId?: number;
+}
+
+export interface SubtitleTrack {
+  id: number;
+  mediaType: string;
+  movieId?: number;
+  episodeId?: number;
+  episodeFileId?: number;
+  movieFileId?: number;
+  language: string;
+  path: string;
+  provider: string;
+  releaseName: string;
+  score: number;
+  forced: boolean;
+  hearingImpaired: boolean;
+  downloadedAt: string;
+}
+
+export interface SubtitleCandidate {
+  provider: string;
+  fileId: number;
+  language: string;
+  releaseName: string;
+  hearingImpaired: boolean;
+  forced: boolean;
+  hashMatch: boolean;
+  downloadCount: number;
+  score: number;
+}
+
+export interface SubtitlesStatus {
+  tracks: SubtitleTrack[];
+  missing: string[];
+  file: MediaFileInfo | null;
+}
+
+export interface OpenSubtitlesConfig {
+  apiKey: string;
+  username: string;
+  password: string;
+}
+
+export interface SubtitlesConfig {
+  enabled: boolean;
+  autoDownload: boolean;
+  languages: string[];
+  preferHearingImpaired: boolean;
+  includeForced: boolean;
+  openSubtitles: OpenSubtitlesConfig;
+}
+
 export interface Movie {
   id: number;
   title: string;
@@ -470,6 +533,36 @@ export interface DiscoveredPlugin {
   settings: Record<string, unknown>;
 }
 
+export interface CatalogPluginAsset {
+  goos: string;
+  goarch: string;
+  url: string;
+  sha256: string;
+  size: number;
+}
+
+export interface CatalogPlugin {
+  id: string;
+  name: string;
+  version: string;
+  author: string;
+  description: string;
+  types: string[];
+  homepage?: string;
+  repository?: string;
+  minReplacearrVersion?: string;
+  assets: CatalogPluginAsset[];
+  installed: boolean;
+  installedVersion?: string;
+  updateAvailable: boolean;
+  hasPlatformAsset: boolean;
+}
+
+export interface PluginCatalogResponse {
+  catalogUrl: string;
+  plugins: CatalogPlugin[];
+}
+
 export interface OverviewResponse {
   counts: {
     series: number;
@@ -797,5 +890,6 @@ export interface AppConfig {
   metadata: MetadataConfig;
   metadataConsumers: MetadataConsumer[];
   remotePathMappings: RemotePathMapping[];
+  subtitles: SubtitlesConfig;
 }
 

@@ -42,9 +42,10 @@ This is a highly experimental AI created repo. I still have to deslop it. feel f
 replacearr/
 ├── cmd/replacearr/                # Main server entrypoint
 ├── examples/plugins/
-│   ├── sample-indexer/            # Torznab demo indexer (examples-only; not shipped)
-│   ├── openvpn-proxy/             # Sample network proxy plugin
-│   └── webhook-notifier/          # Sample notification plugin (POST JSON webhooks)
+│   ├── jellyfin-notifier/         # Marketplace pointer (README only)
+│   ├── sample-indexer/            # Test fixture (canonical: SiloCityLabs/replacearr-plugins)
+│   ├── openvpn-proxy/             # Marketplace pointer (README only)
+│   └── webhook-notifier/          # Marketplace pointer (README only)
 ├── internal/
 │   ├── api/                       # Unified REST API + Sonarr/Radarr/Prowlarr compat routers
 │   ├── auth/                      # Password hashing, JWT tokens, RBAC & API key middleware
@@ -52,7 +53,8 @@ replacearr/
 │   ├── db/                        # Pure-Go SQLite store, migrations & default seeders
 │   ├── domain/                    # Core domain models & RBAC permission constants
 │   ├── indexers/                  # Torznab/Newznab, Cardigann YAML & Plugin search engine
-│   ├── plugins/                   # Out-of-process plugin host & JSON-RPC supervisor
+│   ├── plugincatalog/             # Marketplace index.json fetch + checksummed install
+│   ├── pluginhost/                # Out-of-process plugin host & JSON-RPC supervisor
 │   └── webui/                     # Go embed.FS serving the compiled React SPA
 ├── pkg/pluginsdk/                 # Public Go SDK for authoring Replacearr plugins
 ├── web/                           # React + TypeScript + Vite unified frontend
@@ -191,13 +193,18 @@ func main() {
 }
 ```
 
-Build your plugin as a standard Go executable and place it in `/config/plugins` (or `bin/plugins` in development):
+**Marketplace:** optional community/first-party plugins are listed from
+[`SiloCityLabs/replacearr-plugins`](https://github.com/SiloCityLabs/replacearr-plugins)
+`index.json` (override with `REPLACEARR_PLUGIN_CATALOG_URL`). Use **Plugins → Marketplace**
+to install checksummed release binaries into `REPLACEARR_PLUGIN_DIR`.
+
+Or build a plugin yourself and place it in `/config/plugins` (or `bin/plugins` in development):
 
 ```bash
 CGO_ENABLED=0 go build -ldflags="-s -w" -o /config/plugins/my-indexer ./cmd/my-indexer
 ```
 
-Then click **Reload Plugins** in the **Plugins** tab of the Replacearr UI.
+Then click **Re-Scan Plugin Directory** in the **Plugins** tab.
 
 ---
 
@@ -251,6 +258,7 @@ services:
 | `REPLACEARR_CONFIG_DIR` | `/config` | Directory for SQLite database, JWT secret, and plugins |
 | `REPLACEARR_DB_PATH` | `/config/replacearr.db` | Custom path to SQLite database file |
 | `REPLACEARR_PLUGIN_DIR` | `/config/plugins` | Directory scanned for executable Go plugins |
+| `REPLACEARR_PLUGIN_CATALOG_URL` | SiloCityLabs `index.json` | Marketplace catalog URL (HTTPS) |
 | `REPLACEARR_DEFINITIONS_DIR` | `/config/definitions` | Directory scanned for Cardigann YAML definitions (seeded from bundled `definitions/`) |
 | `REPLACEARR_ADMIN_USER` | `admin` | Initial admin username seeded on first startup |
 | `REPLACEARR_ADMIN_PASS` | `replacearr` | Initial admin password seeded on first startup |
@@ -286,7 +294,7 @@ make build
 | :--- | :--- |
 | `make help` | Show all available `make` targets |
 | `make build-web` | Build static React SPA and copy into `internal/webui/dist` |
-| `make build-plugins` | Compile local example Go plugins into `bin/plugins/` (excludes Torznab demo) |
+| `make build-plugins` | Ensures `bin/plugins/` exists; optional plugins install from the marketplace |
 | `make build-backend` | Compile the static `bin/replacearr` binary |
 | `make build` | Full production build (React UI + plugins + static Go binary) |
 | `make test` | Run all Go backend unit/integration tests and frontend typechecks |

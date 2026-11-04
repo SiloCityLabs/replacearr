@@ -1,17 +1,15 @@
 // Package main is a reference Replacearr Go plugin implementing a Torznab-style
 // indexer in a single file with zero CGO dependencies.
 //
-// This demo invents fake releases for SDK learning. It is examples-only: it is
-// not built by `make build-plugins`, not shipped in release tarballs, and not
-// bundled into the production Docker image.
+// This demo invents fake releases for SDK learning.
 //
-// Build standalone binary:
+// Build:
 //
-//	CGO_ENABLED=0 go build -o bin/plugins/sample-indexer ./examples/plugins/sample-indexer
+//	CGO_ENABLED=0 go build -o sample-indexer .
 //
 // Inspect manifest:
 //
-//	./bin/plugins/sample-indexer --manifest
+//	./sample-indexer --manifest
 package main
 
 import (
@@ -37,7 +35,7 @@ func (p *SampleIndexerPlugin) Manifest() pluginsdk.Manifest {
 		ID:          "sample-torznab-indexer",
 		Name:        "Replacearr Torznab Demo Indexer",
 		Version:     "0.1.0",
-		Author:      "Replacearr Contributors",
+		Author:      "SiloCityLabs",
 		Description: "Reference Go indexer plugin demonstrating the zero-CGO Replacearr Plugin SDK over stdin/stdout JSON-RPC.",
 		Types: []pluginsdk.PluginType{
 			pluginsdk.PluginTypeIndexer,

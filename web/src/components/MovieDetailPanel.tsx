@@ -12,6 +12,7 @@ import {
 import type { Movie, ReleaseSearchRequest } from '../types';
 import { formatBytes } from '../api';
 import type { ManualTorrentTarget } from './ManualTorrentForm';
+import { SubtitlesPanel } from './SubtitlesPanel';
 
 interface MovieDetailPanelProps {
   movie: Movie;
@@ -20,6 +21,7 @@ interface MovieDetailPanelProps {
   onDelete: () => void;
   onSearchReleases: (req: ReleaseSearchRequest) => void;
   onManualTorrent: (target: ManualTorrentTarget) => void;
+  onNotify?: (msg: string, isError?: boolean) => void;
 }
 
 export const MovieDetailPanel: React.FC<MovieDetailPanelProps> = ({
@@ -29,6 +31,7 @@ export const MovieDetailPanel: React.FC<MovieDetailPanelProps> = ({
   onDelete,
   onSearchReleases,
   onManualTorrent,
+  onNotify,
 }) => {
   const searchMovie = () => {
     onSearchReleases({
@@ -142,6 +145,12 @@ export const MovieDetailPanel: React.FC<MovieDetailPanelProps> = ({
             <Folder className="w-3.5 h-3.5 shrink-0" />
             <span>{movie.path || `${movie.rootFolderPath}/${movie.title}`}</span>
           </div>
+          <SubtitlesPanel
+            kind="movie"
+            id={movie.id}
+            hasFile={movie.hasFile}
+            onNotify={onNotify}
+          />
         </div>
       </div>
     </div>

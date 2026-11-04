@@ -183,6 +183,14 @@ export const App: React.FC = () => {
         const normalized: AppConfig = {
           ...cfg,
           setupComplete: Boolean(cfg.setupComplete),
+          subtitles: cfg.subtitles ?? {
+            enabled: true,
+            autoDownload: true,
+            languages: ['en'],
+            preferHearingImpaired: false,
+            includeForced: true,
+            openSubtitles: { apiKey: '', username: '', password: '' },
+          },
         };
         setAppConfig(normalized);
         applyUiPreferences(normalized.ui);

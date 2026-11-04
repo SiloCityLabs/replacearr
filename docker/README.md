@@ -123,6 +123,7 @@ docker exec replacearr cat /config/api_key.txt
 | `REPLACEARR_CONFIG_DIR` | `/config` | Base directory for the database, secrets, plugins, and definitions. |
 | `REPLACEARR_DB_PATH` | `/config/replacearr.db` | SQLite database file. |
 | `REPLACEARR_PLUGIN_DIR` | `/config/plugins` | Directory scanned for executable Go plugins. |
+| `REPLACEARR_PLUGIN_CATALOG_URL` | SiloCityLabs `index.json` | Marketplace catalog URL used by Plugins → Marketplace. |
 | `REPLACEARR_DEFINITIONS_DIR` | `/config/definitions` | Directory scanned for Cardigann YAML indexer definitions. |
 
 ### Authentication (first run only)
@@ -212,7 +213,7 @@ Authentication accepts the `X-Api-Key` header, the `?apikey=` query parameter, o
 
 ## Plugins and Indexer Definitions
 
-- **Plugins:** drop executable Go plugin binaries into `/config/plugins` and make them executable (`chmod +x`). Bundled plugins are copied there on startup only if a file with the same name doesn't already exist, so your own versions are never overwritten. See the [Plugin SDK docs](https://github.com/replacearr/replacearr#go-plugin-sdk-pkgpluginsdk).
+- **Plugins:** install from **Plugins → Marketplace** (checksummed assets from [replacearr-plugins](https://github.com/SiloCityLabs/replacearr-plugins)), or drop binaries into `/config/plugins` (`chmod +x`). Image-bundled plugins are copied on startup only if missing. See the [Plugin SDK docs](https://github.com/SiloCityLabs/replacearr#go-plugin-sdk-pkgpluginsdk).
 - **Indexer YAML definitions:** the image bundles the Replacearr `definitions/` catalog (~580 Cardigann YAML files) and seeds missing files into `/config/definitions` on startup without overwriting local edits. Drop additional custom `.yml` files there as needed.
 
 ---

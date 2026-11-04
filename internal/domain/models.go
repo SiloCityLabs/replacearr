@@ -195,6 +195,73 @@ type Episode struct {
 	AbsoluteEpisodeNum int       `json:"absoluteEpisodeNumber,omitempty"`
 }
 
+// EpisodeFile is the on-disk video for an episode (native library record).
+type EpisodeFile struct {
+	ID           int64     `json:"id"`
+	SeriesID     int64     `json:"seriesId"`
+	EpisodeID    int64     `json:"episodeId"`
+	Path         string    `json:"path"`
+	RelativePath string    `json:"relativePath"`
+	Size         int64     `json:"size"`
+	SceneName    string    `json:"sceneName"`
+	ReleaseGroup string    `json:"releaseGroup"`
+	DateAdded    time.Time `json:"dateAdded"`
+}
+
+// MovieFile is the on-disk video for a movie (native library record).
+type MovieFile struct {
+	ID           int64     `json:"id"`
+	MovieID      int64     `json:"movieId"`
+	Path         string    `json:"path"`
+	RelativePath string    `json:"relativePath"`
+	Size         int64     `json:"size"`
+	SceneName    string    `json:"sceneName"`
+	ReleaseGroup string    `json:"releaseGroup"`
+	DateAdded    time.Time `json:"dateAdded"`
+}
+
+// SubtitleProfile describes wanted subtitle languages and preferences.
+type SubtitleProfile struct {
+	ID                     int64    `json:"id"`
+	Name                   string   `json:"name"`
+	Languages              []string `json:"languages"`
+	PreferHearingImpaired  bool     `json:"preferHearingImpaired"`
+	IncludeForced          bool     `json:"includeForced"`
+	MinScore               int      `json:"minScore"`
+	Enabled                bool     `json:"enabled"`
+}
+
+// SubtitleTrack is a downloaded (or discovered) sidecar subtitle.
+type SubtitleTrack struct {
+	ID               int64     `json:"id"`
+	MediaType        string    `json:"mediaType"` // movie | tv
+	MovieID          int64     `json:"movieId,omitempty"`
+	EpisodeID        int64     `json:"episodeId,omitempty"`
+	EpisodeFileID    int64     `json:"episodeFileId,omitempty"`
+	MovieFileID      int64     `json:"movieFileId,omitempty"`
+	Language         string    `json:"language"`
+	Path             string    `json:"path"`
+	Provider         string    `json:"provider"`
+	ReleaseName      string    `json:"releaseName"`
+	Score            int       `json:"score"`
+	Forced           bool      `json:"forced"`
+	HearingImpaired  bool      `json:"hearingImpaired"`
+	DownloadedAt     time.Time `json:"downloadedAt"`
+}
+
+// SubtitleCandidate is a provider search hit before download.
+type SubtitleCandidate struct {
+	Provider        string `json:"provider"`
+	FileID          int64  `json:"fileId"`
+	Language        string `json:"language"`
+	ReleaseName     string `json:"releaseName"`
+	HearingImpaired bool   `json:"hearingImpaired"`
+	Forced          bool   `json:"forced"`
+	HashMatch       bool   `json:"hashMatch"`
+	DownloadCount   int    `json:"downloadCount"`
+	Score           int    `json:"score"`
+}
+
 // Radarr Movie Domain Models
 
 type Movie struct {

@@ -9,6 +9,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -29,12 +30,19 @@ type PluginDownloads interface {
 	ListPluginDownloads(ctx context.Context) ([]pluginsdk.DownloadItem, error)
 }
 
+// SubtitleHook runs after a movie/episode video is imported (native subtitles).
+type SubtitleHook interface {
+	OnMovieImported(ctx context.Context, movieID int64)
+	OnEpisodeImported(ctx context.Context, episodeID int64)
+}
+
 // Monitor polls qBittorrent (and plugins) and runs completed-download import.
 type Monitor struct {
-	store    *db.Store
-	plugins  PluginDownloads
-	notify   Notifier
-	interval time.Duration
+	store     *db.Store
+	plugins   PluginDownloads
+	notify    Notifier
+	subtitles SubtitleHook
+	interval  time.Duration
 }
 
 // New creates a Monitor with a default 15s tick.
@@ -45,6 +53,11 @@ func New(store *db.Store, plugins PluginDownloads, notify Notifier) *Monitor {
 		notify:   notify,
 		interval: 15 * time.Second,
 	}
+}
+
+// SetSubtitleHook registers the post-import subtitle pipeline (optional).
+func (m *Monitor) SetSubtitleHook(hook SubtitleHook) {
+	m.subtitles = hook
 }
 
 // Run blocks until ctx is cancelled.
@@ -227,20 +240,51 @@ func (m *Monitor) importCompleted(ctx context.Context, appCfg domain.AppConfig, 
 		return err
 	}
 
+	sceneName := strings.TrimSpace(q.Title)
+	releaseGroup := parseReleaseGroup(sceneName)
+	var size int64
+	if fi, err := os.Stat(dest); err == nil {
+		size = fi.Size()
+	}
+
 	if q.MovieID > 0 {
-		if mv, err := m.store.GetMovieByID(q.MovieID); err == nil && mv != nil {
-			mv.HasFile = true
-			mv.Path = filepath.Dir(dest)
-			_, _ = m.store.UpdateMovie(*mv)
-		} else {
-			_ = m.store.MarkMovieHasFile(q.MovieID, true)
+		if _, err := m.store.UpsertMovieFile(q.MovieID, dest, sceneName, releaseGroup, size); err != nil {
+			log.Printf("downloadmonitor: movie file record failed: %v", err)
+			if mv, err := m.store.GetMovieByID(q.MovieID); err == nil && mv != nil {
+				mv.HasFile = true
+				mv.Path = filepath.Dir(dest)
+				_, _ = m.store.UpdateMovie(*mv)
+			} else {
+				_ = m.store.MarkMovieHasFile(q.MovieID, true)
+			}
+		} else if m.subtitles != nil {
+			m.subtitles.OnMovieImported(ctx, q.MovieID)
 		}
 	}
 	if q.SeriesID > 0 {
-		if q.EpisodeID > 0 {
-			_ = m.store.MarkEpisodeHasFile(q.EpisodeID, true)
-		} else if season, ep, ok := parseSeasonEpisode(q.Title); ok {
-			_ = m.store.MarkEpisodeHasFileByNumbers(q.SeriesID, season, ep, true)
+		episodeID := q.EpisodeID
+		if episodeID == 0 {
+			if season, ep, ok := parseSeasonEpisode(q.Title); ok {
+				if eps, err := m.store.ListEpisodes(q.SeriesID); err == nil {
+					for _, e := range eps {
+						if e.SeasonNumber == season && e.EpisodeNumber == ep {
+							episodeID = e.ID
+							break
+						}
+					}
+				}
+				if episodeID == 0 {
+					_ = m.store.MarkEpisodeHasFileByNumbers(q.SeriesID, season, ep, true)
+				}
+			}
+		}
+		if episodeID > 0 {
+			if _, err := m.store.UpsertEpisodeFile(q.SeriesID, episodeID, dest, sceneName, releaseGroup, size); err != nil {
+				log.Printf("downloadmonitor: episode file record failed: %v", err)
+				_ = m.store.MarkEpisodeHasFile(episodeID, true)
+			} else if m.subtitles != nil {
+				m.subtitles.OnEpisodeImported(ctx, episodeID)
+			}
 		}
 	}
 	if q.AlbumID > 0 {
@@ -278,14 +322,50 @@ func (m *Monitor) importCompleted(ctx context.Context, appCfg domain.AppConfig, 
 	})
 
 	if m.notify != nil {
-		m.notify.EmitDownloadComplete(ctx, map[string]any{
-			"title": q.Title, "queueId": q.ID, "path": dest, "mediaType": q.MediaType,
-		})
-		m.notify.EmitDownloadMoved(ctx, map[string]any{
-			"title": q.Title, "queueId": q.ID, "sourcePath": src, "destPath": dest,
-		})
+		completePayload := importNotifyPayload(q, dest)
+		m.notify.EmitDownloadComplete(ctx, completePayload)
+		movedPayload := importNotifyPayload(q, dest)
+		movedPayload["sourcePath"] = src
+		movedPayload["destPath"] = dest
+		delete(movedPayload, "path")
+		m.notify.EmitDownloadMoved(ctx, movedPayload)
 	}
 	return nil
+}
+
+// importNotifyPayload builds the common lifecycle fields for import notifications.
+func importNotifyPayload(q domain.QueueItem, dest string) map[string]any {
+	payload := map[string]any{
+		"title":     q.Title,
+		"queueId":   q.ID,
+		"path":      dest,
+		"mediaType": q.MediaType,
+	}
+	if q.SeriesID > 0 {
+		payload["seriesId"] = q.SeriesID
+	}
+	if q.EpisodeID > 0 {
+		payload["episodeId"] = q.EpisodeID
+	}
+	if q.MovieID > 0 {
+		payload["movieId"] = q.MovieID
+	}
+	if q.ArtistID > 0 {
+		payload["artistId"] = q.ArtistID
+	}
+	if q.AlbumID > 0 {
+		payload["albumId"] = q.AlbumID
+	}
+	if q.AuthorID > 0 {
+		payload["authorId"] = q.AuthorID
+	}
+	if q.BookID > 0 {
+		payload["bookId"] = q.BookID
+	}
+	if q.EditionID > 0 {
+		payload["editionId"] = q.EditionID
+	}
+	return payload
 }
 
 func (m *Monitor) destinationPath(appCfg domain.AppConfig, q domain.QueueItem, ext string) (string, error) {
@@ -558,6 +638,22 @@ func importFile(src, dest string, hardlink bool) error {
 func sanitizeName(name string) string {
 	replacer := strings.NewReplacer(`/`, "-", `\`, "-", `:`, " -", `*`, "", `?`, "", `"`, "", `<`, "", `>`, "", `|`, "")
 	return strings.TrimSpace(replacer.Replace(name))
+}
+
+var releaseGroupPattern = regexp.MustCompile(`(?i)[-.]([A-Za-z0-9]+)(?:\[[^\]]*\])?(?:\.(?:mkv|mp4|avi))?$`)
+
+func parseReleaseGroup(title string) string {
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return ""
+	}
+	base := filepath.Base(title)
+	base = strings.TrimSuffix(base, filepath.Ext(base))
+	m := releaseGroupPattern.FindStringSubmatch(base)
+	if len(m) < 2 {
+		return ""
+	}
+	return m[1]
 }
 
 func parseSeasonEpisode(title string) (int, int, bool) {
