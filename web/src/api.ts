@@ -954,6 +954,8 @@ export const api = {
       matchId?: number;
       tmdbId?: number;
       tvdbId?: number;
+      foreignId?: string;
+      format?: string;
       qualityProfileId?: number;
       seasonNumber?: number;
       episodeNumber?: number;

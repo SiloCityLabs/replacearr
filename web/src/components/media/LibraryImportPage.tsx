@@ -71,18 +71,78 @@ function seriesToMatch(s: Series, libraryId?: number): LibraryImportMatch {
   };
 }
 
+function artistToMatch(a: Artist, libraryId?: number): LibraryImportMatch {
+  return {
+    libraryId,
+    foreignId: a.foreignArtistId || undefined,
+    title: a.title,
+    overview: a.overview,
+    disambiguation: a.disambiguation,
+    inLibrary: Boolean(libraryId),
+  };
+}
+
+function bookToMatch(b: Book, libraryId?: number, format?: string): LibraryImportMatch {
+  const year = Number.parseInt((b.releaseDate || '').slice(0, 4), 10);
+  const authorName = b.overview?.startsWith('by ') ? b.overview.slice(3) : undefined;
+  return {
+    libraryId,
+    foreignId: b.foreignBookId || undefined,
+    title: b.title,
+    year: Number.isFinite(year) && year > 0 ? year : undefined,
+    overview: b.overview,
+    authorName,
+    format,
+    inLibrary: Boolean(libraryId),
+  };
+}
+
+function guessBookFormat(path: string): 'ebook' | 'audiobook' {
+  const ext = path.split('.').pop()?.toLowerCase() || '';
+  if (['m4b', 'mp3', 'flac', 'm4a', 'aac'].includes(ext)) return 'audiobook';
+  return 'ebook';
+}
+
+function matchSourceHint(media: MediaNavType): string {
+  switch (media) {
+    case 'movies':
+      return 'Search TMDB…';
+    case 'series':
+      return 'Search TVDB…';
+    case 'music':
+      return 'Search MusicBrainz…';
+    case 'books':
+      return 'Search OpenLibrary…';
+    default:
+      return 'Search metadata…';
+  }
+}
+
 const MatchSearchField: React.FC<{
   query: string;
   match: LibraryImportMatch | null;
   open: boolean;
   loading: boolean;
   results: LibraryImportMatch[];
+  placeholder?: string;
   onQueryChange: (value: string) => void;
   onFocus: () => void;
   onClear: () => void;
   onSelect: (match: LibraryImportMatch) => void;
   onClose: () => void;
-}> = ({ query, match, open, loading, results, onQueryChange, onFocus, onClear, onSelect, onClose }) => {
+}> = ({
+  query,
+  match,
+  open,
+  loading,
+  results,
+  placeholder = 'Search metadata…',
+  onQueryChange,
+  onFocus,
+  onClear,
+  onSelect,
+  onClose,
+}) => {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const [menuBox, setMenuBox] = useState<{ top: number; left: number; width: number } | null>(null);
@@ -146,7 +206,7 @@ const MatchSearchField: React.FC<{
             ) : (
               results.map((hit) => (
                 <button
-                  key={`${hit.tmdbId || hit.tvdbId || hit.title}-${hit.year || 0}`}
+                  key={`${hit.tmdbId || hit.tvdbId || hit.foreignId || hit.title}-${hit.year || 0}`}
                   type="button"
                   onMouseDown={(e) => e.preventDefault()}
                   onClick={() => onSelect(hit)}
@@ -154,6 +214,9 @@ const MatchSearchField: React.FC<{
                 >
                   <div className="text-xs text-slate-100 font-medium">
                     {matchLabel(hit)}
+                    {hit.disambiguation ? (
+                      <span className="ml-1 text-slate-400 font-normal">({hit.disambiguation})</span>
+                    ) : null}
                     {hit.inLibrary ? (
                       <span className="ml-2 text-[10px] uppercase tracking-wide text-emerald-400">
                         library
@@ -163,6 +226,8 @@ const MatchSearchField: React.FC<{
                   <div className="text-[11px] text-slate-500 truncate">
                     {hit.tmdbId ? `tmdb:${hit.tmdbId}` : ''}
                     {hit.tvdbId ? `tvdb:${hit.tvdbId}` : ''}
+                    {hit.foreignId && !hit.tmdbId && !hit.tvdbId ? hit.foreignId : ''}
+                    {hit.authorName ? ` · ${hit.authorName}` : ''}
                     {hit.overview ? ` — ${hit.overview}` : ''}
                   </div>
                 </button>
@@ -182,7 +247,7 @@ const MatchSearchField: React.FC<{
           value={query}
           onChange={(e) => onQueryChange(e.target.value)}
           onFocus={onFocus}
-          placeholder="Search TMDB / TVDB…"
+          placeholder={placeholder}
           className="w-full pl-7 pr-7 py-1.5 bg-slate-950 border border-slate-800 rounded-md text-xs text-white"
         />
         {query ? (
@@ -200,6 +265,8 @@ const MatchSearchField: React.FC<{
           {matchLabel(match)}
           {match.tmdbId ? ` · tmdb:${match.tmdbId}` : ''}
           {match.tvdbId ? ` · tvdb:${match.tvdbId}` : ''}
+          {match.foreignId && !match.tmdbId && !match.tvdbId ? ` · ${match.foreignId}` : ''}
+          {match.authorName ? ` · ${match.authorName}` : ''}
           {match.inLibrary ? ' · in library' : ''}
         </div>
       ) : (
@@ -217,7 +284,7 @@ export const LibraryImportPage: React.FC<LibraryImportPageProps> = ({
   series,
   movies,
   artists,
-  authors,
+  authors: _authors,
   books,
   onRefresh,
   onNotify,
@@ -240,6 +307,12 @@ export const LibraryImportPage: React.FC<LibraryImportPageProps> = ({
     if (apiMedia === 'movies' || apiMedia === 'tv') {
       return profiles.filter((p) => !p.mediaType || p.mediaType === 'video' || p.mediaType === apiMedia);
     }
+    if (apiMedia === 'music') {
+      return profiles.filter((p) => !p.mediaType || p.mediaType === 'music');
+    }
+    if (apiMedia === 'books') {
+      return profiles.filter((p) => !p.mediaType || p.mediaType === 'ebook' || p.mediaType === 'audiobook');
+    }
     return profiles;
   }, [profiles, apiMedia]);
 
@@ -253,30 +326,6 @@ export const LibraryImportPage: React.FC<LibraryImportPageProps> = ({
   const [searchResults, setSearchResults] = useState<LibraryImportMatch[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const searchTimer = useRef<number | null>(null);
-
-  const usesMetadataMatch = media === 'movies' || media === 'series';
-
-  const libraryMatchOptions = useMemo(() => {
-    switch (media) {
-      case 'music':
-        return artists.map((a) => ({
-          libraryId: a.id,
-          title: a.title || String(a.id),
-          inLibrary: true,
-        }));
-      case 'books':
-        return books.map((b) => {
-          const author = authors.find((a) => a.id === b.authorId);
-          return {
-            libraryId: b.id,
-            title: author ? `${b.title} — ${author.title}` : b.title,
-            inLibrary: true,
-          };
-        });
-      default:
-        return [];
-    }
-  }, [media, artists, authors, books]);
 
   useEffect(() => {
     if (mediaProfiles[0]?.id && !mediaProfiles.some((p) => p.id === profileId)) {
@@ -292,7 +341,7 @@ export const LibraryImportPage: React.FC<LibraryImportPageProps> = ({
 
   const runMetadataSearch = async (idx: number, term: string) => {
     const q = term.trim();
-    if (!q || !usesMetadataMatch) {
+    if (!q) {
       setSearchResults([]);
       return;
     }
@@ -302,10 +351,23 @@ export const LibraryImportPage: React.FC<LibraryImportPageProps> = ({
         const results = await api.lookupMovies(q);
         const byTmdb = new Map(movies.filter((m) => m.tmdbId > 0).map((m) => [m.tmdbId, m.id]));
         setSearchResults(results.map((m) => movieToMatch(m, byTmdb.get(m.tmdbId))));
-      } else {
+      } else if (media === 'series') {
         const results = await api.lookupSeries(q);
         const byTvdb = new Map(series.filter((s) => s.tvdbId > 0).map((s) => [s.tvdbId, s.id]));
         setSearchResults(results.map((s) => seriesToMatch(s, byTvdb.get(s.tvdbId))));
+      } else if (media === 'music') {
+        const results = await api.lookupArtists(q);
+        const byForeign = new Map(
+          artists.filter((a) => a.foreignArtistId).map((a) => [a.foreignArtistId, a.id])
+        );
+        setSearchResults(results.map((a) => artistToMatch(a, byForeign.get(a.foreignArtistId))));
+      } else {
+        const results = await api.lookupBooks(q);
+        const byForeign = new Map(
+          books.filter((b) => b.foreignBookId).map((b) => [b.foreignBookId, b.id])
+        );
+        const format = rows[idx] ? guessBookFormat(rows[idx].path) : 'ebook';
+        setSearchResults(results.map((b) => bookToMatch(b, byForeign.get(b.foreignBookId), format)));
       }
       setActiveSearchIdx(idx);
     } catch (err) {
@@ -368,8 +430,9 @@ export const LibraryImportPage: React.FC<LibraryImportPageProps> = ({
   const doImport = async () => {
     const selected = rows.filter((r) => {
       if (!r.selected || !r.match) return false;
-      if (usesMetadataMatch) return Boolean(r.match.tmdbId || r.match.tvdbId || r.match.libraryId);
-      return Boolean(r.match.libraryId);
+      return Boolean(
+        r.match.tmdbId || r.match.tvdbId || r.match.foreignId || r.match.libraryId
+      );
     });
     if (!selected.length) {
       onNotify('Select at least one matched file', true);
@@ -387,6 +450,8 @@ export const LibraryImportPage: React.FC<LibraryImportPageProps> = ({
           matchId: r.match?.libraryId || undefined,
           tmdbId: r.match?.tmdbId || undefined,
           tvdbId: r.match?.tvdbId || undefined,
+          foreignId: r.match?.foreignId || undefined,
+          format: r.match?.format || undefined,
           qualityProfileId: profileId,
           seasonNumber: r.seasonNumber,
           episodeNumber: r.episodeNumber,
@@ -421,7 +486,15 @@ export const LibraryImportPage: React.FC<LibraryImportPageProps> = ({
               match,
               selected: true,
               query: matchLabel(match),
-              matches: [match, ...r.matches.filter((m) => m.tmdbId !== match.tmdbId || m.tvdbId !== match.tvdbId)],
+              matches: [
+                match,
+                ...r.matches.filter((m) => {
+                  if (match.tmdbId) return m.tmdbId !== match.tmdbId;
+                  if (match.tvdbId) return m.tvdbId !== match.tvdbId;
+                  if (match.foreignId) return m.foreignId !== match.foreignId;
+                  return m.title !== match.title;
+                }),
+              ],
             }
           : r
       )
@@ -436,9 +509,8 @@ export const LibraryImportPage: React.FC<LibraryImportPageProps> = ({
         <div>
           <h2 className="text-lg font-bold text-white">Library Import</h2>
           <p className="text-xs text-slate-400 mt-1">
-            {usesMetadataMatch
-              ? 'Scan folders and match files to TMDB / TVDB by folder name, then import into your library.'
-              : 'Scan a folder for unmapped media files and import them into your library.'}
+            Scan folders and match files by name against TMDB, TVDB, MusicBrainz, or OpenLibrary, then
+            import into your library.
           </p>
         </div>
         <button
@@ -550,75 +622,46 @@ export const LibraryImportPage: React.FC<LibraryImportPageProps> = ({
                         : ''}
                     </td>
                     <td className="px-3 py-2">
-                      {usesMetadataMatch ? (
-                        <MatchSearchField
-                          query={row.query}
-                          match={row.match}
-                          open={activeSearchIdx === idx}
-                          loading={searchLoading && activeSearchIdx === idx}
-                          results={
-                            activeSearchIdx === idx
-                              ? searchResults.length > 0
-                                ? searchResults
-                                : row.matches
-                              : []
+                      <MatchSearchField
+                        query={row.query}
+                        match={row.match}
+                        open={activeSearchIdx === idx}
+                        loading={searchLoading && activeSearchIdx === idx}
+                        placeholder={matchSourceHint(media)}
+                        results={
+                          activeSearchIdx === idx
+                            ? searchResults.length > 0
+                              ? searchResults
+                              : row.matches
+                            : []
+                        }
+                        onQueryChange={(value) => {
+                          setRows((prev) =>
+                            prev.map((r, i) => (i === idx ? { ...r, query: value, match: null } : r))
+                          );
+                          setActiveSearchIdx(idx);
+                          scheduleSearch(idx, value);
+                        }}
+                        onFocus={() => {
+                          setActiveSearchIdx(idx);
+                          if (row.matches.length) {
+                            setSearchResults(row.matches);
+                          } else if (row.query.trim()) {
+                            scheduleSearch(idx, row.query);
                           }
-                          onQueryChange={(value) => {
-                            setRows((prev) =>
-                              prev.map((r, i) => (i === idx ? { ...r, query: value, match: null } : r))
-                            );
-                            setActiveSearchIdx(idx);
-                            scheduleSearch(idx, value);
-                          }}
-                          onFocus={() => {
-                            setActiveSearchIdx(idx);
-                            if (row.matches.length) {
-                              setSearchResults(row.matches);
-                            } else if (row.query.trim()) {
-                              scheduleSearch(idx, row.query);
-                            }
-                          }}
-                          onClear={() => {
-                            setRows((prev) =>
-                              prev.map((r, i) => (i === idx ? { ...r, query: '', match: null } : r))
-                            );
-                            setSearchResults([]);
-                            setActiveSearchIdx(idx);
-                          }}
-                          onSelect={(hit) => applyMatch(idx, hit)}
-                          onClose={() => {
-                            if (activeSearchIdx === idx) setActiveSearchIdx(null);
-                          }}
-                        />
-                      ) : (
-                        <select
-                          value={row.match?.libraryId ?? 0}
-                          onChange={(e) => {
-                            const id = Number(e.target.value);
-                            const opt = libraryMatchOptions.find((o) => o.libraryId === id) || null;
-                            setRows((prev) =>
-                              prev.map((r, i) =>
-                                i === idx
-                                  ? {
-                                      ...r,
-                                      match: opt,
-                                      selected: Boolean(opt),
-                                      query: opt?.title || '',
-                                    }
-                                  : r
-                              )
-                            );
-                          }}
-                          className="bg-slate-950 border border-slate-800 rounded-md px-2 py-1 text-xs text-white max-w-[14rem]"
-                        >
-                          <option value={0}>— select —</option>
-                          {libraryMatchOptions.map((o) => (
-                            <option key={o.libraryId} value={o.libraryId}>
-                              {o.title}
-                            </option>
-                          ))}
-                        </select>
-                      )}
+                        }}
+                        onClear={() => {
+                          setRows((prev) =>
+                            prev.map((r, i) => (i === idx ? { ...r, query: '', match: null } : r))
+                          );
+                          setSearchResults([]);
+                          setActiveSearchIdx(idx);
+                        }}
+                        onSelect={(hit) => applyMatch(idx, hit)}
+                        onClose={() => {
+                          if (activeSearchIdx === idx) setActiveSearchIdx(null);
+                        }}
+                      />
                     </td>
                   </tr>
                 ))}

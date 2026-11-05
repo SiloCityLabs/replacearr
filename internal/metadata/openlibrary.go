@@ -294,11 +294,16 @@ func mapOLSearchDoc(doc olSearchDoc) domain.Book {
 		remote := fmt.Sprintf("https://covers.openlibrary.org/b/id/%d-L.jpg", doc.CoverI)
 		images = append(images, domain.MediaImage{CoverType: "poster", URL: remote, RemoteURL: remote})
 	}
+	overview := ""
+	if len(doc.AuthorName) > 0 {
+		overview = "by " + strings.Join(doc.AuthorName, ", ")
+	}
 	return domain.Book{
 		Title:         doc.Title,
 		ForeignBookID: doc.Key,
 		TitleSlug:     slugify(doc.Title),
 		ReleaseDate:   release,
+		Overview:      overview,
 		Monitored:     true,
 		PageCount:     doc.NumberOfPages,
 		Images:        images,

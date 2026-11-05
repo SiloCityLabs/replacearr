@@ -51,6 +51,29 @@ func (s *Store) GetArtistByID(id int64) (*domain.Artist, error) {
 	return &a, nil
 }
 
+func (s *Store) GetArtistByForeignID(foreignID string) (*domain.Artist, error) {
+	foreignID = strings.TrimSpace(foreignID)
+	if foreignID == "" {
+		return nil, sql.ErrNoRows
+	}
+	rows, err := s.db.Query(`
+		SELECT id, title, sort_title, status, overview, images_json, path, quality_profile_id, monitored,
+		       foreign_artist_id, title_slug, clean_title, root_folder_path, genres_json, tags_json, disambiguation, added
+		FROM artists WHERE foreign_artist_id = ? LIMIT 1`, foreignID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		return nil, sql.ErrNoRows
+	}
+	a, err := scanArtist(rows)
+	if err != nil {
+		return nil, err
+	}
+	return &a, nil
+}
+
 func scanArtist(rows *sql.Rows) (domain.Artist, error) {
 	var a domain.Artist
 	var monitored int
@@ -617,6 +640,29 @@ func (s *Store) GetBookByID(id int64) (*domain.Book, error) {
 		SELECT id, author_id, title, foreign_book_id, title_slug, release_date, overview, images_json,
 		       monitored, series_title, series_position, genres_json, page_count
 		FROM books WHERE id = ?`, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		return nil, sql.ErrNoRows
+	}
+	b, err := scanBook(rows)
+	if err != nil {
+		return nil, err
+	}
+	return &b, nil
+}
+
+func (s *Store) GetBookByForeignID(foreignID string) (*domain.Book, error) {
+	foreignID = strings.TrimSpace(foreignID)
+	if foreignID == "" {
+		return nil, sql.ErrNoRows
+	}
+	rows, err := s.db.Query(`
+		SELECT id, author_id, title, foreign_book_id, title_slug, release_date, overview, images_json,
+		       monitored, series_title, series_position, genres_json, page_count
+		FROM books WHERE foreign_book_id = ? LIMIT 1`, foreignID)
 	if err != nil {
 		return nil, err
 	}

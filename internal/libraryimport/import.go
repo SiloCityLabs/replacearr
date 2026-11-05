@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -17,14 +18,18 @@ import (
 )
 
 type MatchCandidate struct {
-	LibraryID int64  `json:"libraryId,omitempty"`
-	TmdbID    int    `json:"tmdbId,omitempty"`
-	TvdbID    int    `json:"tvdbId,omitempty"`
-	ImdbID    string `json:"imdbId,omitempty"`
-	Title     string `json:"title"`
-	Year      int    `json:"year,omitempty"`
-	Overview  string `json:"overview,omitempty"`
-	InLibrary bool   `json:"inLibrary"`
+	LibraryID     int64  `json:"libraryId,omitempty"`
+	TmdbID        int    `json:"tmdbId,omitempty"`
+	TvdbID        int    `json:"tvdbId,omitempty"`
+	ImdbID        string `json:"imdbId,omitempty"`
+	ForeignID     string `json:"foreignId,omitempty"` // MusicBrainz MBID or OpenLibrary work key
+	AuthorName    string `json:"authorName,omitempty"`
+	Format        string `json:"format,omitempty"` // ebook | audiobook
+	Title         string `json:"title"`
+	Year          int    `json:"year,omitempty"`
+	Overview      string `json:"overview,omitempty"`
+	Disambiguation string `json:"disambiguation,omitempty"`
+	InLibrary     bool   `json:"inLibrary"`
 }
 
 type ScanItem struct {
@@ -48,6 +53,8 @@ type ImportItem struct {
 	MatchID          int64  `json:"matchId,omitempty"`
 	TmdbID           int    `json:"tmdbId,omitempty"`
 	TvdbID           int    `json:"tvdbId,omitempty"`
+	ForeignID        string `json:"foreignId,omitempty"`
+	Format           string `json:"format,omitempty"`
 	QualityProfileID int64  `json:"qualityProfileId,omitempty"`
 	SeasonNumber     int    `json:"seasonNumber,omitempty"`
 	EpisodeNumber    int    `json:"episodeNumber,omitempty"`
@@ -64,14 +71,15 @@ type ScanOptions struct {
 }
 
 type ImportOptions struct {
-	Store                *db.Store
-	Meta                 *metadata.Service
-	AppCfg               domain.AppConfig
-	MediaType            string
-	RootFolderPath       string
-	QualityProfileID     int64
-	Language             string
-	SyncSeriesEpisodes   func(ctx context.Context, sr *domain.Series) error
+	Store              *db.Store
+	Meta               *metadata.Service
+	AppCfg             domain.AppConfig
+	MediaType          string
+	RootFolderPath     string
+	QualityProfileID   int64
+	Language           string
+	SyncSeriesEpisodes func(ctx context.Context, sr *domain.Series) error
+	SyncArtistAlbums   func(ctx context.Context, artist *domain.Artist) error
 }
 
 var seasonEpRe = regexp.MustCompile(`(?i)[Ss](\d{1,2})[Ee](\d{1,3})`)
@@ -132,8 +140,15 @@ func Scan(ctx context.Context, opts ScanOptions) (*ScanResult, error) {
 		})
 	}
 
-	if opts.Meta != nil && (mediaType == "movies" || mediaType == "movie" || mediaType == "tv" || mediaType == "series") {
-		enrichMatches(ctx, opts, mediaType, raw, maxMatches, workers)
+	if opts.Meta != nil {
+		switch mediaType {
+		case "movies", "movie", "tv", "series", "music", "books", "ebook", "audiobook":
+			if mediaType == "music" && workers > 1 {
+				// MusicBrainz is rate-limited (~1 req/s).
+				workers = 1
+			}
+			enrichMatches(ctx, opts, mediaType, raw, maxMatches, workers)
+		}
 	}
 
 	return &ScanResult{Items: raw}, nil
@@ -169,6 +184,8 @@ func enrichMatches(ctx context.Context, opts ScanOptions, mediaType string, item
 
 	libraryMovies := map[int]int64{}
 	librarySeries := map[int]int64{}
+	libraryArtists := map[string]int64{}
+	libraryBooks := map[string]int64{}
 	if mediaType == "movies" || mediaType == "movie" {
 		if all, err := opts.Store.ListMovies(); err == nil {
 			for _, m := range all {
@@ -183,6 +200,24 @@ func enrichMatches(ctx context.Context, opts ScanOptions, mediaType string, item
 			for _, s := range all {
 				if s.TvdbID > 0 {
 					librarySeries[s.TvdbID] = s.ID
+				}
+			}
+		}
+	}
+	if mediaType == "music" {
+		if all, err := opts.Store.ListArtists(); err == nil {
+			for _, a := range all {
+				if a.ForeignArtistID != "" {
+					libraryArtists[a.ForeignArtistID] = a.ID
+				}
+			}
+		}
+	}
+	if mediaType == "books" || mediaType == "ebook" || mediaType == "audiobook" {
+		if all, err := opts.Store.ListBooks(0); err == nil {
+			for _, b := range all {
+				if b.ForeignBookID != "" {
+					libraryBooks[b.ForeignBookID] = b.ID
 				}
 			}
 		}
@@ -223,6 +258,19 @@ func enrichMatches(ctx context.Context, opts ScanOptions, mediaType string, item
 					continue
 				}
 				matches = seriesCandidates(series, parsed.Year, librarySeries, maxMatches)
+			case "music":
+				artists, err := opts.Meta.SearchArtists(ctx, term)
+				if err != nil {
+					continue
+				}
+				matches = artistCandidates(artists, libraryArtists, maxMatches)
+			case "books", "ebook", "audiobook":
+				books, err := opts.Meta.SearchBooks(ctx, term)
+				if err != nil {
+					continue
+				}
+				format := detectBookFormat(item.Path, mediaType)
+				matches = bookCandidates(books, libraryBooks, format, maxMatches)
 			}
 			if len(matches) == 0 {
 				continue
@@ -314,6 +362,70 @@ func seriesCandidates(series []domain.Series, year int, library map[int]int64, m
 		scored = scored[:max]
 	}
 	return scored
+}
+
+func artistCandidates(artists []domain.Artist, library map[string]int64, max int) []MatchCandidate {
+	out := make([]MatchCandidate, 0, len(artists))
+	for _, a := range artists {
+		if a.Title == "" || a.ForeignArtistID == "" {
+			continue
+		}
+		out = append(out, MatchCandidate{
+			ForeignID:      a.ForeignArtistID,
+			Title:          a.Title,
+			Overview:       a.Overview,
+			Disambiguation: a.Disambiguation,
+			LibraryID:      library[a.ForeignArtistID],
+			InLibrary:      library[a.ForeignArtistID] > 0,
+		})
+		if len(out) >= max {
+			break
+		}
+	}
+	return out
+}
+
+func bookCandidates(books []domain.Book, library map[string]int64, format string, max int) []MatchCandidate {
+	out := make([]MatchCandidate, 0, len(books))
+	for _, b := range books {
+		if b.Title == "" || b.ForeignBookID == "" {
+			continue
+		}
+		year := 0
+		if y, err := strconv.Atoi(strings.TrimSpace(b.ReleaseDate)); err == nil {
+			year = y
+		} else if len(b.ReleaseDate) >= 4 {
+			if y, err := strconv.Atoi(b.ReleaseDate[:4]); err == nil {
+				year = y
+			}
+		}
+		authorName := strings.TrimPrefix(b.Overview, "by ")
+		if authorName == b.Overview {
+			authorName = ""
+		}
+		out = append(out, MatchCandidate{
+			ForeignID:  b.ForeignBookID,
+			Title:      b.Title,
+			Year:       year,
+			Overview:   b.Overview,
+			AuthorName: authorName,
+			Format:     format,
+			LibraryID:  library[b.ForeignBookID],
+			InLibrary:  library[b.ForeignBookID] > 0,
+		})
+		if len(out) >= max {
+			break
+		}
+	}
+	return out
+}
+
+func detectBookFormat(path, mediaType string) string {
+	mediaType = strings.ToLower(strings.TrimSpace(mediaType))
+	if mediaType == "audiobook" || mediafile.IsAudiobook(path) {
+		return "audiobook"
+	}
+	return "ebook"
 }
 
 func knownPaths(store *db.Store, mediaType string) map[string]bool {
@@ -418,16 +530,30 @@ func ImportSelected(ctx context.Context, opts ImportOptions, items []ImportItem)
 				Data:    map[string]any{"sourcePath": src, "destPath": src, "inPlace": true},
 			})
 			imported++
-		case "music", "books", "ebook", "audiobook":
-			// Legacy path: only attach to an existing library row.
-			if it.MatchID <= 0 {
+		case "music":
+			ar, err := resolveArtist(ctx, opts, it, profileID, src)
+			if err != nil || ar == nil {
 				continue
 			}
-			n, err := importExistingLegacy(opts, mediaType, it, src, fi.Size())
-			if err != nil {
+			_ = opts.Store.CreateHistory(domain.HistoryRecord{
+				MediaType: "music", ArtistID: ar.ID,
+				SourceTitle: filepath.Base(src), EventType: "downloadFolderImported",
+				Quality: map[string]any{"quality": map[string]any{"name": "Unknown"}},
+				Data:    map[string]any{"sourcePath": src, "destPath": src, "inPlace": true},
+			})
+			imported++
+		case "books", "ebook", "audiobook":
+			bk, err := resolveBook(ctx, opts, it, profileID, src, mediaType)
+			if err != nil || bk == nil {
 				continue
 			}
-			imported += n
+			_ = opts.Store.CreateHistory(domain.HistoryRecord{
+				MediaType: "ebook", BookID: bk.ID,
+				SourceTitle: filepath.Base(src), EventType: "downloadFolderImported",
+				Quality: map[string]any{"quality": map[string]any{"name": "Unknown"}},
+				Data:    map[string]any{"sourcePath": src, "destPath": src, "inPlace": true},
+			})
+			imported++
 		}
 	}
 	return imported, nil
@@ -506,27 +632,153 @@ func resolveSeries(ctx context.Context, opts ImportOptions, it ImportItem, profi
 	return created, nil
 }
 
-func importExistingLegacy(opts ImportOptions, mediaType string, it ImportItem, src string, size int64) (int, error) {
-	switch mediaType {
-	case "music":
-		_ = opts.Store.CreateHistory(domain.HistoryRecord{
-			MediaType: "music", ArtistID: it.MatchID,
-			SourceTitle: filepath.Base(src), EventType: "downloadFolderImported",
-			Quality: map[string]any{"quality": map[string]any{"name": "Unknown"}},
-			Data:    map[string]any{"sourcePath": src, "destPath": src, "inPlace": true},
-		})
-		return 1, nil
-	case "books", "ebook", "audiobook":
-		_ = opts.Store.CreateHistory(domain.HistoryRecord{
-			MediaType: "ebook", BookID: it.MatchID,
-			SourceTitle: filepath.Base(src), EventType: "downloadFolderImported",
-			Quality: map[string]any{"quality": map[string]any{"name": "Unknown"}},
-			Data:    map[string]any{"sourcePath": src, "destPath": src, "inPlace": true},
-		})
-		return 1, nil
-	default:
-		_ = opts.AppCfg
-		_ = size
-		return 0, fmt.Errorf("unsupported")
+func resolveArtist(ctx context.Context, opts ImportOptions, it ImportItem, profileID int64, src string) (*domain.Artist, error) {
+	if it.MatchID > 0 {
+		return opts.Store.GetArtistByID(it.MatchID)
 	}
+	foreignID := strings.TrimSpace(it.ForeignID)
+	if foreignID != "" {
+		if existing, err := opts.Store.GetArtistByForeignID(foreignID); err == nil && existing != nil {
+			return existing, nil
+		}
+	}
+	if foreignID == "" || opts.Meta == nil {
+		return nil, fmt.Errorf("artist match required")
+	}
+	meta, _, err := opts.Meta.GetArtistByMBID(ctx, foreignID)
+	if err != nil {
+		return nil, err
+	}
+	folder := filepath.Dir(src)
+	// Prefer artist folder when file is nested Artist/Album/track.
+	rel, err := filepath.Rel(opts.RootFolderPath, src)
+	if err == nil {
+		parts := strings.Split(rel, string(filepath.Separator))
+		if len(parts) >= 2 && opts.RootFolderPath != "" {
+			folder = filepath.Join(opts.RootFolderPath, parts[0])
+		}
+	}
+	root := strings.TrimSpace(opts.RootFolderPath)
+	if root == "" {
+		root = folder
+	}
+	meta.QualityProfileID = profileID
+	meta.RootFolderPath = root
+	meta.Path = folder
+	meta.Monitored = true
+	created, err := opts.Store.CreateArtist(meta)
+	if err != nil {
+		return nil, err
+	}
+	if opts.SyncArtistAlbums != nil {
+		_ = opts.SyncArtistAlbums(ctx, created)
+	}
+	return created, nil
+}
+
+func resolveBook(ctx context.Context, opts ImportOptions, it ImportItem, profileID int64, src, mediaType string) (*domain.Book, error) {
+	if it.MatchID > 0 {
+		if bk, err := opts.Store.GetBookByID(it.MatchID); err == nil && bk != nil {
+			_ = ensureBookEdition(opts, bk, src, it.Format, mediaType, profileID)
+			return bk, nil
+		}
+	}
+	foreignID := strings.TrimSpace(it.ForeignID)
+	if foreignID != "" {
+		if existing, err := opts.Store.GetBookByForeignID(foreignID); err == nil && existing != nil {
+			_ = ensureBookEdition(opts, existing, src, it.Format, mediaType, profileID)
+			return existing, nil
+		}
+	}
+	if foreignID == "" || opts.Meta == nil {
+		return nil, fmt.Errorf("book match required")
+	}
+	book, author, _, err := opts.Meta.GetBookByWorkKey(ctx, foreignID)
+	if err != nil {
+		return nil, err
+	}
+	format := strings.TrimSpace(it.Format)
+	if format == "" {
+		format = detectBookFormat(src, mediaType)
+	}
+	folder := filepath.Dir(src)
+	root := strings.TrimSpace(opts.RootFolderPath)
+	if root == "" {
+		root = folder
+	}
+
+	var authorID int64
+	if author.ForeignAuthorID != "" {
+		if existing, err := opts.Store.GetAuthorByForeignID(author.ForeignAuthorID); err == nil && existing != nil {
+			authorID = existing.ID
+		}
+	}
+	if authorID == 0 {
+		if author.Title == "" {
+			author.Title = "Unknown Author"
+		}
+		author.RootFolderPath = root
+		author.Path = folder
+		author.QualityProfileID = profileID
+		author.Monitored = true
+		createdAuthor, err := opts.Store.CreateAuthor(author)
+		if err != nil {
+			return nil, err
+		}
+		authorID = createdAuthor.ID
+	}
+
+	book.AuthorID = authorID
+	book.Monitored = true
+	createdBook, err := opts.Store.CreateBook(book)
+	if err != nil {
+		return nil, err
+	}
+	_ = ensureBookEdition(opts, createdBook, src, format, mediaType, profileID)
+	return createdBook, nil
+}
+
+func ensureBookEdition(opts ImportOptions, book *domain.Book, src, format, mediaType string, profileID int64) error {
+	if book == nil {
+		return fmt.Errorf("book required")
+	}
+	format = strings.TrimSpace(format)
+	if format == "" {
+		format = detectBookFormat(src, mediaType)
+	}
+	folder := filepath.Dir(src)
+	root := strings.TrimSpace(opts.RootFolderPath)
+	if root == "" {
+		root = folder
+	}
+	editions, err := opts.Store.ListEditions(book.ID, format)
+	if err == nil {
+		for i := range editions {
+			ed := editions[i]
+			ed.HasFile = true
+			ed.Path = folder
+			ed.RootFolderPath = root
+			if ed.QualityProfileID == 0 {
+				ed.QualityProfileID = profileID
+			}
+			_, _ = opts.Store.UpdateEdition(ed)
+			return nil
+		}
+	}
+	_, err = opts.Store.CreateEdition(domain.Edition{
+		BookID:           book.ID,
+		AuthorID:         book.AuthorID,
+		ForeignEditionID: book.ForeignBookID + "-" + format,
+		Title:            book.Title,
+		Format:           format,
+		Monitored:        true,
+		HasFile:          true,
+		Path:             folder,
+		QualityProfileID: profileID,
+		RootFolderPath:   root,
+		Images:           book.Images,
+		ReleaseDate:      book.ReleaseDate,
+		PageCount:        book.PageCount,
+	})
+	return err
 }

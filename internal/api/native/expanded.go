@@ -394,6 +394,16 @@ func (s *Server) handleLibraryImport(w http.ResponseWriter, r *http.Request) {
 		SyncSeriesEpisodes: func(ctx context.Context, sr *domain.Series) error {
 			return s.syncSeriesEpisodes(ctx, sr)
 		},
+		SyncArtistAlbums: func(ctx context.Context, artist *domain.Artist) error {
+			if artist == nil || artist.ForeignArtistID == "" || s.meta == nil {
+				return nil
+			}
+			_, items, err := s.meta.GetArtistByMBID(ctx, artist.ForeignArtistID)
+			if err != nil || len(items) == 0 {
+				return err
+			}
+			return s.store.ReplaceArtistDiscography(artist.ID, items)
+		},
 	}, req.Items)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err)

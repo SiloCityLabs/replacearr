@@ -142,9 +142,13 @@ export interface LibraryImportMatch {
   tmdbId?: number;
   tvdbId?: number;
   imdbId?: string;
+  foreignId?: string;
+  authorName?: string;
+  format?: string;
   title: string;
   year?: number;
   overview?: string;
+  disambiguation?: string;
   inLibrary?: boolean;
 }
 

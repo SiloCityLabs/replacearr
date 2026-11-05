@@ -180,8 +180,11 @@ func MatcherForMediaType(mediaType string) func(string) bool {
 	switch strings.ToLower(strings.TrimSpace(mediaType)) {
 	case "music":
 		return IsAudio
-	case "ebook", "book", "books":
+	case "ebook", "book":
 		return IsEbook
+	case "books":
+		// Books library import covers both ebook and audiobook files.
+		return func(path string) bool { return IsEbook(path) || IsAudiobook(path) }
 	case "audiobook":
 		return IsAudiobook
 	case "movie", "movies", "tv", "series":
