@@ -76,10 +76,10 @@ While Sonarr v3 and Radarr v3 share `NzbDrone.Core` and `ProviderControllerBase`
 * **Upstream Source**: `Movies/MovieController.cs`, `Movies/MovieLookupController.cs`, `Movies/MovieResource.cs`
 * **Query Parameters**:
   * `GET /api/v3/movie?tmdbId={tmdbId}&excludeLocalCovers={bool}&languageId={int}`
-  * `GET /api/v3/movie/lookup?term={term}` (supports `tmdb:12345`, `imdb:tt1234567`, or free-text search). Replacearr backs this with Radarr’s metadata API (`https://api.radarr.video/v1/…`) via `internal/metadata` — not a curated stub catalog.
+  * `GET /api/v3/movie/lookup?term={term}` (supports `tmdb:12345`, `imdb:tt1234567`, `person:12345` / TMDB person URLs for cast/crew filmography, or free-text search). Replacearr backs this with Radarr’s metadata API (`https://api.radarr.video/v1/…`) via `internal/metadata` — not a curated stub catalog. Person filmography collects TMDB movie ids from the public person page, then hydrates each title through `api.radarr.video`.
   * `GET /api/v3/movie/lookup/tmdb?tmdbId={tmdbId}` (returns a single `MovieResource` object, **not** an array! Overseerr calls this directly before adding a movie)
   * `GET /api/v3/movie/lookup/imdb?imdbId={imdbId}` (returns a single `MovieResource` object)
-  * `DELETE /api/v3/movie/{id}?deleteFiles={bool}&addImportExclusion={bool}` (note: parameter name is `addImportExclusion` in Radarr vs. `addImportListExclusion` in Sonarr)
+  * `DELETE /api/v3/movie/{id}?deleteFiles={bool}&addImportExclusion={bool}` (note: parameter name is `addImportExclusion` in Radarr vs. `addImportListExclusion` in Sonarr). Native UI uses the same query flags on `DELETE /api/v1/movies/{id}`: `deleteFiles` removes the movie folder under its root path; `addImportExclusion` inserts into `import_list_exclusions`.
 * **POST Request / GET Response Shape (`MovieResource`)**:
 ```json
 {

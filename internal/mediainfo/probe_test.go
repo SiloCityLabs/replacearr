@@ -46,3 +46,34 @@ func TestResolutionFromLabel(t *testing.T) {
 		t.Fatal("4k")
 	}
 }
+
+func TestNormalizeLanguageTag(t *testing.T) {
+	cases := map[string]string{
+		"":          "",
+		"und":       "",
+		"UND":       "",
+		"unknown":   "",
+		"eng":       "eng",
+		" en ":      "en",
+	}
+	for in, want := range cases {
+		if got := normalizeLanguageTag(in); got != want {
+			t.Fatalf("normalizeLanguageTag(%q)=%q want %q", in, got, want)
+		}
+	}
+}
+
+func TestFormatHelpers(t *testing.T) {
+	if got := formatBitrate(156_800); got != "156.8 kbit/s" {
+		t.Fatalf("bitrate: %q", got)
+	}
+	if got := formatBitrate(4_400_000); got != "4.4 Mbit/s" {
+		t.Fatalf("video bitrate: %q", got)
+	}
+	if got := formatDuration(5931); got != "1:38:51" {
+		t.Fatalf("duration: %q", got)
+	}
+	if got := formatFPS(23.976023976); got != "23.976" {
+		t.Fatalf("fps: %q", got)
+	}
+}

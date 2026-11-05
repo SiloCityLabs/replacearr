@@ -12,30 +12,37 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/replacearr/replacearr/internal/domain"
 )
 
 const (
-	defaultSkyHookBase = "https://skyhook.sonarr.tv/v2/tvdb"
-	defaultRadarrBase  = "https://api.radarr.video/v1"
-	defaultTimeout     = 20 * time.Second
+	defaultSkyHookBase  = "https://skyhook.sonarr.tv/v2/tvdb"
+	defaultRadarrBase   = "https://api.radarr.video/v1"
+	defaultTMDBSiteBase = "https://www.themoviedb.org"
+	defaultTimeout      = 20 * time.Second
+	maxPersonMovies     = 48
+	personHydrateWorkers = 6
 )
 
 var (
-	imdbURLRe = regexp.MustCompile(`(?i)imdb\.com/title/(tt\d{7,})`)
-	tmdbURLRe = regexp.MustCompile(`(?i)themoviedb\.org/movie/(\d+)`)
-	imdbIDRe  = regexp.MustCompile(`(?i)^tt\d{7,}$`)
+	imdbURLRe   = regexp.MustCompile(`(?i)imdb\.com/title/(tt\d{7,})`)
+	tmdbURLRe   = regexp.MustCompile(`(?i)themoviedb\.org/movie/(\d+)`)
+	personURLRe = regexp.MustCompile(`(?i)themoviedb\.org/person/(\d+)`)
+	movieHrefRe = regexp.MustCompile(`href="/movie/(\d+)`)
+	imdbIDRe    = regexp.MustCompile(`(?i)^tt\d{7,}$`)
 )
 
 // Service looks up series, movies, artists, and books for Add New flows.
 type Service struct {
-	httpClient  *http.Client
-	skyHookBase string
-	radarrBase  string
-	mbBase      string
-	olBase      string
+	httpClient   *http.Client
+	skyHookBase  string
+	radarrBase   string
+	tmdbSiteBase string
+	mbBase       string
+	olBase       string
 }
 
 // Option configures Service.
@@ -68,6 +75,15 @@ func WithRadarrBase(base string) Option {
 	}
 }
 
+// WithTMDBSiteBase overrides the TMDB website base URL used for person filmography (tests).
+func WithTMDBSiteBase(base string) Option {
+	return func(s *Service) {
+		if base != "" {
+			s.tmdbSiteBase = strings.TrimRight(base, "/")
+		}
+	}
+}
+
 // WithMusicBrainzBase overrides the MusicBrainz WS2 base URL (tests).
 func WithMusicBrainzBase(base string) Option {
 	return func(s *Service) {
@@ -89,11 +105,12 @@ func WithOpenLibraryBase(base string) Option {
 // New returns a Service pointed at the public SkyHook, Radarr, MusicBrainz, and OpenLibrary APIs.
 func New(opts ...Option) *Service {
 	s := &Service{
-		httpClient:  &http.Client{Timeout: defaultTimeout},
-		skyHookBase: defaultSkyHookBase,
-		radarrBase:  defaultRadarrBase,
-		mbBase:      defaultMusicBrainzBase,
-		olBase:      defaultOpenLibraryBase,
+		httpClient:   &http.Client{Timeout: defaultTimeout},
+		skyHookBase:  defaultSkyHookBase,
+		radarrBase:   defaultRadarrBase,
+		tmdbSiteBase: defaultTMDBSiteBase,
+		mbBase:       defaultMusicBrainzBase,
+		olBase:       defaultOpenLibraryBase,
 	}
 	for _, opt := range opts {
 		opt(s)
@@ -183,7 +200,7 @@ func (s *Service) GetSeriesByTVDB(ctx context.Context, tvdbID int, language stri
 	return mapSeries(show), mapSkyHookEpisodes(show.Episodes), mapSeriesAliases(show), nil
 }
 
-// SearchMovies performs Radarr-style movie lookup (free-text, imdb:, tmdb:, or URLs).
+// SearchMovies performs Radarr-style movie lookup (free-text, imdb:, tmdb:, person:, or URLs).
 func (s *Service) SearchMovies(ctx context.Context, term string) ([]domain.Movie, error) {
 	term = strings.TrimSpace(term)
 	if term == "" {
@@ -192,11 +209,16 @@ func (s *Service) SearchMovies(ctx context.Context, term string) ([]domain.Movie
 
 	if m := imdbURLRe.FindStringSubmatch(term); len(m) == 2 {
 		term = "imdb:" + m[1]
+	} else if m := personURLRe.FindStringSubmatch(term); len(m) == 2 {
+		term = "person:" + m[1]
 	} else if m := tmdbURLRe.FindStringSubmatch(term); len(m) == 2 {
 		term = "tmdb:" + m[1]
 	}
 
 	lower := strings.ToLower(term)
+	if id, ok := parsePrefixedInt(lower, "person:", "personid:", "tmdbperson:"); ok {
+		return s.SearchMoviesByPerson(ctx, id)
+	}
 	if id, ok := parsePrefixedInt(lower, "tmdb:", "tmdbid:"); ok {
 		movie, err := s.GetMovieByTMDB(ctx, id)
 		if err != nil {
@@ -228,6 +250,116 @@ func (s *Service) SearchMovies(ctx context.Context, term string) ([]domain.Movie
 	out := make([]domain.Movie, 0, len(movies))
 	for _, m := range movies {
 		out = append(out, mapMovie(m))
+	}
+	return out, nil
+}
+
+// SearchMoviesByPerson returns movies credited to a TMDB person (cast or crew).
+func (s *Service) SearchMoviesByPerson(ctx context.Context, personTMDBID int) ([]domain.Movie, error) {
+	if personTMDBID <= 0 {
+		return []domain.Movie{}, nil
+	}
+	ids, err := s.personMovieIDs(ctx, personTMDBID)
+	if err != nil {
+		return nil, err
+	}
+	if len(ids) == 0 {
+		return []domain.Movie{}, nil
+	}
+	if len(ids) > maxPersonMovies {
+		ids = ids[:maxPersonMovies]
+	}
+	return s.hydrateMoviesByTMDB(ctx, ids)
+}
+
+func (s *Service) personMovieIDs(ctx context.Context, personTMDBID int) ([]int, error) {
+	u := fmt.Sprintf("%s/person/%d", s.tmdbSiteBase, personTMDBID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "text/html,application/xhtml+xml")
+	req.Header.Set("User-Agent", "Replacearr/0.1 (+https://github.com/replacearr/replacearr)")
+
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("tmdb person page: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, errNotFound
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("tmdb person page: upstream returned %d", resp.StatusCode)
+	}
+	return extractMovieIDsFromPersonHTML(body), nil
+}
+
+func extractMovieIDsFromPersonHTML(html []byte) []int {
+	matches := movieHrefRe.FindAllSubmatch(html, -1)
+	if len(matches) == 0 {
+		return nil
+	}
+	seen := make(map[int]struct{}, len(matches))
+	out := make([]int, 0, len(matches))
+	for _, m := range matches {
+		id, err := strconv.Atoi(string(m[1]))
+		if err != nil || id <= 0 {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	return out
+}
+
+func (s *Service) hydrateMoviesByTMDB(ctx context.Context, ids []int) ([]domain.Movie, error) {
+	type result struct {
+		idx int
+		mv  domain.Movie
+	}
+	ch := make(chan result, len(ids))
+	sem := make(chan struct{}, personHydrateWorkers)
+	var wg sync.WaitGroup
+	for i, id := range ids {
+		wg.Add(1)
+		go func(i, id int) {
+			defer wg.Done()
+			select {
+			case <-ctx.Done():
+				return
+			case sem <- struct{}{}:
+			}
+			defer func() { <-sem }()
+			mv, err := s.GetMovieByTMDB(ctx, id)
+			if err != nil || mv.TmdbID == 0 {
+				return
+			}
+			ch <- result{idx: i, mv: mv}
+		}(i, id)
+	}
+	go func() {
+		wg.Wait()
+		close(ch)
+	}()
+
+	byIdx := make(map[int]domain.Movie, len(ids))
+	for r := range ch {
+		byIdx[r.idx] = r.mv
+	}
+	out := make([]domain.Movie, 0, len(byIdx))
+	for i := range ids {
+		if mv, ok := byIdx[i]; ok {
+			out = append(out, mv)
+		}
 	}
 	return out, nil
 }

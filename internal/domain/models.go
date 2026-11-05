@@ -209,6 +209,8 @@ type EpisodeFile struct {
 	Resolution   int       `json:"resolution"`
 	VideoCodec   string    `json:"videoCodec"`
 	AudioCodec   string    `json:"audioCodec"`
+	Languages    string    `json:"languages"`
+	Indexer      string    `json:"indexer"`
 	DateAdded    time.Time `json:"dateAdded"`
 }
 
@@ -225,7 +227,35 @@ type MovieFile struct {
 	Resolution   int       `json:"resolution"`
 	VideoCodec   string    `json:"videoCodec"`
 	AudioCodec   string    `json:"audioCodec"`
+	Languages    string    `json:"languages"`
+	Indexer      string    `json:"indexer"`
 	DateAdded    time.Time `json:"dateAdded"`
+}
+
+// MovieFileUpdate is the editable metadata patch for a movie file.
+type MovieFileUpdate struct {
+	Quality      string `json:"quality"`
+	Languages    string `json:"languages"`
+	Indexer      string `json:"indexer"`
+	ReleaseGroup string `json:"releaseGroup"`
+	SceneName    string `json:"sceneName"`
+	VideoCodec   string `json:"videoCodec"`
+	AudioCodec   string `json:"audioCodec"`
+	Resolution   int    `json:"resolution"`
+}
+
+// FileDetailProperty is a labeled media/file attribute for the details modal.
+type FileDetailProperty struct {
+	Label string `json:"label"`
+	Value string `json:"value"`
+}
+
+// FileDetails is a probe/stat summary for media or sidecar files.
+type FileDetails struct {
+	Path       string               `json:"path"`
+	Kind       string               `json:"kind"` // media | extra
+	Source     string               `json:"source,omitempty"`
+	Properties []FileDetailProperty `json:"properties"`
 }
 
 // SubtitleProfile describes wanted subtitle languages and preferences.
@@ -717,6 +747,18 @@ type BlocklistItem struct {
 	Size            int64     `json:"size,omitempty"`
 	Protocol        string    `json:"protocol,omitempty"`
 	CreatedAt       time.Time `json:"createdAt"`
+}
+
+// ImportListExclusion blocks a title from being re-added by import lists.
+type ImportListExclusion struct {
+	ID        int64     `json:"id"`
+	MediaType string    `json:"mediaType"`
+	TmdbID    int       `json:"tmdbId,omitempty"`
+	TvdbID    int       `json:"tvdbId,omitempty"`
+	ImdbID    string    `json:"imdbId,omitempty"`
+	Title     string    `json:"title"`
+	Year      int       `json:"year,omitempty"`
+	CreatedAt time.Time `json:"createdAt"`
 }
 
 type CalendarEvent struct {

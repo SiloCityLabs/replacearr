@@ -165,6 +165,62 @@ func TestSearchMoviesFreeTextAndPrefixes(t *testing.T) {
 	}
 }
 
+func TestSearchMoviesByPerson(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/person/31":
+			w.Header().Set("Content-Type", "text/html")
+			_, _ = w.Write([]byte(`
+				<html><body>
+				  <a href="/movie/13-forest-gump">Forest Gump</a>
+				  <a href="/movie/862-toy-story">Toy Story</a>
+				  <a href="/movie/13-forest-gump">dup</a>
+				  <a href="/movie/99999999-missing">Missing</a>
+				</body></html>`))
+		case r.URL.Path == "/movie/13":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"TmdbId": 13, "Title": "Forrest Gump", "Year": 1994, "Status": "released"}`))
+		case r.URL.Path == "/movie/862":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"TmdbId": 862, "Title": "Toy Story", "Year": 1995, "Status": "released"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer ts.Close()
+
+	svc := New(
+		WithRadarrBase(ts.URL),
+		WithTMDBSiteBase(ts.URL),
+		WithHTTPClient(ts.Client()),
+	)
+
+	byPrefix, err := svc.SearchMovies(context.Background(), "person:31")
+	if err != nil {
+		t.Fatalf("person prefix: %v", err)
+	}
+	if len(byPrefix) != 2 || byPrefix[0].TmdbID != 13 || byPrefix[1].TmdbID != 862 {
+		t.Fatalf("person prefix results: %+v", byPrefix)
+	}
+
+	byURL, err := svc.SearchMovies(context.Background(), "https://www.themoviedb.org/person/31-tom-hanks")
+	if err != nil || len(byURL) != 2 {
+		t.Fatalf("person url: %v %+v", err, byURL)
+	}
+}
+
+func TestExtractMovieIDsFromPersonHTML(t *testing.T) {
+	ids := extractMovieIDsFromPersonHTML([]byte(`
+		<a href="/movie/13-forest-gump">A</a>
+		<a href="/tv/123">ignore</a>
+		<a href="/movie/13">dup</a>
+		<a href="/movie/862-toy-story">B</a>
+	`))
+	if len(ids) != 2 || ids[0] != 13 || ids[1] != 862 {
+		t.Fatalf("ids: %+v", ids)
+	}
+}
+
 func TestEmptyTerm(t *testing.T) {
 	svc := New()
 	series, err := svc.SearchSeries(context.Background(), "  ", "en")

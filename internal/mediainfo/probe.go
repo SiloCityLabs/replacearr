@@ -23,6 +23,7 @@ type Info struct {
 	Height     int
 	VideoCodec string
 	AudioCodec string
+	Languages  string // comma-separated audio language tags
 	Source     string // ffprobe | filename
 }
 
@@ -46,6 +47,7 @@ func Probe(path, sceneName string) Info {
 		info.Height = probed.Height
 		info.VideoCodec = probed.VideoCodec
 		info.AudioCodec = probed.AudioCodec
+		info.Languages = probed.Languages
 		info.Source = "ffprobe"
 		if probed.Height > 0 {
 			bucket := BucketHeight(probed.Height)
@@ -61,6 +63,7 @@ type ffResult struct {
 	Height     int
 	VideoCodec string
 	AudioCodec string
+	Languages  string
 }
 
 func probeFF(path string) (ffResult, bool) {
@@ -76,7 +79,7 @@ func probeFF(path string) (ffResult, bool) {
 		"-probesize", "10M",
 		"-analyzeduration", "5M",
 		"-print_format", "json",
-		"-show_entries", "stream=codec_type,codec_name,width,height",
+		"-show_entries", "stream=codec_type,codec_name,width,height:stream_tags=language",
 		"-show_streams",
 		path,
 	)
@@ -90,12 +93,17 @@ func probeFF(path string) (ffResult, bool) {
 			CodecName string `json:"codec_name"`
 			Width     int    `json:"width"`
 			Height    int    `json:"height"`
+			Tags      struct {
+				Language string `json:"language"`
+			} `json:"tags"`
 		} `json:"streams"`
 	}
 	if err := json.Unmarshal(out, &parsed); err != nil {
 		return ffResult{}, false
 	}
 	var res ffResult
+	var langs []string
+	seen := map[string]bool{}
 	for _, s := range parsed.Streams {
 		switch s.CodecType {
 		case "video":
@@ -108,12 +116,29 @@ func probeFF(path string) (ffResult, bool) {
 			if res.AudioCodec == "" {
 				res.AudioCodec = normalizeCodec(s.CodecName)
 			}
+			lang := normalizeLanguageTag(s.Tags.Language)
+			if lang != "" && !seen[lang] {
+				seen[lang] = true
+				langs = append(langs, lang)
+			}
 		}
 	}
+	res.Languages = strings.Join(langs, ", ")
 	if res.Width == 0 && res.Height == 0 && res.VideoCodec == "" {
 		return ffResult{}, false
 	}
 	return res, true
+}
+
+// normalizeLanguageTag returns a usable language code, or empty for unset/undetermined.
+func normalizeLanguageTag(tag string) string {
+	lang := strings.ToLower(strings.TrimSpace(tag))
+	switch lang {
+	case "", "und", "undefined", "unknown", "nul", "null":
+		return ""
+	default:
+		return lang
+	}
 }
 
 func normalizeCodec(name string) string {

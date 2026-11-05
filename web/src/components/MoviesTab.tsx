@@ -48,6 +48,7 @@ export const MoviesTab: React.FC<MoviesTabProps> = ({
   const [lookupTerm, setLookupTerm] = useState('');
   const [lookupResults, setLookupResults] = useState<Movie[]>([]);
   const [lookupLoading, setLookupLoading] = useState(false);
+  const [personFilter, setPersonFilter] = useState<{ name: string; tmdbId: number } | null>(null);
   const [selectedProfileId, setSelectedProfileId] = useState<number>(profiles[0]?.id || 1);
   const [selectedRootFolder, setSelectedRootFolder] = useState<string>(
     availableRoots[0]?.path || ''
@@ -95,6 +96,17 @@ export const MoviesTab: React.FC<MoviesTabProps> = ({
     }
   };
 
+  const openAddForPerson = (person: { name: string; tmdbId: number }) => {
+    if (!person.tmdbId) return;
+    setActiveMovie(null);
+    setShowAddPanel(true);
+    setSelectedRootFolder(availableRoots[0]?.path || '');
+    setPersonFilter({ name: person.name, tmdbId: person.tmdbId });
+    setLookupTerm(person.name);
+    setLookupResults([]);
+    void handleLookup(undefined, `person:${person.tmdbId}`);
+  };
+
   const handleAddMovie = async (candidate: Partial<Movie>) => {
     if (!selectedRootFolder) {
       onNotify('Add a movies root folder in setup or settings first', true);
@@ -117,14 +129,32 @@ export const MoviesTab: React.FC<MoviesTabProps> = ({
   };
 
   const handleDeleteMovie = async (m: Movie) => {
-    const ok = await confirm({
-      title: 'Remove movie',
-      message: `Remove "${m.title}" from the Movies library?`,
-      confirmLabel: 'Remove',
+    const fileCount = m.hasFile ? 1 : 0;
+    const result = await confirm({
+      title: 'Delete movie',
+      message: `Are you sure you want to delete "${m.title}" from the Movies library?`,
+      confirmLabel: 'Delete',
+      checkboxes: [
+        {
+          id: 'addImportExclusion',
+          label: 'Add List Exclusion',
+          description: 'Prevent this movie from being re-added by import lists.',
+          defaultChecked: false,
+        },
+        {
+          id: 'deleteFiles',
+          label: `Delete ${fileCount} Movie Files`,
+          description: 'Permanently delete the movie files and folder from disk.',
+          defaultChecked: false,
+        },
+      ],
     });
-    if (!ok) return;
+    if (!result) return;
     try {
-      await api.deleteMovie(m.id);
+      await api.deleteMovie(m.id, {
+        addImportExclusion: result.addImportExclusion === true,
+        deleteFiles: result.deleteFiles === true,
+      });
       onNotify(`Removed "${m.title}" from library`);
       if (activeMovie?.id === m.id) {
         setActiveMovie(null);
@@ -143,6 +173,7 @@ export const MoviesTab: React.FC<MoviesTabProps> = ({
   const startAddPanel = () => {
     setShowAddPanel(true);
     setSelectedRootFolder(availableRoots[0]?.path || '');
+    setPersonFilter(null);
     setLookupTerm('');
     setLookupResults([]);
   };
@@ -168,6 +199,7 @@ export const MoviesTab: React.FC<MoviesTabProps> = ({
           onDelete={() => void handleDeleteMovie(activeMovie)}
           onSearchReleases={onSearchReleases}
           onManualTorrent={setManualTarget}
+          onAddByPerson={openAddForPerson}
           onNotify={onNotify}
           onUpdated={(m) => {
             setActiveMovie(m);
@@ -193,14 +225,21 @@ export const MoviesTab: React.FC<MoviesTabProps> = ({
           <div className="flex items-center gap-2.5">
             <Sparkles className="w-5 h-5 text-emerald-400" />
             <div>
-              <h3 className="text-base font-bold text-white">Add Movie</h3>
+              <h3 className="text-base font-bold text-white">
+                {personFilter ? `Add Movie — ${personFilter.name}` : 'Add Movie'}
+              </h3>
               <p className="text-xs text-slate-400">
-                Lookup on TMDB / IMDb — not torrent search
+                {personFilter
+                  ? 'Movies credited to this cast/crew member'
+                  : 'Lookup on TMDB / IMDb — not torrent search'}
               </p>
             </div>
           </div>
           <button
-            onClick={() => setShowAddPanel(false)}
+            onClick={() => {
+              setShowAddPanel(false);
+              setPersonFilter(null);
+            }}
             className="p-1.5 rounded-lg bg-slate-800 text-slate-400 hover:text-white"
           >
             <X className="w-4 h-4" />
@@ -208,12 +247,25 @@ export const MoviesTab: React.FC<MoviesTabProps> = ({
         </div>
 
         <div className="p-5 border-b border-slate-800 space-y-4 bg-slate-950/50 shrink-0">
-          <form onSubmit={(e) => void handleLookup(e)} className="flex gap-2">
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (personFilter) {
+                void handleLookup(undefined, `person:${personFilter.tmdbId}`);
+                return;
+              }
+              void handleLookup(e);
+            }}
+            className="flex gap-2"
+          >
             <input
               type="text"
               value={lookupTerm}
-              onChange={(e) => setLookupTerm(e.target.value)}
-              placeholder="Movie title, tmdb:12345, or imdb:tt…"
+              onChange={(e) => {
+                setPersonFilter(null);
+                setLookupTerm(e.target.value);
+              }}
+              placeholder="Movie title, person:12345, tmdb:12345, or imdb:tt…"
               className="flex-1 px-3.5 py-2.5 bg-slate-900 border border-slate-800 rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
               autoFocus
             />
@@ -281,9 +333,14 @@ export const MoviesTab: React.FC<MoviesTabProps> = ({
         </div>
 
         <div className="flex-1 overflow-y-auto p-5 space-y-3">
+          {lookupLoading ? (
+            <p className="text-sm text-slate-400 text-center py-12">Looking up…</p>
+          ) : null}
           {lookupResults.length === 0 && !lookupLoading ? (
             <p className="text-sm text-slate-400 text-center py-12">
-              Search for a movie title to see lookup results.
+              {personFilter
+                ? `No movies found for ${personFilter.name}.`
+                : 'Search for a movie title to see lookup results.'}
             </p>
           ) : null}
           {lookupResults.map((item, idx) => (

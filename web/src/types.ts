@@ -287,10 +287,35 @@ export interface MediaFileInfo {
   resolution?: number;
   videoCodec?: string;
   audioCodec?: string;
+  languages?: string;
+  indexer?: string;
   dateAdded: string;
   seriesId?: number;
   episodeId?: number;
   movieId?: number;
+}
+
+export interface MediaFileUpdate {
+  quality?: string;
+  languages?: string;
+  indexer?: string;
+  releaseGroup?: string;
+  sceneName?: string;
+  videoCodec?: string;
+  audioCodec?: string;
+  resolution?: number;
+}
+
+export interface FileDetailProperty {
+  label: string;
+  value: string;
+}
+
+export interface FileDetails {
+  path: string;
+  kind: string;
+  source?: string;
+  properties: FileDetailProperty[];
 }
 
 export interface SubtitleTrack {

@@ -2,8 +2,10 @@ package native
 
 import (
 	"context"
+	"database/sql"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"runtime"
@@ -405,6 +407,12 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/v1/movies/{id}", s.authSvc.RequirePermission(domain.PermMoviesDelete, s.handleDeleteMovie))
 	mux.HandleFunc("POST /api/v1/movies/{id}/refresh", s.authSvc.RequirePermission(domain.PermMoviesWrite, s.handleRefreshMovieMetadata))
 	mux.HandleFunc("GET /api/v1/movies/{id}/files", s.authSvc.RequirePermission(domain.PermMoviesRead, s.handleMovieFiles))
+	mux.HandleFunc("PUT /api/v1/movies/{id}/files/{fileId}", s.authSvc.RequirePermission(domain.PermMoviesWrite, s.handleUpdateMovieFile))
+	mux.HandleFunc("DELETE /api/v1/movies/{id}/files/{fileId}", s.authSvc.RequirePermission(domain.PermMoviesDelete, s.handleDeleteMovieFile))
+	mux.HandleFunc("GET /api/v1/movies/{id}/files/{fileId}/details", s.authSvc.RequirePermission(domain.PermMoviesRead, s.handleMovieFileDetails))
+	mux.HandleFunc("GET /api/v1/movies/{id}/extra-files/details", s.authSvc.RequirePermission(domain.PermMoviesRead, s.handleMovieExtraFileDetails))
+	mux.HandleFunc("PUT /api/v1/movies/{id}/extra-files", s.authSvc.RequirePermission(domain.PermMoviesWrite, s.handleUpdateMovieExtraFile))
+	mux.HandleFunc("DELETE /api/v1/movies/{id}/extra-files", s.authSvc.RequirePermission(domain.PermMoviesDelete, s.handleDeleteMovieExtraFile))
 	mux.HandleFunc("GET /api/v1/movies/{id}/subtitles", s.authSvc.RequirePermission(domain.PermMoviesRead, s.handleMovieSubtitles))
 	mux.HandleFunc("GET /api/v1/movies/{id}/subtitles/search", s.authSvc.RequirePermission(domain.PermMoviesRead, s.handleSearchMovieSubtitles))
 	mux.HandleFunc("POST /api/v1/movies/{id}/subtitles/download", s.authSvc.RequirePermission(domain.PermMoviesWrite, s.handleDownloadMovieSubtitle))
@@ -664,6 +672,39 @@ func (s *Server) handleCreateMovie(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleDeleteMovie(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	deleteFiles := queryFlag(r, "deleteFiles")
+	addExclusion := queryFlag(r, "addImportExclusion")
+
+	mv, err := s.store.GetMovieByID(id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeErr(w, http.StatusNotFound, errors.New("movie not found"))
+			return
+		}
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	if addExclusion {
+		if _, err := s.store.AddImportListExclusion(domain.ImportListExclusion{
+			MediaType: "movie",
+			TmdbID:    mv.TmdbID,
+			ImdbID:    mv.ImdbID,
+			Title:     mv.Title,
+			Year:      mv.Year,
+		}); err != nil {
+			writeErr(w, http.StatusInternalServerError, fmt.Errorf("add list exclusion: %w", err))
+			return
+		}
+	}
+
+	if deleteFiles {
+		if err := s.store.DeleteMovieDiskFiles(mv); err != nil {
+			writeErr(w, http.StatusInternalServerError, fmt.Errorf("delete movie files: %w", err))
+			return
+		}
+	}
+
 	if err := s.store.DeleteMovie(id); err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
@@ -1628,4 +1669,9 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 
 func writeErr(w http.ResponseWriter, status int, err error) {
 	writeJSON(w, status, map[string]string{"error": err.Error()})
+}
+
+func queryFlag(r *http.Request, name string) bool {
+	v := strings.TrimSpace(strings.ToLower(r.URL.Query().Get(name)))
+	return v == "true" || v == "1" || v == "yes"
 }

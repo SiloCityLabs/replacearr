@@ -1,10 +1,11 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   ArrowLeft,
   CheckCircle2,
   Clock,
   Film,
   Folder,
+  Info,
   Loader2,
   Magnet,
   Pencil,
@@ -14,6 +15,7 @@ import {
   UserRound,
 } from 'lucide-react';
 import type {
+  MediaFileInfo,
   Movie,
   MovieExtraFile,
   MovieFilesResponse,
@@ -24,7 +26,11 @@ import type {
 } from '../types';
 import { api, formatBytes } from '../api';
 import type { ManualTorrentTarget } from './ManualTorrentForm';
+import { ExtraFileEditModal } from './modals/ExtraFileEditModal';
+import { FileDetailsModal } from './modals/FileDetailsModal';
+import { MediaFileEditModal } from './modals/MediaFileEditModal';
 import { MovieEditModal } from './modals/MovieEditModal';
+import { useConfirm } from './modals/ConfirmModal';
 import { SubtitlesPanel } from './SubtitlesPanel';
 
 interface MovieDetailPanelProps {
@@ -36,6 +42,7 @@ interface MovieDetailPanelProps {
   onDelete: () => void;
   onSearchReleases: (req: ReleaseSearchRequest) => void;
   onManualTorrent: (target: ManualTorrentTarget) => void;
+  onAddByPerson?: (person: MoviePersonCredit) => void;
   onNotify?: (msg: string, isError?: boolean) => void;
   onUpdated?: (movie: Movie) => void;
 }
@@ -87,6 +94,7 @@ export const MovieDetailPanel: React.FC<MovieDetailPanelProps> = ({
   onDelete,
   onSearchReleases,
   onManualTorrent,
+  onAddByPerson,
   onNotify,
   onUpdated,
 }) => {
@@ -95,6 +103,22 @@ export const MovieDetailPanel: React.FC<MovieDetailPanelProps> = ({
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
+  const [editingFile, setEditingFile] = useState<MediaFileInfo | null>(null);
+  const [editingExtra, setEditingExtra] = useState<MovieExtraFile | null>(null);
+  const [detailsTarget, setDetailsTarget] = useState<
+    | { kind: 'media'; file: MediaFileInfo }
+    | { kind: 'extra'; file: MovieExtraFile }
+    | null
+  >(null);
+  const { confirm, dialog: confirmDialog } = useConfirm();
+
+  const reloadFiles = useCallback(async () => {
+    const filePayload = await api.getMovieFiles(movie.id);
+    setFiles(filePayload);
+    const next = await api.getMovie(movie.id);
+    setMovie(next);
+    onUpdated?.(next);
+  }, [movie.id, onUpdated]);
 
   const load = async (id: number, refreshMeta: boolean) => {
     setLoading(true);
@@ -146,6 +170,40 @@ export const MovieDetailPanel: React.FC<MovieDetailPanelProps> = ({
       onNotify?.(err instanceof Error ? err.message : 'Metadata refresh failed', true);
     } finally {
       setRefreshing(false);
+    }
+  };
+
+  const handleDeleteMediaFile = async (file: MediaFileInfo) => {
+    const result = await confirm({
+      title: 'Delete media file',
+      message: `Delete "${file.relativePath || file.path}" from the library and from disk? This cannot be undone.`,
+      confirmLabel: 'Delete file',
+      danger: true,
+    });
+    if (!result) return;
+    try {
+      await api.deleteMovieFile(movie.id, file.id, true);
+      onNotify?.('Media file deleted');
+      await reloadFiles();
+    } catch (err) {
+      onNotify?.(err instanceof Error ? err.message : 'Failed to delete media file', true);
+    }
+  };
+
+  const handleDeleteExtraFile = async (file: MovieExtraFile) => {
+    const result = await confirm({
+      title: 'Delete file',
+      message: `Permanently delete "${file.relativePath}" from disk? This cannot be undone.`,
+      confirmLabel: 'Delete file',
+      danger: true,
+    });
+    if (!result) return;
+    try {
+      await api.deleteMovieExtraFile(movie.id, file.relativePath);
+      onNotify?.('File deleted');
+      await reloadFiles();
+    } catch (err) {
+      onNotify?.(err instanceof Error ? err.message : 'Failed to delete file', true);
     }
   };
 
@@ -342,33 +400,79 @@ export const MovieDetailPanel: React.FC<MovieDetailPanelProps> = ({
           ) : mediaFiles.length === 0 ? (
             <p className="text-xs text-slate-500">No movie file on disk</p>
           ) : (
-            <FileTable
-              headers={['Relative path', 'Quality', 'Resolution', 'Codecs', 'Size', 'Release group', 'Added']}
-              rows={mediaFiles.map((f) => [
-                f.relativePath || f.path,
-                f.quality || '—',
-                f.resolution && f.resolution > 0 ? `${f.resolution}p` : '—',
-                [f.videoCodec, f.audioCodec].filter(Boolean).join(' / ') || '—',
-                formatBytes(f.size),
-                f.releaseGroup || '—',
-                formatDate(f.dateAdded),
-              ])}
-            />
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead>
+                  <tr className="text-slate-500 border-b border-slate-800">
+                    {['Relative path', 'Quality', 'Resolution', 'Codecs', 'Size', 'Release group', 'Added', 'Actions'].map(
+                      (h) => (
+                        <th key={h} className={`py-2 pr-3 font-medium ${h === 'Actions' ? 'text-right' : ''}`}>
+                          {h}
+                        </th>
+                      ),
+                    )}
+                  </tr>
+                </thead>
+                <tbody>
+                  {mediaFiles.map((f) => (
+                    <tr key={f.id} className="border-b border-slate-800/60 text-slate-300">
+                      <td className="py-2 pr-3 font-mono break-all">{f.relativePath || f.path}</td>
+                      <td className="py-2 pr-3">{f.quality || '—'}</td>
+                      <td className="py-2 pr-3">{f.resolution && f.resolution > 0 ? `${f.resolution}p` : '—'}</td>
+                      <td className="py-2 pr-3">
+                        {[f.videoCodec, f.audioCodec].filter(Boolean).join(' / ') || '—'}
+                      </td>
+                      <td className="py-2 pr-3">{formatBytes(f.size)}</td>
+                      <td className="py-2 pr-3">{f.releaseGroup || '—'}</td>
+                      <td className="py-2 pr-3">{formatDate(f.dateAdded)}</td>
+                      <td className="py-2 pr-0">
+                        <FileActions
+                          onEdit={() => setEditingFile(f)}
+                          onDetails={() => setDetailsTarget({ kind: 'media', file: f })}
+                          onDelete={() => void handleDeleteMediaFile(f)}
+                        />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </section>
 
         {extraFiles.length > 0 && (
           <section className="rounded-xl border border-slate-800 bg-slate-950/50 p-4">
             <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-3">Other files</h3>
-            <FileTable
-              headers={['Name', 'Type', 'Ext', 'Size']}
-              rows={extraFiles.map((f: MovieExtraFile) => [
-                f.relativePath,
-                f.type,
-                f.extension || '—',
-                formatBytes(f.size),
-              ])}
-            />
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead>
+                  <tr className="text-slate-500 border-b border-slate-800">
+                    {['Name', 'Type', 'Ext', 'Size', 'Actions'].map((h) => (
+                      <th key={h} className={`py-2 pr-3 font-medium ${h === 'Actions' ? 'text-right' : ''}`}>
+                        {h}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {extraFiles.map((f: MovieExtraFile) => (
+                    <tr key={f.relativePath} className="border-b border-slate-800/60 text-slate-300">
+                      <td className="py-2 pr-3 font-mono break-all">{f.relativePath}</td>
+                      <td className="py-2 pr-3">{f.type}</td>
+                      <td className="py-2 pr-3">{f.extension || '—'}</td>
+                      <td className="py-2 pr-3">{formatBytes(f.size)}</td>
+                      <td className="py-2 pr-0">
+                        <FileActions
+                          onEdit={() => setEditingExtra(f)}
+                          onDetails={() => setDetailsTarget({ kind: 'extra', file: f })}
+                          onDelete={() => void handleDeleteExtraFile(f)}
+                        />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </section>
         )}
 
@@ -379,7 +483,12 @@ export const MovieDetailPanel: React.FC<MovieDetailPanelProps> = ({
                 <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-3">Cast</h3>
                 <div className="flex gap-3 overflow-x-auto pb-1 -mx-1 px-1 scroll-smooth">
                   {cast.map((person) => (
-                    <PersonCard key={`cast-${person.tmdbId}-${person.order}`} person={person} subtitle={person.character} />
+                    <PersonCard
+                      key={`cast-${person.tmdbId}-${person.order}`}
+                      person={person}
+                      subtitle={person.character}
+                      onSelect={onAddByPerson}
+                    />
                   ))}
                 </div>
               </div>
@@ -393,6 +502,7 @@ export const MovieDetailPanel: React.FC<MovieDetailPanelProps> = ({
                       key={`crew-${person.tmdbId}-${person.job}-${person.order}`}
                       person={person}
                       subtitle={person.job}
+                      onSelect={onAddByPerson}
                     />
                   ))}
                 </div>
@@ -429,9 +539,94 @@ export const MovieDetailPanel: React.FC<MovieDetailPanelProps> = ({
           onNotify={onNotify}
         />
       )}
+      {editingFile && (
+        <MediaFileEditModal
+          movieId={movie.id}
+          file={editingFile}
+          onClose={() => setEditingFile(null)}
+          onSaved={(updated) => {
+            setFiles((prev) =>
+              prev
+                ? {
+                    ...prev,
+                    media: prev.media.map((m) => (m.id === updated.id ? { ...m, ...updated } : m)),
+                  }
+                : prev,
+            );
+          }}
+          onNotify={onNotify}
+        />
+      )}
+      {editingExtra && (
+        <ExtraFileEditModal
+          movieId={movie.id}
+          file={editingExtra}
+          onClose={() => setEditingExtra(null)}
+          onSaved={() => {
+            void reloadFiles();
+          }}
+          onNotify={onNotify}
+        />
+      )}
+      {detailsTarget && (
+        <FileDetailsModal
+          key={
+            detailsTarget.kind === 'media'
+              ? `media-${detailsTarget.file.id}`
+              : `extra-${detailsTarget.file.relativePath}`
+          }
+          title={detailsTarget.kind === 'media' ? 'Media file details' : 'File details'}
+          load={
+            detailsTarget.kind === 'media'
+              ? () => api.getMovieFileDetails(movie.id, detailsTarget.file.id)
+              : () => api.getMovieExtraFileDetails(movie.id, detailsTarget.file.relativePath)
+          }
+          onClose={() => setDetailsTarget(null)}
+          onNotify={onNotify}
+        />
+      )}
+      {confirmDialog}
     </div>
   );
 };
+
+const FileActions: React.FC<{
+  onEdit?: () => void;
+  onDetails: () => void;
+  onDelete: () => void;
+}> = ({ onEdit, onDetails, onDelete }) => (
+  <div className="flex items-center justify-end gap-1">
+    {onEdit ? (
+      <button
+        type="button"
+        onClick={onEdit}
+        className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-sky-300 hover:bg-sky-500/10"
+        title="Edit"
+      >
+        <Pencil className="w-3.5 h-3.5" />
+        <span className="hidden sm:inline">Edit</span>
+      </button>
+    ) : null}
+    <button
+      type="button"
+      onClick={onDetails}
+      className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-slate-300 hover:bg-slate-800"
+      title="Details"
+    >
+      <Info className="w-3.5 h-3.5" />
+      <span className="hidden sm:inline">Details</span>
+    </button>
+    <button
+      type="button"
+      onClick={onDelete}
+      className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-rose-300 hover:bg-rose-500/10"
+      title="Delete"
+    >
+      <Trash2 className="w-3.5 h-3.5" />
+      <span className="hidden sm:inline">Delete</span>
+    </button>
+  </div>
+);
 
 const MetaRow: React.FC<{ label: string; value: string; title?: string }> = ({
   label,
@@ -532,11 +727,15 @@ const RatingChip: React.FC<{ kind: RatingKind; value?: number; votes?: number }>
   );
 };
 
-const PersonCard: React.FC<{ person: MoviePersonCredit; subtitle?: string }> = ({ person, subtitle }) => {
+const PersonCard: React.FC<{
+  person: MoviePersonCredit;
+  subtitle?: string;
+  onSelect?: (person: MoviePersonCredit) => void;
+}> = ({ person, subtitle, onSelect }) => {
   const src = personImage(person);
-  const href = person.tmdbId > 0 ? `https://www.themoviedb.org/person/${person.tmdbId}` : undefined;
+  const canSelect = Boolean(onSelect && person.tmdbId > 0);
   const className =
-    'w-28 shrink-0 rounded-lg border border-slate-800 bg-slate-900/60 overflow-hidden block transition hover:border-sky-500/40 hover:bg-slate-900';
+    'w-28 shrink-0 rounded-lg border border-slate-800 bg-slate-900/60 overflow-hidden text-left transition hover:border-emerald-500/40 hover:bg-slate-900';
   const body = (
     <>
       <div className="aspect-[2/3] bg-slate-950 flex items-center justify-center">
@@ -558,19 +757,18 @@ const PersonCard: React.FC<{ person: MoviePersonCredit; subtitle?: string }> = (
       </div>
     </>
   );
-  if (!href) {
+  if (!canSelect) {
     return <div className={className}>{body}</div>;
   }
   return (
-    <a
-      href={href}
-      target="_blank"
-      rel="noopener noreferrer"
+    <button
+      type="button"
+      onClick={() => onSelect?.(person)}
       className={className}
-      title={`Open ${person.name} on TMDB`}
+      title={`Find movies with ${person.name}`}
     >
       {body}
-    </a>
+    </button>
   );
 };
 

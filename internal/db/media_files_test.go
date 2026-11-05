@@ -79,3 +79,73 @@ func TestUpsertMovieAndEpisodeFiles(t *testing.T) {
 		t.Fatalf("episode not linked: %+v", ep)
 	}
 }
+
+func TestUpdateAndDeleteMovieFile(t *testing.T) {
+	store := openTestStore(t)
+	dir := t.TempDir()
+	video := filepath.Join(dir, "Film (2021).mkv")
+	sidecar := filepath.Join(dir, "Film (2021).en.srt")
+	if err := os.WriteFile(video, []byte("fake-video"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sidecar, []byte("1\n00:00:01,000 --> 00:00:02,000\nhi\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	mv, err := store.CreateMovie(domain.Movie{
+		Title:            "Film",
+		Year:             2021,
+		QualityProfileID: 1,
+		RootFolderPath:   dir,
+		Path:             dir,
+		Monitored:        true,
+	})
+	if err != nil {
+		t.Fatalf("create movie: %v", err)
+	}
+	mf, err := store.UpsertMovieFile(mv.ID, video, "Film.2021.1080p-GROUP", "GROUP", 10)
+	if err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	updated, err := store.UpdateMovieFile(mf.ID, domain.MovieFileUpdate{
+		Quality:      "Bluray-1080p",
+		Languages:    "eng",
+		Indexer:      "DemoIndexer",
+		ReleaseGroup: "NEWGROUP",
+		SceneName:    "Film.2021.Bluray",
+		VideoCodec:   "x265",
+		AudioCodec:   "TrueHD",
+		Resolution:   1080,
+	})
+	if err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if updated.Quality != "Bluray-1080p" || updated.Languages != "eng" || updated.Indexer != "DemoIndexer" {
+		t.Fatalf("unexpected update: %+v", updated)
+	}
+
+	extras, err := store.ListMovieExtraFiles(mv.ID)
+	if err != nil || len(extras) == 0 {
+		t.Fatalf("extras: %v len=%d", err, len(extras))
+	}
+	if err := store.DeleteMovieExtraFile(mv.ID, "Film (2021).en.srt"); err != nil {
+		t.Fatalf("delete extra: %v", err)
+	}
+	if _, err := os.Stat(sidecar); !os.IsNotExist(err) {
+		t.Fatalf("sidecar still present: %v", err)
+	}
+
+	if err := store.DeleteMovieFile(mf.ID, true); err != nil {
+		t.Fatalf("delete media: %v", err)
+	}
+	if _, err := os.Stat(video); !os.IsNotExist(err) {
+		t.Fatalf("video still present: %v", err)
+	}
+	got, err := store.GetMovieByID(mv.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.HasFile || got.MovieFileID != 0 {
+		t.Fatalf("movie still linked: %+v", got)
+	}
+}

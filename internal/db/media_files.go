@@ -2,6 +2,7 @@ package db
 
 import (
 	"database/sql"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,10 +13,10 @@ import (
 )
 
 const movieFileSelectCols = `id, movie_id, path, relative_path, size, scene_name, release_group, date_added,
-		quality, resolution, video_codec, audio_codec`
+		quality, resolution, video_codec, audio_codec, languages, indexer`
 
 const episodeFileSelectCols = `id, series_id, episode_id, path, relative_path, size, scene_name, release_group, date_added,
-		quality, resolution, video_codec, audio_codec`
+		quality, resolution, video_codec, audio_codec, languages, indexer`
 
 // UpsertEpisodeFile creates or replaces the video file row for an episode and links episode_file_id.
 func (s *Store) UpsertEpisodeFile(seriesID, episodeID int64, path, sceneName, releaseGroup string, size int64) (*domain.EpisodeFile, error) {
@@ -32,10 +33,10 @@ func (s *Store) UpsertEpisodeFile(seriesID, episodeID int64, path, sceneName, re
 	res, err := s.db.Exec(`
 		INSERT INTO episode_files (
 			series_id, episode_id, path, relative_path, size, scene_name, release_group, date_added,
-			quality, resolution, video_codec, audio_codec
-		) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?, ?)`,
+			quality, resolution, video_codec, audio_codec, languages, indexer
+		) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?)`,
 		seriesID, episodeID, path, rel, size, sceneName, releaseGroup,
-		info.Quality, info.Resolution, info.VideoCodec, info.AudioCodec,
+		info.Quality, info.Resolution, info.VideoCodec, info.AudioCodec, info.Languages, "",
 	)
 	if err != nil {
 		return nil, err
@@ -68,10 +69,10 @@ func (s *Store) UpsertMovieFile(movieID int64, path, sceneName, releaseGroup str
 	res, err := s.db.Exec(`
 		INSERT INTO movie_files (
 			movie_id, path, relative_path, size, scene_name, release_group, date_added,
-			quality, resolution, video_codec, audio_codec
-		) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?, ?)`,
+			quality, resolution, video_codec, audio_codec, languages, indexer
+		) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?)`,
 		movieID, path, rel, size, sceneName, releaseGroup,
-		info.Quality, info.Resolution, info.VideoCodec, info.AudioCodec,
+		info.Quality, info.Resolution, info.VideoCodec, info.AudioCodec, info.Languages, "",
 	)
 	if err != nil {
 		return nil, err
@@ -90,9 +91,11 @@ func (s *Store) UpsertMovieFile(movieID int64, path, sceneName, releaseGroup str
 
 func (s *Store) updateMovieFileMediaInfo(id int64, info mediainfo.Info) error {
 	_, err := s.db.Exec(`
-		UPDATE movie_files SET quality = ?, resolution = ?, video_codec = ?, audio_codec = ?
+		UPDATE movie_files SET quality = ?, resolution = ?, video_codec = ?, audio_codec = ?,
+			languages = CASE WHEN trim(languages) = '' AND ? != '' THEN ? ELSE languages END
 		WHERE id = ?`,
-		info.Quality, info.Resolution, info.VideoCodec, info.AudioCodec, id,
+		info.Quality, info.Resolution, info.VideoCodec, info.AudioCodec,
+		info.Languages, info.Languages, id,
 	)
 	return err
 }
@@ -103,12 +106,12 @@ func (s *Store) EnsureMovieFileMediaInfo(f *domain.MovieFile) {
 	if f == nil || f.Path == "" {
 		return
 	}
-	needProbe := f.VideoCodec == "" || f.Resolution <= 0 || f.Quality == "" || f.Quality == "Unknown"
+	needProbe := f.VideoCodec == "" || f.Resolution <= 0 || f.Quality == "" || f.Quality == "Unknown" || f.Languages == ""
 	if !needProbe {
 		return
 	}
 	var info mediainfo.Info
-	if f.VideoCodec == "" {
+	if f.VideoCodec == "" || f.Languages == "" {
 		info = mediainfo.Probe(f.Path, f.SceneName)
 	} else {
 		info = mediainfo.ProbeFilename(f.Path, f.SceneName)
@@ -125,14 +128,171 @@ func (s *Store) EnsureMovieFileMediaInfo(f *domain.MovieFile) {
 	if info.AudioCodec != "" {
 		f.AudioCodec = info.AudioCodec
 	}
+	if f.Languages == "" && info.Languages != "" {
+		f.Languages = info.Languages
+	}
 	if f.ID > 0 {
 		_ = s.updateMovieFileMediaInfo(f.ID, mediainfo.Info{
 			Quality:    f.Quality,
 			Resolution: f.Resolution,
 			VideoCodec: f.VideoCodec,
 			AudioCodec: f.AudioCodec,
+			Languages:  f.Languages,
 		})
 	}
+}
+
+// UpdateMovieFile applies editable metadata fields for a movie file.
+func (s *Store) UpdateMovieFile(id int64, patch domain.MovieFileUpdate) (*domain.MovieFile, error) {
+	existing, err := s.GetMovieFileByID(id)
+	if err != nil {
+		return nil, err
+	}
+	quality := strings.TrimSpace(patch.Quality)
+	if quality == "" {
+		quality = existing.Quality
+	}
+	languages := strings.TrimSpace(patch.Languages)
+	indexer := strings.TrimSpace(patch.Indexer)
+	releaseGroup := strings.TrimSpace(patch.ReleaseGroup)
+	sceneName := strings.TrimSpace(patch.SceneName)
+	videoCodec := strings.TrimSpace(patch.VideoCodec)
+	audioCodec := strings.TrimSpace(patch.AudioCodec)
+	resolution := patch.Resolution
+	if resolution <= 0 {
+		resolution = existing.Resolution
+		if r := mediainfo.ResolutionFromLabel(quality); r > 0 {
+			resolution = r
+		}
+	}
+	if videoCodec == "" {
+		videoCodec = existing.VideoCodec
+	}
+	if audioCodec == "" {
+		audioCodec = existing.AudioCodec
+	}
+	_, err = s.db.Exec(`
+		UPDATE movie_files SET
+			quality = ?, languages = ?, indexer = ?, release_group = ?, scene_name = ?,
+			video_codec = ?, audio_codec = ?, resolution = ?
+		WHERE id = ?`,
+		quality, languages, indexer, releaseGroup, sceneName,
+		videoCodec, audioCodec, resolution, id,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return s.GetMovieFileByID(id)
+}
+
+// DeleteMovieFile removes the movie file DB row, unlinks the movie, and optionally deletes the file on disk.
+func (s *Store) DeleteMovieFile(id int64, deleteFromDisk bool) error {
+	f, err := s.GetMovieFileByID(id)
+	if err != nil {
+		return err
+	}
+	if deleteFromDisk && strings.TrimSpace(f.Path) != "" {
+		if err := removePath(f.Path); err != nil {
+			return fmt.Errorf("delete file from disk: %w", err)
+		}
+	}
+	if _, err := s.db.Exec(`DELETE FROM movie_files WHERE id = ?`, id); err != nil {
+		return err
+	}
+	_, err = s.db.Exec(`
+		UPDATE movies SET has_file = 0, movie_file_id = 0, size_on_disk = 0
+		WHERE id = ? AND (movie_file_id = ? OR movie_file_id = 0)`,
+		f.MovieID, id,
+	)
+	return err
+}
+
+// DeleteMovieExtraFile deletes a non-video file under the movie folder.
+func (s *Store) DeleteMovieExtraFile(movieID int64, relativePath string) error {
+	full, err := s.resolveMovieExtraPath(movieID, relativePath)
+	if err != nil {
+		return err
+	}
+	return removePath(full)
+}
+
+// RenameMovieExtraFile renames a sidecar file within the movie folder.
+func (s *Store) RenameMovieExtraFile(movieID int64, relativePath, newName string) (domain.MovieExtraFile, error) {
+	src, err := s.resolveMovieExtraPath(movieID, relativePath)
+	if err != nil {
+		return domain.MovieExtraFile{}, err
+	}
+	name := filepath.Base(strings.TrimSpace(newName))
+	if name == "" || name == "." || name == ".." || strings.ContainsAny(name, `/\`) {
+		return domain.MovieExtraFile{}, fmt.Errorf("invalid file name")
+	}
+	dst := filepath.Join(filepath.Dir(src), name)
+	if filepath.Clean(dst) == filepath.Clean(src) {
+		return s.extraFileInfo(dst)
+	}
+	if _, err := os.Stat(dst); err == nil {
+		return domain.MovieExtraFile{}, fmt.Errorf("target file already exists")
+	}
+	if err := os.Rename(src, dst); err != nil {
+		return domain.MovieExtraFile{}, err
+	}
+	return s.extraFileInfo(dst)
+}
+
+func (s *Store) extraFileInfo(full string) (domain.MovieExtraFile, error) {
+	info, err := os.Stat(full)
+	if err != nil {
+		return domain.MovieExtraFile{}, err
+	}
+	ext := strings.ToLower(filepath.Ext(full))
+	return domain.MovieExtraFile{
+		RelativePath: filepath.Base(full),
+		Path:         full,
+		Extension:    strings.TrimPrefix(ext, "."),
+		Type:         classifyExtraFile(ext),
+		Size:         info.Size(),
+	}, nil
+}
+
+// ResolveMovieExtraPath validates that relativePath is a file inside the movie folder.
+func (s *Store) ResolveMovieExtraPath(movieID int64, relativePath string) (string, error) {
+	return s.resolveMovieExtraPath(movieID, relativePath)
+}
+
+func (s *Store) resolveMovieExtraPath(movieID int64, relativePath string) (string, error) {
+	rel := filepath.Clean(strings.TrimSpace(relativePath))
+	if rel == "." || rel == "" || strings.HasPrefix(rel, "..") || filepath.IsAbs(rel) {
+		return "", fmt.Errorf("invalid relative path")
+	}
+	mv, err := s.GetMovieByID(movieID)
+	if err != nil {
+		return "", err
+	}
+	dir := strings.TrimSpace(mv.Path)
+	if dir == "" {
+		return "", fmt.Errorf("movie has no folder path")
+	}
+	full := filepath.Clean(filepath.Join(dir, rel))
+	sep := string(os.PathSeparator)
+	cleanDir := filepath.Clean(dir)
+	if full == cleanDir || !strings.HasPrefix(full, cleanDir+sep) {
+		return "", fmt.Errorf("path escapes movie folder")
+	}
+	info, err := os.Stat(full)
+	if err != nil {
+		return "", err
+	}
+	if info.IsDir() {
+		return "", fmt.Errorf("refusing to delete a directory")
+	}
+	return full, nil
+}
+
+func removePath(path string) error {
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
 }
 
 func (s *Store) GetEpisodeFileByID(id int64) (*domain.EpisodeFile, error) {
@@ -293,7 +453,7 @@ func scanEpisodeFile(row *sql.Row) (*domain.EpisodeFile, error) {
 	var added string
 	err := row.Scan(
 		&f.ID, &f.SeriesID, &f.EpisodeID, &f.Path, &f.RelativePath, &f.Size, &f.SceneName, &f.ReleaseGroup, &added,
-		&f.Quality, &f.Resolution, &f.VideoCodec, &f.AudioCodec,
+		&f.Quality, &f.Resolution, &f.VideoCodec, &f.AudioCodec, &f.Languages, &f.Indexer,
 	)
 	if err != nil {
 		return nil, err
@@ -307,7 +467,7 @@ func scanMovieFile(row *sql.Row) (*domain.MovieFile, error) {
 	var added string
 	err := row.Scan(
 		&f.ID, &f.MovieID, &f.Path, &f.RelativePath, &f.Size, &f.SceneName, &f.ReleaseGroup, &added,
-		&f.Quality, &f.Resolution, &f.VideoCodec, &f.AudioCodec,
+		&f.Quality, &f.Resolution, &f.VideoCodec, &f.AudioCodec, &f.Languages, &f.Indexer,
 	)
 	if err != nil {
 		return nil, err
@@ -321,7 +481,7 @@ func scanEpisodeFileRows(rows *sql.Rows) (domain.EpisodeFile, error) {
 	var added string
 	err := rows.Scan(
 		&f.ID, &f.SeriesID, &f.EpisodeID, &f.Path, &f.RelativePath, &f.Size, &f.SceneName, &f.ReleaseGroup, &added,
-		&f.Quality, &f.Resolution, &f.VideoCodec, &f.AudioCodec,
+		&f.Quality, &f.Resolution, &f.VideoCodec, &f.AudioCodec, &f.Languages, &f.Indexer,
 	)
 	if err != nil {
 		return f, err
@@ -335,7 +495,7 @@ func scanMovieFileRows(rows *sql.Rows) (domain.MovieFile, error) {
 	var added string
 	err := rows.Scan(
 		&f.ID, &f.MovieID, &f.Path, &f.RelativePath, &f.Size, &f.SceneName, &f.ReleaseGroup, &added,
-		&f.Quality, &f.Resolution, &f.VideoCodec, &f.AudioCodec,
+		&f.Quality, &f.Resolution, &f.VideoCodec, &f.AudioCodec, &f.Languages, &f.Indexer,
 	)
 	if err != nil {
 		return f, err

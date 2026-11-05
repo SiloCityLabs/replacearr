@@ -25,10 +25,14 @@ import type {
   HistoryRecord,
   Indexer,
   IndexerProxy,
+  FileDetails,
   LibraryImportScanResult,
   LogEntry,
+  MediaFileInfo,
+  MediaFileUpdate,
   MediaStatistics,
   Movie,
+  MovieExtraFile,
   MovieFilesResponse,
   OverviewResponse,
   QualityDefinition,
@@ -228,8 +232,55 @@ export const api = {
     return request<MovieFilesResponse>(`/api/v1/movies/${id}/files`);
   },
 
-  async deleteMovie(id: number): Promise<void> {
-    await request(`/api/v1/movies/${id}`, { method: 'DELETE' });
+  async updateMovieFile(movieId: number, fileId: number, payload: MediaFileUpdate): Promise<MediaFileInfo> {
+    return request<MediaFileInfo>(`/api/v1/movies/${movieId}/files/${fileId}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async deleteMovieFile(movieId: number, fileId: number, deleteFiles = true): Promise<void> {
+    const q = deleteFiles ? '?deleteFiles=true' : '?deleteFiles=false';
+    await request(`/api/v1/movies/${movieId}/files/${fileId}${q}`, { method: 'DELETE' });
+  },
+
+  async getMovieFileDetails(movieId: number, fileId: number): Promise<FileDetails> {
+    return request<FileDetails>(`/api/v1/movies/${movieId}/files/${fileId}/details`);
+  },
+
+  async getMovieExtraFileDetails(movieId: number, relativePath: string): Promise<FileDetails> {
+    return request<FileDetails>(
+      `/api/v1/movies/${movieId}/extra-files/details?path=${encodeURIComponent(relativePath)}`
+    );
+  },
+
+  async deleteMovieExtraFile(movieId: number, relativePath: string): Promise<void> {
+    await request(`/api/v1/movies/${movieId}/extra-files`, {
+      method: 'DELETE',
+      body: JSON.stringify({ relativePath }),
+    });
+  },
+
+  async renameMovieExtraFile(
+    movieId: number,
+    relativePath: string,
+    newName: string
+  ): Promise<MovieExtraFile> {
+    return request<MovieExtraFile>(`/api/v1/movies/${movieId}/extra-files`, {
+      method: 'PUT',
+      body: JSON.stringify({ relativePath, newName }),
+    });
+  },
+
+  async deleteMovie(
+    id: number,
+    options?: { deleteFiles?: boolean; addImportExclusion?: boolean }
+  ): Promise<void> {
+    const params = new URLSearchParams();
+    if (options?.deleteFiles) params.set('deleteFiles', 'true');
+    if (options?.addImportExclusion) params.set('addImportExclusion', 'true');
+    const q = params.toString();
+    await request(`/api/v1/movies/${id}${q ? `?${q}` : ''}`, { method: 'DELETE' });
   },
 
   // Music

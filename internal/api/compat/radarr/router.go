@@ -419,7 +419,40 @@ func (h *Handler) handleUpdateMovieBody(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, updated)
 }
 
-func (h *Handler) handleDeleteMovie(w http.ResponseWriter, _ *http.Request, id int64) {
+func (h *Handler) handleDeleteMovie(w http.ResponseWriter, r *http.Request, id int64) {
+	deleteFiles := queryFlag(r, "deleteFiles")
+	addExclusion := queryFlag(r, "addImportExclusion")
+
+	mv, err := h.store.GetMovieByID(id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "movie not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	if addExclusion {
+		if _, err := h.store.AddImportListExclusion(domain.ImportListExclusion{
+			MediaType: "movie",
+			TmdbID:    mv.TmdbID,
+			ImdbID:    mv.ImdbID,
+			Title:     mv.Title,
+			Year:      mv.Year,
+		}); err != nil {
+			writeError(w, http.StatusInternalServerError, "add list exclusion: "+err.Error())
+			return
+		}
+	}
+
+	if deleteFiles {
+		if err := h.store.DeleteMovieDiskFiles(mv); err != nil {
+			writeError(w, http.StatusInternalServerError, "delete movie files: "+err.Error())
+			return
+		}
+	}
+
 	if err := h.store.DeleteMovie(id); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -978,4 +1011,9 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 
 func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]any{"message": msg, "error": msg})
+}
+
+func queryFlag(r *http.Request, name string) bool {
+	v := strings.TrimSpace(strings.ToLower(r.URL.Query().Get(name)))
+	return v == "true" || v == "1" || v == "yes"
 }
