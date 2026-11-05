@@ -947,9 +947,14 @@ export const api = {
 
   async runLibraryImport(payload: {
     mediaType: string;
+    rootFolderPath?: string;
+    qualityProfileId?: number;
     items: Array<{
       path: string;
-      matchId: number;
+      matchId?: number;
+      tmdbId?: number;
+      tvdbId?: number;
+      qualityProfileId?: number;
       seasonNumber?: number;
       episodeNumber?: number;
     }>;

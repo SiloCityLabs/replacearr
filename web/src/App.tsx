@@ -747,6 +747,7 @@ export const App: React.FC = () => {
             <LibraryImportPage
               media={media}
               rootFolders={rootFolders}
+              profiles={profiles}
               series={series}
               movies={movies}
               artists={artists}

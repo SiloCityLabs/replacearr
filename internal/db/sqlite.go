@@ -708,6 +708,33 @@ func (s *Store) GetSeriesByID(id int64) (*domain.Series, error) {
 	return &sr, nil
 }
 
+func (s *Store) GetSeriesByTvdbID(tvdbID int) (*domain.Series, error) {
+	if tvdbID <= 0 {
+		return nil, sql.ErrNoRows
+	}
+	rows, err := s.db.Query(`
+		SELECT id, title, sort_title, status, ended, overview, network, air_time, images_json, seasons_json,
+		       year, path, quality_profile_id, language_profile_id, season_folder, monitored, use_scene_numbering,
+		       runtime, tvdb_id, tv_rage_id, tv_maze_id, imdb_id, title_slug, root_folder_path, series_type,
+		       clean_title, genres_json, tags_json, added
+		FROM series WHERE tvdb_id = ? LIMIT 1`, tvdbID)
+	if err != nil {
+		return nil, err
+	}
+	if !rows.Next() {
+		rows.Close()
+		return nil, sql.ErrNoRows
+	}
+	sr, err := scanSeries(rows)
+	if err != nil {
+		rows.Close()
+		return nil, err
+	}
+	rows.Close()
+	s.enrichSeriesStatistics(&sr)
+	return &sr, nil
+}
+
 func scanSeries(rows *sql.Rows) (domain.Series, error) {
 	var sr domain.Series
 	var ended, seasonFolder, monitored, sceneNum int
@@ -1036,6 +1063,25 @@ func (s *Store) ListMovies() ([]domain.Movie, error) {
 
 func (s *Store) GetMovieByID(id int64) (*domain.Movie, error) {
 	rows, err := s.db.Query(`SELECT `+movieSelectCols+` FROM movies WHERE id = ?`, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		return nil, sql.ErrNoRows
+	}
+	mv, err := scanMovie(rows)
+	if err != nil {
+		return nil, err
+	}
+	return &mv, nil
+}
+
+func (s *Store) GetMovieByTmdbID(tmdbID int) (*domain.Movie, error) {
+	if tmdbID <= 0 {
+		return nil, sql.ErrNoRows
+	}
+	rows, err := s.db.Query(`SELECT `+movieSelectCols+` FROM movies WHERE tmdb_id = ? LIMIT 1`, tmdbID)
 	if err != nil {
 		return nil, err
 	}

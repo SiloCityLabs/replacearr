@@ -137,13 +137,27 @@ export interface ChangelogSection {
   notes: string[];
 }
 
+export interface LibraryImportMatch {
+  libraryId?: number;
+  tmdbId?: number;
+  tvdbId?: number;
+  imdbId?: string;
+  title: string;
+  year?: number;
+  overview?: string;
+  inLibrary?: boolean;
+}
+
 export interface LibraryImportScanItem {
   path: string;
   relativePath: string;
   size: number;
   guessedTitle: string;
+  guessedYear?: number;
   seasonNumber?: number;
   episodeNumber?: number;
+  matches?: LibraryImportMatch[];
+  match?: LibraryImportMatch | null;
 }
 
 export interface LibraryImportScanResult {

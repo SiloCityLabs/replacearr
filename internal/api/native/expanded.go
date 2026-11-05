@@ -1,6 +1,7 @@
 package native
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -352,7 +353,13 @@ func (s *Server) handleLibraryImportScan(w http.ResponseWriter, r *http.Request)
 		writeErr(w, http.StatusBadRequest, fmt.Errorf("path is required"))
 		return
 	}
-	result, err := libraryimport.Scan(s.store, req.MediaType, path)
+	result, err := libraryimport.Scan(r.Context(), libraryimport.ScanOptions{
+		Store:     s.store,
+		Meta:      s.meta,
+		MediaType: req.MediaType,
+		Root:      path,
+		Language:  s.preferredMetadataLanguage(),
+	})
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
@@ -362,8 +369,10 @@ func (s *Server) handleLibraryImportScan(w http.ResponseWriter, r *http.Request)
 
 func (s *Server) handleLibraryImport(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		MediaType string                    `json:"mediaType"`
-		Items     []libraryimport.ImportItem `json:"items"`
+		MediaType        string                     `json:"mediaType"`
+		RootFolderPath   string                     `json:"rootFolderPath"`
+		QualityProfileID int64                      `json:"qualityProfileId"`
+		Items            []libraryimport.ImportItem `json:"items"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, http.StatusBadRequest, err)
@@ -374,7 +383,18 @@ func (s *Server) handleLibraryImport(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
-	n, err := libraryimport.ImportSelected(s.store, cfg, req.MediaType, req.Items)
+	n, err := libraryimport.ImportSelected(r.Context(), libraryimport.ImportOptions{
+		Store:            s.store,
+		Meta:             s.meta,
+		AppCfg:           cfg,
+		MediaType:        req.MediaType,
+		RootFolderPath:   req.RootFolderPath,
+		QualityProfileID: req.QualityProfileID,
+		Language:         s.preferredMetadataLanguage(),
+		SyncSeriesEpisodes: func(ctx context.Context, sr *domain.Series) error {
+			return s.syncSeriesEpisodes(ctx, sr)
+		},
+	}, req.Items)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
