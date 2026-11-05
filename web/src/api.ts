@@ -15,6 +15,7 @@ import type {
   DomainClearance,
   CatalogResolveResponse,
   PluginCatalogResponse,
+  DiscoveredDownloadClient,
   DownloadClient,
   Edition,
   Episode,
@@ -809,6 +810,14 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(payload),
     });
+  },
+
+  async discoverDownloadClients(): Promise<DiscoveredDownloadClient[]> {
+    const res = await request<{ clients?: DiscoveredDownloadClient[] }>(
+      '/api/v1/downloadclients/discover',
+      { method: 'POST', body: '{}' }
+    );
+    return unwrapArray<DiscoveredDownloadClient>(res, 'clients');
   },
 
   async getBlocklist(mediaType?: string): Promise<BlocklistItem[]> {

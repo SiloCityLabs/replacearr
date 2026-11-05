@@ -23,6 +23,38 @@ func TestParseAndUnwanted(t *testing.T) {
 	}
 }
 
+func TestIsSubtitleAndExtraDest(t *testing.T) {
+	if !IsSubtitle("a.srt") || !IsSubtitle("b.ASS") || IsSubtitle("c.mkv") {
+		t.Fatal("IsSubtitle")
+	}
+	dir := t.TempDir()
+	video := filepath.Join(dir, "Movie.2024.mkv")
+	side := filepath.Join(dir, "Movie.2024.srt")
+	lang := filepath.Join(dir, "Movie.2024.en.srt")
+	subs := filepath.Join(dir, "Subs")
+	_ = os.MkdirAll(subs, 0o755)
+	nested := filepath.Join(subs, "English.srt")
+	for _, p := range []string{video, side, lang, nested} {
+		if err := os.WriteFile(p, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	extras, err := ListExtraFiles(dir, video, ParseExtensions("srt"))
+	if err != nil || len(extras) != 3 {
+		t.Fatalf("ListExtraFiles: %v %#v", err, extras)
+	}
+	destVideo := "/data/Movies/Movie (2024)/Movie (2024).mkv"
+	if got := ExtraDestPath(destVideo, side); got != "/data/Movies/Movie (2024)/Movie (2024).srt" {
+		t.Fatalf("side = %q", got)
+	}
+	if got := ExtraDestPath(destVideo, lang); got != "/data/Movies/Movie (2024)/Movie (2024).en.srt" {
+		t.Fatalf("lang = %q", got)
+	}
+	if got := ExtraDestPath(destVideo, nested); got != "/data/Movies/Movie (2024)/Movie (2024).English.srt" {
+		t.Fatalf("nested = %q", got)
+	}
+}
+
 func TestDeleteUnwantedInDir(t *testing.T) {
 	dir := t.TempDir()
 	mustWrite := func(name string) {

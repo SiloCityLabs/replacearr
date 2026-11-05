@@ -144,8 +144,22 @@ func ImportSelected(store *db.Store, appCfg domain.AppConfig, mediaType string, 
 		if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 			continue
 		}
-		if err := copyOrLink(src, dest, appCfg.MediaManagement.CopyUsingHardlinks); err != nil {
+		hardlink := appCfg.MediaManagement.CopyUsingHardlinks
+		if err := copyOrLink(src, dest, hardlink); err != nil {
 			continue
+		}
+		if appCfg.MediaManagement.ImportExtraFiles {
+			exts := mediafile.ParseExtensions(appCfg.MediaManagement.ExtraFileExtensions)
+			if len(exts) == 0 {
+				exts = mediafile.ParseExtensions("srt")
+			}
+			searchRoot := filepath.Dir(src)
+			extras, _ := mediafile.ListExtraFiles(searchRoot, src, exts)
+			for _, extra := range extras {
+				extraDest := mediafile.ExtraDestPath(dest, extra)
+				_ = os.MkdirAll(filepath.Dir(extraDest), 0o755)
+				_ = copyOrLink(extra, extraDest, hardlink)
+			}
 		}
 		size := fi.Size()
 		switch mediaType {

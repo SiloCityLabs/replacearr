@@ -110,8 +110,14 @@ func TestAddListRemove(t *testing.T) {
 	if items[0].EtaSeconds != 125 {
 		t.Fatalf("EtaSeconds = %d", items[0].EtaSeconds)
 	}
+	if items[0].ContentPath != "/downloads/Severance" {
+		t.Fatalf("ContentPath = %q", items[0].ContentPath)
+	}
 	if IsCompleted(4, 0.1, 90) || !IsCompleted(6, 1, 0) {
 		t.Fatalf("IsCompleted logic")
+	}
+	if IsCompleted(0, 0, 0) || IsCompleted(4, 0, 0) {
+		t.Fatalf("metadata-only torrent must not be completed")
 	}
 	if err := cli.Remove(context.Background(), id, false); err != nil {
 		t.Fatalf("Remove: %v", err)

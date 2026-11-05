@@ -353,7 +353,8 @@ func DefaultAppConfig() AppConfig {
 			EpisodeTitleRequired:          "always",
 			MinimumFreeSpaceWhenImporting: 100,
 			CopyUsingHardlinks:            true,
-			ExtraFileExtensions:           "srt",
+			ImportExtraFiles:              true,
+			ExtraFileExtensions:           "srt,ass,ssa,vtt,sub",
 			DownloadPropersAndRepacks:     "preferAndUpgrade",
 			AnalyzeVideoFiles:             true,
 			RescanAfterRefresh:            "always",
@@ -493,6 +494,9 @@ func (c *AppConfig) Normalize() {
 	}
 	if strings.TrimSpace(c.MediaManagement.UnwantedFileExtensions) == "" {
 		c.MediaManagement.UnwantedFileExtensions = ".exe"
+	}
+	if strings.TrimSpace(c.MediaManagement.ExtraFileExtensions) == "" {
+		c.MediaManagement.ExtraFileExtensions = "srt,ass,ssa,vtt,sub"
 	}
 
 	c.Security.AuthenticationMethod = "forms"

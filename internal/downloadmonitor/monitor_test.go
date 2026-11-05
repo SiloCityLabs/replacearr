@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/replacearr/replacearr/internal/domain"
 )
 
 func TestFindPrimaryVideoAndImport(t *testing.T) {
@@ -41,6 +43,20 @@ func TestApplyRemotePathMapping(t *testing.T) {
 	mapped := applyRemotePathMapping(nil, "/downloads/a")
 	if mapped != "/downloads/a" {
 		t.Fatalf("%q", mapped)
+	}
+}
+
+func TestApplyMovieFormatAndCleanFileName(t *testing.T) {
+	got := applyMovieFormat("{Movie Title} ({Release Year}) {Quality Full}", "Avatar: Fire and Ash", 2025, "")
+	if got != "Avatar: Fire and Ash (2025)" {
+		t.Fatalf("format = %q", got)
+	}
+	cleaned := cleanFileName(got, domain.MediaManagementConfig{
+		ReplaceIllegalCharacters: true,
+		ColonReplacementFormat:   "smart",
+	})
+	if cleaned != "Avatar - Fire and Ash (2025)" {
+		t.Fatalf("clean = %q", cleaned)
 	}
 }
 

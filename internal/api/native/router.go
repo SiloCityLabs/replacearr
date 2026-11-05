@@ -457,6 +457,7 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/v1/indexers/{id}", s.authSvc.RequirePermission(domain.PermIndexersWrite, s.handleUpdateIndexer))
 	mux.HandleFunc("PUT /api/v1/downloadclients/{id}", s.authSvc.RequirePermission(domain.PermDownloadsWrite, s.handleUpdateDownloadClient))
 	mux.HandleFunc("POST /api/v1/downloadclients/test", s.authSvc.RequirePermission(domain.PermDownloadsRead, s.handleTestDownloadClient))
+	mux.HandleFunc("POST /api/v1/downloadclients/discover", s.authSvc.RequirePermission(domain.PermDownloadsRead, s.handleDiscoverDownloadClients))
 
 	// Plugins
 	mux.HandleFunc("GET /api/v1/plugins", s.authSvc.RequirePermission(domain.PermPluginsRead, s.handleListPlugins))

@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
-import { Folder, DownloadCloud, CheckCircle2, LogOut, ChevronRight, ChevronLeft } from 'lucide-react';
-import type { AppConfig } from '../types';
+import React, { useEffect, useRef, useState } from 'react';
+import { Folder, DownloadCloud, CheckCircle2, LogOut, ChevronRight, ChevronLeft, RefreshCw } from 'lucide-react';
+import type { AppConfig, DiscoveredDownloadClient } from '../types';
 import { api } from '../api';
 
 interface SetupWizardProps {
@@ -8,6 +8,16 @@ interface SetupWizardProps {
   onComplete: (config: AppConfig) => void;
   onLogout: () => void;
   onNotify: (msg: string, isError?: boolean) => void;
+}
+
+function protocolForImplementation(implementation: string): string {
+  switch (implementation) {
+    case 'SABnzbd':
+    case 'NZBGet':
+      return 'usenet';
+    default:
+      return 'torrent';
+  }
 }
 
 export const SetupWizard: React.FC<SetupWizardProps> = ({
@@ -21,9 +31,41 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({
   const [moviesPath, setMoviesPath] = useState('/data/Movies');
   const [addClient, setAddClient] = useState(false);
   const [clientName, setClientName] = useState('qBittorrent');
+  const [clientImplementation, setClientImplementation] = useState('qBittorrent');
   const [clientBaseUrl, setClientBaseUrl] = useState('http://localhost:8080');
   const [downloadPathNote, setDownloadPathNote] = useState('/data/downloads');
   const [busy, setBusy] = useState(false);
+  const [discovered, setDiscovered] = useState<DiscoveredDownloadClient[]>([]);
+  const [discovering, setDiscovering] = useState(false);
+  const [discoverDone, setDiscoverDone] = useState(false);
+  const discoverOnceRef = useRef(false);
+
+  const runDiscover = async () => {
+    setDiscovering(true);
+    try {
+      const hits = await api.discoverDownloadClients();
+      setDiscovered(hits);
+      setDiscoverDone(true);
+    } catch (err) {
+      onNotify(err instanceof Error ? err.message : 'Client discovery failed', true);
+      setDiscoverDone(true);
+    } finally {
+      setDiscovering(false);
+    }
+  };
+
+  useEffect(() => {
+    if (step !== 2 || discoverOnceRef.current) return;
+    discoverOnceRef.current = true;
+    void runDiscover();
+  }, [step]);
+
+  const applyDiscovered = (hit: DiscoveredDownloadClient) => {
+    setAddClient(true);
+    setClientName(hit.nameHint || hit.implementation);
+    setClientImplementation(hit.implementation);
+    setClientBaseUrl(hit.baseUrl);
+  };
 
   const finish = async () => {
     if (!tvPath.trim() || !moviesPath.trim()) {
@@ -36,12 +78,13 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({
       await api.addRootFolder({ path: moviesPath.trim(), mediaType: 'movie' });
 
       if (addClient) {
+        const impl = clientImplementation.trim() || 'qBittorrent';
         await api.addDownloadClient({
-          name: clientName.trim() || 'qBittorrent',
-          implementation: 'qBittorrent',
-          implementationName: 'qBittorrent',
-          configContract: 'QBittorrentSettings',
-          protocol: 'torrent',
+          name: clientName.trim() || impl,
+          implementation: impl,
+          implementationName: impl,
+          configContract: `${impl}Settings`,
+          protocol: protocolForImplementation(impl),
           enable: true,
           priority: 1,
           baseUrl: clientBaseUrl.trim() || 'http://localhost:8080',
@@ -155,6 +198,56 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({
                     Download client (optional)
                   </span>
                 </div>
+
+                <div className="rounded-lg border border-slate-800 bg-slate-950/80 p-3 space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-xs text-slate-400">
+                      {discovering
+                        ? 'Looking for nearby download clients…'
+                        : discoverDone && discovered.length === 0
+                          ? 'No clients found on local or SSDP hosts.'
+                          : discovered.length > 0
+                            ? 'Suggested clients — click to use'
+                            : 'Scanning for nearby clients…'}
+                    </p>
+                    <button
+                      type="button"
+                      disabled={discovering}
+                      onClick={() => void runDiscover()}
+                      className="inline-flex items-center gap-1 text-[11px] text-sky-300 hover:text-sky-200 disabled:opacity-40"
+                    >
+                      <RefreshCw className={`w-3 h-3 ${discovering ? 'animate-spin' : ''}`} />
+                      Scan again
+                    </button>
+                  </div>
+                  {discovered.length > 0 && (
+                    <ul className="space-y-1.5">
+                      {discovered.map((hit) => (
+                        <li key={`${hit.implementation}:${hit.baseUrl}`}>
+                          <button
+                            type="button"
+                            onClick={() => applyDiscovered(hit)}
+                            className="w-full text-left px-2.5 py-2 rounded-md border border-slate-800 hover:border-sky-500/40 hover:bg-sky-500/5 transition"
+                          >
+                            <div className="text-xs font-semibold text-white">
+                              {hit.nameHint || hit.implementation}
+                              <span className="ml-2 text-[10px] font-mono uppercase text-slate-500">
+                                {hit.protocol}
+                              </span>
+                            </div>
+                            <div className="text-[11px] font-mono text-slate-400 break-all">
+                              {hit.baseUrl}
+                            </div>
+                            {hit.detail ? (
+                              <div className="text-[10px] text-slate-500 mt-0.5">{hit.detail}</div>
+                            ) : null}
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+
                 <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
                   <input
                     type="checkbox"
@@ -167,6 +260,25 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({
                 {addClient && (
                   <div className="space-y-3 pl-1">
                     <div className="space-y-3">
+                      <div>
+                        <label className="block text-[11px] text-slate-400 mb-1">Type</label>
+                        <select
+                          value={clientImplementation}
+                          onChange={(e) => {
+                            setClientImplementation(e.target.value);
+                            if (!clientName.trim() || clientName === clientImplementation) {
+                              setClientName(e.target.value);
+                            }
+                          }}
+                          className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white"
+                        >
+                          <option value="qBittorrent">qBittorrent</option>
+                          <option value="Transmission">Transmission</option>
+                          <option value="Deluge">Deluge</option>
+                          <option value="SABnzbd">SABnzbd</option>
+                          <option value="NZBGet">NZBGet</option>
+                        </select>
+                      </div>
                       <div>
                         <label className="block text-[11px] text-slate-400 mb-1">Name</label>
                         <input
@@ -204,7 +316,8 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({
                     </div>
                     <p className="text-[11px] text-slate-500">
                       Download path is stored as a client note for your reference. Map remote paths
-                      later under Settings if the client runs in another container.
+                      later under Settings if the client runs in another container. Add credentials
+                      under Queue &amp; Clients after setup if needed.
                     </p>
                   </div>
                 )}

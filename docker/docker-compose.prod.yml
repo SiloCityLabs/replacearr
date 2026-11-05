@@ -40,6 +40,8 @@ services:
       - ./config:/config
       # Unified media library & downloads directory (/data/TV, /data/Movies, /data/downloads)
       - ./media:/data
+      # Host routing table so client discovery can learn the LAN from Docker bridge mode
+      - /proc/net:/host/proc/net:ro
     depends_on:
       - flaresolverr
     restart: unless-stopped

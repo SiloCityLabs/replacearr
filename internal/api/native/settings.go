@@ -1,6 +1,7 @@
 package native
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/replacearr/replacearr/internal/domain"
+	"github.com/replacearr/replacearr/internal/downloadclient/discover"
 )
 
 var tagLabelPattern = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
@@ -374,4 +376,32 @@ func (s *Server) handleTestDownloadClient(w http.ResponseWriter, r *http.Request
 		"message":   "connected to " + baseURL,
 		"latencyMs": latency,
 	})
+}
+
+func (s *Server) handleDiscoverDownloadClients(w http.ResponseWriter, r *http.Request) {
+	existing, err := s.store.ListDownloadClients()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	known := make([]discover.ExistingClient, 0, len(existing))
+	for _, c := range existing {
+		known = append(known, discover.ExistingClient{
+			Implementation: c.Implementation,
+			BaseURL:        c.BaseURL,
+		})
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
+	defer cancel()
+
+	found, err := discover.Discover(ctx, discover.Options{Existing: known})
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	if found == nil {
+		found = []discover.Result{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"clients": found})
 }

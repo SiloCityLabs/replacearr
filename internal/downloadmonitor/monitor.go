@@ -164,6 +164,7 @@ func (m *Monitor) syncFromClients(ctx context.Context, doImport bool) {
 				continue
 			}
 			for _, it := range items {
+				content := firstNonEmpty(it.ContentPath, it.DownloadDir)
 				byID[it.Hash] = trackedDownload{
 					ID:          it.Hash,
 					Title:       it.Name,
@@ -173,8 +174,8 @@ func (m *Monitor) syncFromClients(ctx context.Context, doImport bool) {
 					SizeLeft:    it.AmountLeft,
 					Timeleft:    formatTimeleft(it.EtaSeconds, it.AmountLeft),
 					EtaSeconds:  it.EtaSeconds,
-					OutputPath:  it.DownloadDir,
-					ContentPath: it.DownloadDir,
+					OutputPath:  content,
+					ContentPath: content,
 					Client:      cli,
 					RemoveDone:  dc.RemoveCompletedDownloads,
 					ClientName:  dc.Name,
@@ -282,9 +283,12 @@ func (m *Monitor) syncFromClients(ctx context.Context, doImport bool) {
 		} else {
 			q.EstimatedCompletion = time.Time{}
 		}
-		mapped := applyRemotePathMapping(appCfg.RemotePathMappings, td.OutputPath)
+		srcPath := firstNonEmpty(td.ContentPath, td.OutputPath)
+		mapped := applyRemotePathMapping(appCfg.RemotePathMappings, srcPath)
 		if mapped != "" {
 			q.OutputPath = mapped
+		} else if srcPath != "" {
+			q.OutputPath = srcPath
 		}
 		if !td.Completed {
 			q.Status = "downloading"
@@ -386,15 +390,37 @@ func (m *Monitor) importCompleted(ctx context.Context, appCfg domain.AppConfig, 
 	if err != nil {
 		return err
 	}
-	dest, err := m.destinationPath(appCfg, q, filepath.Ext(src))
+	dest, err := m.destinationPath(appCfg, q, src, filepath.Ext(src))
 	if err != nil {
 		return err
 	}
 	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 		return err
 	}
-	if err := importFile(src, dest, appCfg.MediaManagement.CopyUsingHardlinks); err != nil {
+	hardlink := appCfg.MediaManagement.CopyUsingHardlinks
+	if err := importFile(src, dest, hardlink); err != nil {
 		return err
+	}
+	if appCfg.MediaManagement.ImportExtraFiles {
+		exts := mediafile.ParseExtensions(appCfg.MediaManagement.ExtraFileExtensions)
+		if len(exts) == 0 {
+			exts = mediafile.ParseExtensions("srt")
+		}
+		extras, err := mediafile.ListExtraFiles(srcRoot, src, exts)
+		if err != nil {
+			log.Printf("downloadmonitor: list extras: %v", err)
+		} else {
+			for _, extra := range extras {
+				extraDest := mediafile.ExtraDestPath(dest, extra)
+				if err := os.MkdirAll(filepath.Dir(extraDest), 0o755); err != nil {
+					log.Printf("downloadmonitor: extra mkdir %s: %v", extraDest, err)
+					continue
+				}
+				if err := importFile(extra, extraDest, hardlink); err != nil {
+					log.Printf("downloadmonitor: extra import %s: %v", extra, err)
+				}
+			}
+		}
 	}
 
 	if appCfg.MediaManagement.DeleteUnwantedFiles {
@@ -532,7 +558,7 @@ func importNotifyPayload(q domain.QueueItem, dest string) map[string]any {
 	return payload
 }
 
-func (m *Monitor) destinationPath(appCfg domain.AppConfig, q domain.QueueItem, ext string) (string, error) {
+func (m *Monitor) destinationPath(appCfg domain.AppConfig, q domain.QueueItem, src, ext string) (string, error) {
 	if ext == "" {
 		ext = ".mkv"
 	}
@@ -541,18 +567,42 @@ func (m *Monitor) destinationPath(appCfg domain.AppConfig, q domain.QueueItem, e
 		if err != nil || mv == nil {
 			return "", fmt.Errorf("movie %d not found", q.MovieID)
 		}
+		mm := appCfg.MediaManagement
 		base := strings.TrimSpace(mv.Path)
 		if base == "" {
 			root := firstRoot(appCfg, m.store, "movie")
-			folder := fmt.Sprintf("%s (%d)", sanitizeName(mv.Title), mv.Year)
-			if mv.Year == 0 {
-				folder = sanitizeName(mv.Title)
+			folderFmt := strings.TrimSpace(mm.MovieFolderFormat)
+			if folderFmt == "" {
+				folderFmt = "{Movie Title} ({Release Year})"
+			}
+			folder := applyMovieFormat(folderFmt, mv.Title, mv.Year, "")
+			folder = cleanFileName(folder, mm)
+			if folder == "" {
+				folder = cleanFileName(mv.Title, mm)
 			}
 			base = filepath.Join(root, folder)
 		}
-		file := sanitizeName(mv.Title)
-		if mv.Year > 0 {
-			file = fmt.Sprintf("%s (%d)", sanitizeName(mv.Title), mv.Year)
+		var file string
+		if mm.RenameMovies {
+			fileFmt := strings.TrimSpace(mm.MovieFileFormat)
+			if fileFmt == "" {
+				fileFmt = "{Movie Title} ({Release Year})"
+			}
+			file = applyMovieFormat(fileFmt, mv.Title, mv.Year, "")
+			file = cleanFileName(file, mm)
+		} else {
+			// Keep the release basename (Radarr behavior when renameMovies is off).
+			file = strings.TrimSuffix(filepath.Base(src), filepath.Ext(src))
+			if file == "" || file == "." {
+				file = strings.TrimSuffix(filepath.Base(q.Title), filepath.Ext(q.Title))
+			}
+			file = cleanFileName(file, mm)
+		}
+		if file == "" {
+			file = cleanFileName(mv.Title, mm)
+			if mv.Year > 0 {
+				file = fmt.Sprintf("%s (%d)", file, mv.Year)
+			}
 		}
 		return filepath.Join(base, file+ext), nil
 	}
@@ -773,7 +823,58 @@ func sanitizeName(name string) string {
 	return strings.TrimSpace(replacer.Replace(name))
 }
 
-var releaseGroupPattern = regexp.MustCompile(`(?i)[-.]([A-Za-z0-9]+)(?:\[[^\]]*\])?(?:\.(?:mkv|mp4|avi))?$`)
+// applyMovieFormat replaces common Radarr movie naming tokens.
+func applyMovieFormat(format, title string, year int, quality string) string {
+	yearStr := ""
+	if year > 0 {
+		yearStr = fmt.Sprintf("%d", year)
+	}
+	replacer := strings.NewReplacer(
+		"{Movie Title}", title,
+		"{Movie CleanTitle}", sanitizeName(title),
+		"{Release Year}", yearStr,
+		"{Quality Full}", quality,
+		"{Quality Title}", quality,
+	)
+	out := replacer.Replace(format)
+	out = multiSpacePattern.ReplaceAllString(out, " ")
+	return strings.TrimSpace(strings.Trim(out, " .-_"))
+}
+
+// cleanFileName applies illegal-character / colon replacement from media management settings.
+func cleanFileName(name string, mm domain.MediaManagementConfig) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return ""
+	}
+	if !mm.ReplaceIllegalCharacters {
+		return sanitizeName(name)
+	}
+	colon := strings.TrimSpace(mm.ColonReplacementFormat)
+	switch strings.ToLower(colon) {
+	case "delete":
+		name = strings.ReplaceAll(name, ":", "")
+	case "dash":
+		name = strings.ReplaceAll(name, ":", "-")
+	case "spaceDash":
+		name = strings.ReplaceAll(name, ":", " -")
+	case "spaceDashSpace":
+		name = strings.ReplaceAll(name, ":", " - ")
+	case "custom":
+		custom := mm.CustomColonReplacementFormat
+		name = strings.ReplaceAll(name, ":", custom)
+	default: // smart
+		name = strings.ReplaceAll(name, ": ", " - ")
+		name = strings.ReplaceAll(name, ":", " -")
+	}
+	replacer := strings.NewReplacer(`/`, "-", `\`, "-", `*`, "", `?`, "", `"`, "", `<`, "", `>`, "", `|`, "")
+	return strings.TrimSpace(replacer.Replace(name))
+}
+
+var (
+	releaseGroupPattern = regexp.MustCompile(`(?i)[-.]([A-Za-z0-9]+)(?:\[[^\]]*\])?(?:\.(?:mkv|mp4|avi))?$`)
+	multiSpacePattern   = regexp.MustCompile(`\s{2,}`)
+)
 
 func parseReleaseGroup(title string) string {
 	title = strings.TrimSpace(title)

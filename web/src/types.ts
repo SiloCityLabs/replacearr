@@ -473,6 +473,15 @@ export interface DownloadClient {
   tags: number[];
 }
 
+/** Nearby client found by SSDP + HTTP fingerprint discovery. */
+export interface DiscoveredDownloadClient {
+  implementation: string;
+  protocol: string;
+  baseUrl: string;
+  nameHint: string;
+  detail?: string;
+}
+
 export interface Artist {
   id: number;
   title: string;

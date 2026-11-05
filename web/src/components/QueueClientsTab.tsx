@@ -7,11 +7,14 @@ import {
   FolderPlus,
   HardDrive,
   CheckCircle2,
+  CircleOff,
   Sparkles,
   RefreshCw,
+  Radar,
 } from 'lucide-react';
 import type {
   AppConfig,
+  DiscoveredDownloadClient,
   DownloadClient,
   DownloadClientOptions,
   QualityProfile,
@@ -22,6 +25,7 @@ import type {
 import { api, formatBytes } from '../api';
 import {
   blankDownloadClientForm,
+  discoveredToForm,
   DownloadClientForm,
   DownloadClientModal,
   downloadClientToForm,
@@ -29,6 +33,35 @@ import {
 import { useConfirm } from './modals/ConfirmModal';
 
 const QUEUE_POLL_MS = 5000;
+
+function urlPort(baseUrl: string): string {
+  try {
+    const raw = baseUrl.includes('://') ? baseUrl : `http://${baseUrl}`;
+    const u = new URL(raw);
+    if (u.port) return u.port;
+    return u.protocol === 'https:' ? '443' : '80';
+  } catch {
+    return '';
+  }
+}
+
+function normalizeClientUrl(baseUrl: string): string {
+  return baseUrl.trim().toLowerCase().replace(/\/+$/, '');
+}
+
+/** True when a discovery hit matches an already-configured client. */
+function isAlreadyAdded(hit: DiscoveredDownloadClient, configured: DownloadClient[]): boolean {
+  const hitUrl = normalizeClientUrl(hit.baseUrl);
+  const hitPort = urlPort(hit.baseUrl);
+  return configured.some((dc) => {
+    if (normalizeClientUrl(dc.baseUrl) === hitUrl) return true;
+    return (
+      dc.implementation === hit.implementation &&
+      hitPort !== '' &&
+      urlPort(dc.baseUrl) === hitPort
+    );
+  });
+}
 
 interface QueueClientsTabProps {
   queue: QueueItem[];
@@ -59,6 +92,35 @@ export const QueueClientsTab: React.FC<QueueClientsTabProps> = ({
   const [mappings, setMappings] = useState<RemotePathMapping[]>(appConfig?.remotePathMappings ?? []);
   const [savingOpts, setSavingOpts] = useState(false);
   const [queueRefreshing, setQueueRefreshing] = useState(false);
+  const [discovering, setDiscovering] = useState(false);
+  const [discovered, setDiscovered] = useState<DiscoveredDownloadClient[] | null>(null);
+
+  const handleFindNearby = async () => {
+    setDiscovering(true);
+    try {
+      const hits = await api.discoverDownloadClients();
+      // Backend already filters configured clients; also drop any that match local state.
+      setDiscovered(hits.filter((h) => !isAlreadyAdded(h, clients)));
+      if (hits.length === 0) {
+        onNotify('No clients found on local or SSDP hosts');
+      }
+    } catch (err) {
+      onNotify(err instanceof Error ? err.message : 'Client discovery failed', true);
+    } finally {
+      setDiscovering(false);
+    }
+  };
+
+  // Checklist UX: as clients are added, peel them off the nearby list without re-scanning.
+  useEffect(() => {
+    setDiscovered((prev) => {
+      if (!prev || prev.length === 0) return prev;
+      const next = prev.filter((h) => !isAlreadyAdded(h, clients));
+      return next.length === prev.length ? prev : next;
+    });
+  }, [clients]);
+
+  const pendingDiscoveries = (discovered ?? []).filter((h) => !isAlreadyAdded(h, clients));
 
   const refreshQueue = useCallback(async () => {
     if (onRefreshQueue) {
@@ -289,15 +351,56 @@ export const QueueClientsTab: React.FC<QueueClientsTabProps> = ({
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={() => setClientForm(blankDownloadClientForm())}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-lg transition"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Add Download Client</span>
-          </button>
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <button
+              type="button"
+              disabled={discovering}
+              onClick={() => void handleFindNearby()}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-200 text-xs font-semibold rounded-lg border border-slate-700 transition"
+            >
+              <Radar className={`w-4 h-4 ${discovering ? 'animate-pulse' : ''}`} />
+              <span>{discovering ? 'Scanning…' : 'Find nearby'}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setClientForm(blankDownloadClientForm())}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-lg transition"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Add Download Client</span>
+            </button>
+          </div>
         </div>
+
+        {pendingDiscoveries.length > 0 && (
+          <div className="rounded-xl border border-sky-500/25 bg-sky-500/5 p-3 space-y-2">
+            <p className="text-xs text-sky-200/90 font-medium">
+              Nearby clients — click to add ({pendingDiscoveries.length} remaining)
+            </p>
+            <ul className="space-y-1.5">
+              {pendingDiscoveries.map((hit) => (
+                <li key={`${hit.implementation}:${hit.baseUrl}`}>
+                  <button
+                    type="button"
+                    onClick={() => setClientForm(discoveredToForm(hit))}
+                    className="w-full text-left px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 hover:border-sky-500/40 transition"
+                  >
+                    <div className="text-sm font-semibold text-white">
+                      {hit.nameHint || hit.implementation}
+                      <span className="ml-2 text-[10px] font-mono uppercase text-slate-500">
+                        {hit.protocol}
+                      </span>
+                    </div>
+                    <div className="text-xs font-mono text-slate-400 break-all">{hit.baseUrl}</div>
+                    {hit.detail ? (
+                      <div className="text-[11px] text-slate-500 mt-0.5">{hit.detail}</div>
+                    ) : null}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
 
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {clients.map((dc) => (
@@ -335,8 +438,17 @@ export const QueueClientsTab: React.FC<QueueClientsTabProps> = ({
               </div>
 
               <div className="pt-3 border-t border-slate-800/80 flex items-center justify-between">
-                <span className="inline-flex items-center gap-1 text-xs text-emerald-400">
-                  <CheckCircle2 className="w-3.5 h-3.5" /> {dc.enable ? 'Enabled' : 'Disabled'}
+                <span
+                  className={`inline-flex items-center gap-1 text-xs ${
+                    dc.enable ? 'text-emerald-400' : 'text-amber-400'
+                  }`}
+                >
+                  {dc.enable ? (
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                  ) : (
+                    <CircleOff className="w-3.5 h-3.5" />
+                  )}
+                  {dc.enable ? 'Enabled' : 'Disabled'}
                 </span>
                 <div className="flex items-center gap-1">
                   <button
@@ -407,7 +519,7 @@ export const QueueClientsTab: React.FC<QueueClientsTabProps> = ({
               type="text"
               value={newFolderPath}
               onChange={(e) => setNewFolderPath(e.target.value)}
-              placeholder="/data/anime or /mnt/nas/media"
+              placeholder="/mnt/nas/media"
               className="flex-1 min-w-[10rem] px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white font-mono"
             />
             <select
@@ -415,7 +527,7 @@ export const QueueClientsTab: React.FC<QueueClientsTabProps> = ({
               onChange={(e) => setNewFolderType(e.target.value)}
               className="px-2.5 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-slate-300"
             >
-              <option value="all">all</option>
+              {/* <option value="all">all</option> */}
               <option value="tv">tv</option>
               <option value="movie">movie</option>
               <option value="music">music</option>

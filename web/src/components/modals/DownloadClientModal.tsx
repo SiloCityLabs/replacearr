@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import type { DownloadClient } from '../../types';
+import type { DiscoveredDownloadClient, DownloadClient } from '../../types';
 import { api } from '../../api';
 import {
   Checkbox,
@@ -62,6 +62,16 @@ export function downloadClientToForm(client: DownloadClient): DownloadClientForm
     category: client.category,
     removeCompletedDownloads: client.removeCompletedDownloads,
     removeFailedDownloads: client.removeFailedDownloads,
+  };
+}
+
+export function discoveredToForm(hit: DiscoveredDownloadClient): DownloadClientForm {
+  return {
+    ...blankDownloadClientForm(),
+    name: hit.nameHint || hit.implementation,
+    implementation: hit.implementation,
+    protocol: protocolForImplementation(hit.implementation, hit.protocol),
+    baseUrl: hit.baseUrl,
   };
 }
 

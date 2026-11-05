@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -28,6 +29,8 @@ type Item struct {
 	AmountLeft  int64
 	EtaSeconds  int64 // -1 unknown; -2 not available
 	DownloadDir string
+	// ContentPath is downloadDir/name — the torrent payload root Transmission writes.
+	ContentPath string
 }
 
 // Client talks to a Transmission daemon over RPC.
@@ -182,6 +185,12 @@ func (c *Client) List(ctx context.Context) ([]Item, error) {
 	}
 	items := make([]Item, 0, len(out.Torrents))
 	for _, t := range out.Torrents {
+		dir := strings.TrimSpace(t.DownloadDir)
+		name := strings.TrimSpace(t.Name)
+		content := dir
+		if dir != "" && name != "" {
+			content = filepath.Join(dir, name)
+		}
 		items = append(items, Item{
 			ID:          t.ID,
 			Hash:        strings.ToLower(t.HashString),
@@ -191,7 +200,8 @@ func (c *Client) List(ctx context.Context) ([]Item, error) {
 			Size:        t.TotalSize,
 			AmountLeft:  t.LeftUntilDone,
 			EtaSeconds:  t.Eta,
-			DownloadDir: t.DownloadDir,
+			DownloadDir: dir,
+			ContentPath: content,
 		})
 	}
 	return items, nil
@@ -215,18 +225,19 @@ func (c *Client) Remove(ctx context.Context, id string, deleteFiles bool) error 
 }
 
 // IsCompleted reports whether a Transmission torrent has finished downloading.
+// Requires real progress so magnet/metadata-only torrents (left=0, progress=0) are not treated as done.
 func IsCompleted(status int, progress float64, left int64) bool {
-	if left == 0 && progress >= 0.999 {
-		return true
+	done := left == 0 && progress >= 0.999
+	if !done {
+		return false
 	}
-	// 5 = seed wait, 6 = seed; 0 = stopped (often complete).
+	// 5 = seed wait, 6 = seed; 0 = stopped after completion; 4 = downloading (rare race at 100%).
 	switch status {
-	case 5, 6:
+	case 0, 4, 5, 6:
 		return true
-	case 0:
-		return progress >= 0.999 || left == 0
+	default:
+		return false
 	}
-	return false
 }
 
 func (c *Client) call(ctx context.Context, method string, arguments any, out any) error {

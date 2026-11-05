@@ -2,6 +2,7 @@
 package mediafile
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -43,6 +44,135 @@ func IsAudiobook(path string) bool {
 	default:
 		return false
 	}
+}
+
+// IsSubtitle reports whether path looks like a sidecar subtitle file.
+func IsSubtitle(path string) bool {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".srt", ".ass", ".ssa", ".vtt", ".sub", ".idx", ".sup":
+		return true
+	default:
+		return false
+	}
+}
+
+// HasExtension reports whether path's extension is in the normalized ext list (e.g. ".srt").
+func HasExtension(path string, exts []string) bool {
+	if len(exts) == 0 {
+		return false
+	}
+	ext := strings.ToLower(filepath.Ext(path))
+	for _, e := range exts {
+		if ext == e {
+			return true
+		}
+	}
+	return false
+}
+
+// ListExtraFiles walks root for files whose extension is in exts (typically ExtraFileExtensions).
+// Skips the primary media file itself when primary is under root.
+func ListExtraFiles(root, primary string, exts []string) ([]string, error) {
+	if len(exts) == 0 {
+		return nil, nil
+	}
+	info, err := os.Stat(root)
+	if err != nil {
+		return nil, err
+	}
+	primary = filepath.Clean(primary)
+	var out []string
+	seen := map[string]bool{}
+	collect := func(path string) {
+		clean := filepath.Clean(path)
+		if clean == primary || seen[clean] {
+			return
+		}
+		if !HasExtension(clean, exts) {
+			return
+		}
+		seen[clean] = true
+		out = append(out, clean)
+	}
+	if !info.IsDir() {
+		dir := filepath.Dir(root)
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			return nil, err
+		}
+		for _, e := range entries {
+			if e.IsDir() {
+				continue
+			}
+			collect(filepath.Join(dir, e.Name()))
+		}
+		return out, nil
+	}
+	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		collect(path)
+		return nil
+	})
+	return out, nil
+}
+
+// ExtraDestPath names an imported extra beside the library media file.
+// Same-stem companions become "{videoStem}.srt"; others keep a tag, e.g. "{videoStem}.English.srt".
+func ExtraDestPath(videoDest, extraSrc string) string {
+	dir := filepath.Dir(videoDest)
+	videoStem := strings.TrimSuffix(filepath.Base(videoDest), filepath.Ext(videoDest))
+	extraBase := filepath.Base(extraSrc)
+	extraExt := filepath.Ext(extraBase)
+	extraStem := strings.TrimSuffix(extraBase, extraExt)
+
+	// When the extra sits next to a video/audio release, strip that release stem so
+	// "Movie.2024.en.srt" → "{videoStem}.en.srt" and "Movie.2024.srt" → "{videoStem}.srt".
+	srcVideoStem := companionMediaStem(filepath.Dir(extraSrc))
+	if srcVideoStem != "" {
+		lowerExtra := strings.ToLower(extraStem)
+		lowerVideo := strings.ToLower(srcVideoStem)
+		if lowerExtra == lowerVideo {
+			return filepath.Join(dir, videoStem+extraExt)
+		}
+		if strings.HasPrefix(lowerExtra, lowerVideo+".") {
+			rest := extraStem[len(srcVideoStem):]
+			return filepath.Join(dir, videoStem+rest+extraExt)
+		}
+	}
+	tag := strings.TrimSpace(extraStem)
+	if tag == "" {
+		return filepath.Join(dir, videoStem+extraExt)
+	}
+	return filepath.Join(dir, videoStem+"."+tag+extraExt)
+}
+
+func companionMediaStem(dir string) string {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return ""
+	}
+	var best string
+	var bestSize int64
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if !(IsVideo(name) || IsAudio(name) || IsEbook(name) || IsAudiobook(name)) {
+			continue
+		}
+		fi, err := e.Info()
+		if err != nil {
+			continue
+		}
+		if fi.Size() >= bestSize {
+			bestSize = fi.Size()
+			best = strings.TrimSuffix(name, filepath.Ext(name))
+		}
+	}
+	return best
 }
 
 // MatcherForMediaType returns a path matcher for the given library media type.
