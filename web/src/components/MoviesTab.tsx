@@ -14,6 +14,7 @@ import { api, formatBytes, truncateText } from '../api';
 import { useRovingFocus } from '../htpc/useRovingFocus';
 import { ManualTorrentForm, type ManualTorrentTarget } from './ManualTorrentForm';
 import { MovieDetailPanel } from './MovieDetailPanel';
+import { useConfirm } from './modals/ConfirmModal';
 
 interface MoviesTabProps {
   movies: Movie[];
@@ -38,6 +39,7 @@ export const MoviesTab: React.FC<MoviesTabProps> = ({
   openAddNonce = 0,
   onAddPanelOpened,
 }) => {
+  const { confirm, dialog } = useConfirm();
   const movieRoots = rootFolders.filter((r) => r.mediaType === 'movie');
   const availableRoots = movieRoots.length > 0 ? movieRoots : rootFolders;
 
@@ -107,6 +109,12 @@ export const MoviesTab: React.FC<MoviesTabProps> = ({
   };
 
   const handleDeleteMovie = async (m: Movie) => {
+    const ok = await confirm({
+      title: 'Remove movie',
+      message: `Remove "${m.title}" from the Movies library?`,
+      confirmLabel: 'Remove',
+    });
+    if (!ok) return;
     try {
       await api.deleteMovie(m.id);
       onNotify(`Removed "${m.title}" from library`);
@@ -142,6 +150,7 @@ export const MoviesTab: React.FC<MoviesTabProps> = ({
   if (activeMovie) {
     return (
       <>
+        {dialog}
         <MovieDetailPanel
           movie={activeMovie}
           posterUrl={getPosterUrl(activeMovie)}

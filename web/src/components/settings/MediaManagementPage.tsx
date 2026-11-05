@@ -16,6 +16,7 @@ import {
   TextInput,
   useDraftState,
 } from './fields';
+import { useConfirm } from '../modals/ConfirmModal';
 
 interface MediaManagementPageProps {
   config: AppConfig;
@@ -34,6 +35,7 @@ export const MediaManagementPage: React.FC<MediaManagementPageProps> = ({
   onRefresh,
   onNotify,
 }) => {
+  const { confirm, dialog } = useConfirm();
   const { draft, setDraft, isDirty, saving, setSaving, commit } = useDraftState(
     config.mediaManagement,
     onDirtyChange
@@ -76,7 +78,12 @@ export const MediaManagementPage: React.FC<MediaManagementPageProps> = ({
   };
 
   const handleDeleteFolder = async (folder: RootFolder) => {
-    if (!window.confirm(`Delete root folder "${folder.path}"?`)) return;
+    const ok = await confirm({
+      title: 'Delete root folder',
+      message: `Delete root folder "${folder.path}"?`,
+      confirmLabel: 'Delete',
+    });
+    if (!ok) return;
     try {
       await api.deleteRootFolder(folder.id);
       onNotify(`Removed root folder "${folder.path}"`);
@@ -449,6 +456,7 @@ export const MediaManagementPage: React.FC<MediaManagementPageProps> = ({
           </button>
         </form>
       </section>
+      {dialog}
     </div>
   );
 };

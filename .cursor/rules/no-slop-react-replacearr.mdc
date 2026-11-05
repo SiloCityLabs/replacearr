@@ -1,0 +1,55 @@
+---
+description: No-slop visual and interaction quality standards for Replacearr's React UI
+globs: web/**/*.{tsx,css}
+alwaysApply: false
+---
+
+# No Slop UI — React
+
+Adapted from https://github.com/LeoStehlik/no-slop-ui. Apply when building, modifying, or reviewing visible UI. These are design guardrails, not instructions to redesign unrelated screens.
+
+## Priorities
+
+1. Preserve functionality, accessibility, and the existing product design language.
+2. Inspect nearby screens and shared components before choosing a layout or styling.
+3. Prefer clear, restrained interfaces built around actual user tasks, not decorative showcases.
+4. Keep changes limited to the requested workflow.
+
+## Avoid generic AI-generated UI
+
+- Gratuitous gradients, glassmorphism, blur overlays, glow effects, or floating decorative shapes.
+- Excessively rounded containers, deeply nested cards, dominant shadows, and wasteful empty space.
+- Dashboard hero sections, oversized slogans, fake metrics, placeholder charts, and card grids added for visual filler.
+- Making everything a pill, badge, icon button, status dot, or floating action control.
+- Default purple/blue "AI SaaS" themes that clash with the existing application.
+- Hover scaling, bouncing, parallax, or animations without a functional purpose.
+- Vague microcopy like "Unlock insights", "Seamless experience", and "Your command center".
+- Inventing mock data, features, or dependencies to support a preferred visual treatment.
+
+## Prefer practical application UI
+
+- Make the primary task and relevant controls immediately visible.
+- Use tables for comparable records, lists for scanning, forms for editing, and tabs or filters for navigation. Use cards when grouping is genuinely useful.
+- Maintain useful information density, predictable control placement, clear alignment, and consistent spacing.
+- Use restrained borders and shadows, typography-driven hierarchy, and existing colors/tokens.
+- Keep text labels specific and unambiguous; don't replace important actions with unexplained icons.
+- Handle loading, empty, disabled, error, long-content, and narrow-screen states deliberately.
+- Preserve semantic HTML, visible keyboard focus, meaningful labels, and reduced-motion preferences.
+- Favor subtle color/opacity feedback over unnecessary motion.
+
+## Implementation guardrails
+
+- Reuse existing components, patterns, Tailwind conventions, and theme values rather than establishing a second design system.
+- Don't create generic wrappers or component abstractions solely for visual novelty.
+- Don't change data contracts or unrelated UI to accommodate a design idea.
+- When a no-slop preference conflicts with an established product convention, follow the established convention.
+
+## Quick self-review
+
+Before finishing a visible UI change, ask:
+- Is every section, card, badge, and icon serving a user task?
+- Is the information easy to scan without excessive scrolling or visual decoration?
+- Does the change fit the surrounding application?
+- Are keyboard, loading, error, empty, and responsive states usable?
+
+Simplify any element that fails these checks. Mention a material exception only when it affects the requested work; don't add a boilerplate review report to every response.

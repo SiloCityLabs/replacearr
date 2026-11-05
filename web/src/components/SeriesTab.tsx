@@ -12,6 +12,7 @@ import { api, truncateText } from '../api';
 import { useRovingFocus } from '../htpc/useRovingFocus';
 import { ManualTorrentForm, type ManualTorrentTarget } from './ManualTorrentForm';
 import { SeriesDetailPanel } from './SeriesDetailPanel';
+import { useConfirm } from './modals/ConfirmModal';
 
 interface SeriesTabProps {
   series: Series[];
@@ -38,6 +39,7 @@ export const SeriesTab: React.FC<SeriesTabProps> = ({
   openAddNonce = 0,
   onAddPanelOpened,
 }) => {
+  const { confirm, dialog } = useConfirm();
   const tvRoots = rootFolders.filter((r) => r.mediaType === 'tv');
   const availableRoots = tvRoots.length > 0 ? tvRoots : rootFolders;
 
@@ -123,6 +125,12 @@ export const SeriesTab: React.FC<SeriesTabProps> = ({
   };
 
   const handleDeleteSeries = async (s: Series) => {
+    const ok = await confirm({
+      title: 'Remove series',
+      message: `Remove "${s.title}" from the TV library?`,
+      confirmLabel: 'Remove',
+    });
+    if (!ok) return;
     try {
       await api.deleteSeries(s.id);
       onNotify(`Removed "${s.title}" from library`);
@@ -158,6 +166,7 @@ export const SeriesTab: React.FC<SeriesTabProps> = ({
   if (activeSeries) {
     return (
       <>
+        {dialog}
         <SeriesDetailPanel
           series={activeSeries}
           episodes={episodes}

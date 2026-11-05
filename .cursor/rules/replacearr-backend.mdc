@@ -1,0 +1,19 @@
+---
+description: Replacearr Go backend architecture, API, persistence, and authorization conventions
+globs: "**/*.go"
+alwaysApply: false
+---
+
+# Replacearr backend
+
+Follow the existing package boundaries and established interfaces. Do not introduce a web framework, ORM, or dependency injection container; the backend uses Go's standard library (`net/http`, `database/sql`, `encoding/json`).
+
+- Define shared domain types and RBAC permission constants in `internal/domain`.
+- Access persistent data through `internal/db.Store`; do not put SQL or persistence logic directly in HTTP handlers.
+- Register native API routes through `internal/api/native.Server`.
+- Keep authentication, users, roles, and API keys in `internal/auth`.
+- Protect routes using `auth.Service.Middleware(scope, permission, next)`, with permission constants from `internal/domain` (for example, `tv:write` and `indexers:search`). Do not bypass existing authorization checks.
+- Preserve the native API's camelCase JSON contract and existing struct tags (for example, `roleId` and `mediaType`).
+- For persistence behavior, follow the existing SQLite store testing conventions and use the real store when integration behavior matters.
+
+After backend changes, run `go test -race ./...` when the environment supports it. Report any tests that could not run.

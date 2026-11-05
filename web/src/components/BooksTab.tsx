@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { BookOpen, Plus, Search, X, Headphones } from 'lucide-react';
 import type { Author, Book, Edition, QualityProfile, ReleaseSearchRequest, RootFolder } from '../types';
 import { api } from '../api';
+import { useConfirm } from './modals/ConfirmModal';
 
 interface BooksTabProps {
   authors: Author[];
@@ -35,6 +36,7 @@ export const BooksTab: React.FC<BooksTabProps> = ({
   openAddNonce = 0,
   onAddPanelOpened,
 }) => {
+  const { confirm, dialog } = useConfirm();
   const [format, setFormat] = useState<'ebook' | 'audiobook'>('ebook');
 
   const formatRoots = useMemo(
@@ -245,6 +247,12 @@ export const BooksTab: React.FC<BooksTabProps> = ({
               type="button"
               className="w-full sm:w-auto px-3 py-2 rounded-lg bg-rose-700/80 text-white text-sm"
               onClick={async () => {
+                const ok = await confirm({
+                  title: 'Remove book',
+                  message: `Remove "${activeBook.title}" from the Books library?`,
+                  confirmLabel: 'Remove',
+                });
+                if (!ok) return;
                 await api.deleteBook(activeBook.id);
                 onNotify(`Removed ${activeBook.title}`);
                 setActiveBook(null);
@@ -343,6 +351,7 @@ export const BooksTab: React.FC<BooksTabProps> = ({
           </div>
         </div>
       )}
+      {dialog}
     </div>
   );
 };

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -13,6 +14,7 @@ import (
 	cdefinition "github.com/Kcchouette/cardigann-go/definition"
 	cengine "github.com/Kcchouette/cardigann-go/engine"
 	chttp "github.com/Kcchouette/cardigann-go/httpclient"
+	ctemplate "github.com/Kcchouette/cardigann-go/template"
 
 	"github.com/replacearr/replacearr/internal/domain"
 )
@@ -113,7 +115,6 @@ func Search(ctx context.Context, req SearchRequest) ([]domain.ReleaseResult, err
 		}
 	}
 
-	provider := cengine.NewAuthenticatedProvider(def, baseURL, cfg, client)
 	mode := strings.ToLower(strings.TrimSpace(req.SearchMode))
 	switch mode {
 	case "tv", "tvsearch":
@@ -139,6 +140,17 @@ func Search(ctx context.Context, req SearchRequest) ([]domain.ReleaseResult, err
 		q.Ep = strconv.Itoa(req.Episode)
 	}
 
+	// cardigann-go does not render path methods and mis-parses Prowlarr regex
+	// escapes in Go templates; normalize before the engine runs.
+	if err := applyDefinitionCompat(&def, ctemplate.Context{
+		Config:   cfg,
+		Keywords: q.Keywords,
+		Query:    map[string]string{"Type": q.Type, "Season": q.Season, "Ep": q.Ep},
+	}); err != nil {
+		return nil, err
+	}
+
+	provider := cengine.NewAuthenticatedProvider(def, baseURL, cfg, client)
 	releases, err := provider.Search(ctx, q)
 	if err != nil {
 		return nil, err
@@ -154,10 +166,18 @@ func Search(ctx context.Context, req SearchRequest) ([]domain.ReleaseResult, err
 		if ageDays < 0 {
 			ageDays = 0
 		}
-		leechers := rel.Peers - rel.Seeders
-		if leechers < 0 {
+		// promoteLeechersToPeers maps YAML `leechers` onto cardigann-go's
+		// `peers` field (the engine drops `leechers`). Treat that value as
+		// leechers-only and build Torznab peers = seeders + leechers.
+		seeders := rel.Seeders
+		leechers := rel.Peers
+		if seeders < 0 || seeders >= 5_000_000 {
+			seeders = 0
+		}
+		if leechers < 0 || leechers >= 5_000_000 {
 			leechers = 0
 		}
+		peers := seeders + leechers
 		protocol := string(rel.Protocol)
 		if protocol == "" {
 			protocol = "torrent"
@@ -166,13 +186,10 @@ func Search(ctx context.Context, req SearchRequest) ([]domain.ReleaseResult, err
 		if cats == nil {
 			cats = []int{}
 		}
-		downloadURL := rel.DownloadLink
+		downloadURL := resolveDownloadURL(rel.DownloadLink, rel.InfoHash, rel.Title, baseURL)
 		infoURL := rel.Details
 		if infoURL != "" && strings.HasPrefix(infoURL, "/") {
 			infoURL = strings.TrimRight(baseURL, "/") + infoURL
-		}
-		if downloadURL != "" && strings.HasPrefix(downloadURL, "/") {
-			downloadURL = strings.TrimRight(baseURL, "/") + downloadURL
 		}
 		guid := downloadURL
 		if guid == "" {
@@ -181,6 +198,7 @@ func Search(ctx context.Context, req SearchRequest) ([]domain.ReleaseResult, err
 		if guid == "" {
 			guid = fmt.Sprintf("%s-%s", def.ID, rel.Title)
 		}
+		quality := domain.InferReleaseQuality(rel.Title, "")
 		out = append(out, domain.ReleaseResult{
 			Guid:        guid,
 			Title:       rel.Title,
@@ -192,13 +210,37 @@ func Search(ctx context.Context, req SearchRequest) ([]domain.ReleaseResult, err
 			PublishDate: pub.UTC(),
 			DownloadURL: downloadURL,
 			InfoURL:     infoURL,
-			Seeders:     rel.Seeders,
+			Seeders:     seeders,
 			Leechers:    leechers,
-			Peers:       rel.Peers,
+			Peers:       peers,
 			Categories:  cats,
+			Quality:     quality,
 		})
 	}
 	return out, nil
+}
+
+// resolveDownloadURL absolutizes a torrent/NZB link, or builds a magnet URI
+// from an infohash when the definition only exposes infohash (e.g. Bangumi Moe).
+func resolveDownloadURL(downloadLink, infoHash, title, baseURL string) string {
+	downloadURL := strings.TrimSpace(downloadLink)
+	if downloadURL != "" {
+		if strings.HasPrefix(downloadURL, "/") {
+			return strings.TrimRight(baseURL, "/") + downloadURL
+		}
+		return downloadURL
+	}
+	hash := strings.TrimSpace(infoHash)
+	if hash == "" {
+		return ""
+	}
+	// Strip common wrappers some JSON APIs return.
+	hash = strings.TrimPrefix(strings.ToLower(hash), "urn:btih:")
+	magnet := "magnet:?xt=urn:btih:" + hash
+	if title = strings.TrimSpace(title); title != "" {
+		magnet += "&dn=" + url.QueryEscape(title)
+	}
+	return magnet
 }
 
 func configFromDefinition(def cdefinition.IndexerDefinition, fields []domain.ConfigField) map[string]string {

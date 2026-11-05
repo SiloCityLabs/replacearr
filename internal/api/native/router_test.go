@@ -2,6 +2,7 @@ package native
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -145,5 +146,20 @@ func TestSeriesAndIndexerProxyFlow(t *testing.T) {
 	mux.ServeHTTP(rr, authed(http.MethodPost, "/api/v1/indexerproxies/test", token, []byte(`{"host":"http://127.0.0.1:1"}`)))
 	if rr.Code != http.StatusOK || !bytes.Contains(rr.Body.Bytes(), []byte(`"healthy":false`)) {
 		t.Fatalf("proxy test %d %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestDecodeTorrentBase64(t *testing.T) {
+	want := []byte("d8:announce")
+	got, err := decodeTorrentBase64(base64.StdEncoding.EncodeToString(want))
+	if err != nil || !bytes.Equal(got, want) {
+		t.Fatalf("std: %v %q", err, got)
+	}
+	got, err = decodeTorrentBase64("data:application/x-bittorrent;base64," + base64.StdEncoding.EncodeToString(want))
+	if err != nil || !bytes.Equal(got, want) {
+		t.Fatalf("data-url: %v %q", err, got)
+	}
+	if _, err := decodeTorrentBase64("%%%"); err == nil {
+		t.Fatal("expected invalid base64 error")
 	}
 }

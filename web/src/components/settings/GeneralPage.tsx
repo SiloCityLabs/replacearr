@@ -14,6 +14,7 @@ import {
   TextInput,
   useDraftState,
 } from './fields';
+import { useConfirm } from '../modals/ConfirmModal';
 
 const LOCKED_HELP = 'Set by an environment variable and applied at startup.';
 
@@ -32,6 +33,7 @@ export const GeneralPage: React.FC<GeneralPageProps> = ({
   onNotify,
   onApiKey,
 }) => {
+  const { confirm, dialog } = useConfirm();
   const { draft, setDraft, setBaseline, isDirty, saving, setSaving, commit } = useDraftState(
     config,
     onDirtyChange
@@ -69,9 +71,12 @@ export const GeneralPage: React.FC<GeneralPageProps> = ({
   };
 
   const handleRegenerate = async () => {
-    if (!window.confirm('Regenerate the API key? Clients using the current key will need the new value.')) {
-      return;
-    }
+    const ok = await confirm({
+      title: 'Regenerate API key',
+      message: 'Regenerate the API key? Clients using the current key will need the new value.',
+      confirmLabel: 'Regenerate',
+    });
+    if (!ok) return;
     setRegenerating(true);
     try {
       const res = await api.regenerateApiKey();
@@ -325,6 +330,7 @@ export const GeneralPage: React.FC<GeneralPageProps> = ({
         showAdvanced={showAdvanced}
         onToggleAdvanced={() => setShowAdvanced((current) => !current)}
       />
+      {dialog}
     </div>
   );
 };

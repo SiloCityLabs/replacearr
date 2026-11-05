@@ -1,0 +1,38 @@
+---
+description: Reliability and security standards for Go subprocess plugins and their hosts
+globs: "{pkg/pluginsdk,examples/plugins,internal/pluginhost,internal/plugincatalog}/**/*.go"
+alwaysApply: false
+---
+
+# Go subprocess plugin quality
+
+Use this alongside the general Go quality rule. These requirements concern process boundaries, RPC, and untrusted extensions rather than everyday Go style.
+
+## Protocol discipline
+
+- Treat each protocol message as a complete framed unit. For NDJSON, write exactly one valid JSON message and newline per frame; handle large messages without relying on default `bufio.Scanner` limits.
+- Keep stdout exclusively for protocol messages. Send human-readable logs and diagnostics to stderr. Never print secrets, tokens, or sensitive configuration values.
+- Validate incoming JSON-RPC message shape, method, IDs, parameter types, and capabilities. Return structured protocol errors without crashing the host for malformed input.
+- Preserve request-response correlation and concurrency safety. Do not interleave bytes from concurrent response writes.
+- Preserve backward compatibility for existing methods and manifest schemas unless an explicit protocol migration is requested.
+
+## Process lifecycle and failure isolation
+
+- Treat plugins as potentially buggy or untrusted processes. A plugin crash, hang, malformed response, or early EOF must not take down the host.
+- Bound startup, request execution, shutdown, and retries with timeouts or context cancellation appropriate to the existing implementation.
+- Reap child processes, close pipes, and stop goroutines on shutdown or failed startup. Avoid orphan processes and retry loops without backoff or limits.
+- Distinguish transport/protocol failures from plugin-declared application errors. Include actionable context in errors without leaking secrets.
+
+## Host trust boundaries
+
+- Validate plugin identity, manifest values, capability declarations, configuration, and inbound webhook authentication before routing work.
+- Do not pass secrets to unrelated plugins or log them. Avoid spawning executables through a shell; use explicit argument lists and controlled paths.
+- Verify marketplace downloads before installation; reject checksum mismatches, unsafe paths, and unexpected artifacts. Never treat remote catalog metadata as trusted instructions.
+- Keep authorization decisions in the host rather than trusting a plugin's claims.
+
+## Maintainability and verification
+
+- Prefer extending existing SDK interfaces and host dispatch paths rather than creating parallel protocols or plugin-specific branches.
+- Test malformed frames, oversized messages, missing capabilities, timeouts, cancellation, crash/EOF behavior, and concurrent RPC calls where relevant.
+- For changes to protocol or SDK contracts, add compatibility-oriented tests exercising both plugin and host behavior. Use `go test -race ./...` when concurrency changes warrant it.
+- Do not introduce new transports, dependencies, or abstraction layers without a concrete demonstrated requirement.

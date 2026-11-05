@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   DownloadCloud,
   Server,
@@ -8,6 +8,7 @@ import {
   HardDrive,
   CheckCircle2,
   Sparkles,
+  RefreshCw,
 } from 'lucide-react';
 import type {
   AppConfig,
@@ -25,6 +26,9 @@ import {
   DownloadClientModal,
   downloadClientToForm,
 } from './modals/DownloadClientModal';
+import { useConfirm } from './modals/ConfirmModal';
+
+const QUEUE_POLL_MS = 5000;
 
 interface QueueClientsTabProps {
   queue: QueueItem[];
@@ -34,6 +38,7 @@ interface QueueClientsTabProps {
   appConfig?: AppConfig | null;
   onSaveConfig?: (next: AppConfig) => Promise<AppConfig>;
   onRefresh: () => Promise<void>;
+  onRefreshQueue?: () => Promise<void>;
   onNotify: (msg: string, isError?: boolean) => void;
 }
 
@@ -45,25 +50,60 @@ export const QueueClientsTab: React.FC<QueueClientsTabProps> = ({
   appConfig,
   onSaveConfig,
   onRefresh,
+  onRefreshQueue,
   onNotify,
 }) => {
+  const { confirm, dialog } = useConfirm();
   const [clientForm, setClientForm] = useState<DownloadClientForm | null>(null);
   const [opts, setOpts] = useState<DownloadClientOptions | null>(appConfig?.downloadClientOptions ?? null);
   const [mappings, setMappings] = useState<RemotePathMapping[]>(appConfig?.remotePathMappings ?? []);
   const [savingOpts, setSavingOpts] = useState(false);
+  const [queueRefreshing, setQueueRefreshing] = useState(false);
 
-  React.useEffect(() => {
+  const refreshQueue = useCallback(async () => {
+    if (onRefreshQueue) {
+      await onRefreshQueue();
+      return;
+    }
+    await onRefresh();
+  }, [onRefresh, onRefreshQueue]);
+
+  const handleManualQueueRefresh = async () => {
+    setQueueRefreshing(true);
+    try {
+      await refreshQueue();
+    } catch (err) {
+      onNotify(err instanceof Error ? err.message : 'Failed to refresh queue', true);
+    } finally {
+      setQueueRefreshing(false);
+    }
+  };
+
+  useEffect(() => {
     if (appConfig) {
       setOpts(appConfig.downloadClientOptions);
       setMappings(appConfig.remotePathMappings ?? []);
     }
   }, [appConfig]);
 
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      void refreshQueue();
+    }, QUEUE_POLL_MS);
+    return () => window.clearInterval(id);
+  }, [refreshQueue]);
+
   // Root folder form
   const [newFolderPath, setNewFolderPath] = useState('');
   const [newFolderType, setNewFolderType] = useState('all');
 
   const handleRemoveQueueItem = async (item: QueueItem) => {
+    const ok = await confirm({
+      title: 'Remove from queue',
+      message: `Remove "${item.title}" from the download queue?`,
+      confirmLabel: 'Remove',
+    });
+    if (!ok) return;
     try {
       await api.removeQueueItem(item.id);
       onNotify(`Removed "${item.title}" from download queue`);
@@ -74,7 +114,12 @@ export const QueueClientsTab: React.FC<QueueClientsTabProps> = ({
   };
 
   const handleDeleteClient = async (dc: DownloadClient) => {
-    if (!window.confirm(`Delete download client "${dc.name}"?`)) return;
+    const ok = await confirm({
+      title: 'Delete download client',
+      message: `Delete download client "${dc.name}"?`,
+      confirmLabel: 'Delete',
+    });
+    if (!ok) return;
     try {
       await api.deleteDownloadClient(dc.id);
       onNotify(`Removed download client "${dc.name}"`);
@@ -101,7 +146,12 @@ export const QueueClientsTab: React.FC<QueueClientsTabProps> = ({
   };
 
   const handleDeleteRootFolder = async (folder: RootFolder) => {
-    if (!window.confirm(`Remove root folder "${folder.path}"?`)) return;
+    const ok = await confirm({
+      title: 'Remove root folder',
+      message: `Remove root folder "${folder.path}"?`,
+      confirmLabel: 'Remove',
+    });
+    if (!ok) return;
     try {
       await api.deleteRootFolder(folder.id);
       onNotify(`Removed root folder "${folder.path}"`);
@@ -123,11 +173,21 @@ export const QueueClientsTab: React.FC<QueueClientsTabProps> = ({
             <div>
               <h2 className="text-lg font-bold text-white">Live Download Queue</h2>
               <p className="text-xs text-slate-400">
-                {queue.length} active transfers across Torrent & Usenet download clients
+                {queue.length} active transfers across Torrent & Usenet download clients · auto-refresh 5s
               </p>
             </div>
           </div>
-          <span className="text-xs font-mono text-slate-500">GET /api/v1/queue</span>
+          <button
+            type="button"
+            onClick={() => void handleManualQueueRefresh()}
+            disabled={queueRefreshing}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-300 hover:text-white hover:bg-slate-800 transition disabled:opacity-60"
+            title="Refresh download progress from clients"
+            aria-label="Refresh download queue"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${queueRefreshing ? 'animate-spin text-sky-400' : ''}`} />
+            <span>Refresh</span>
+          </button>
         </div>
 
         {queue.length === 0 ? (
@@ -224,7 +284,7 @@ export const QueueClientsTab: React.FC<QueueClientsTabProps> = ({
             <div>
               <h3 className="text-base font-bold text-white">Download Clients</h3>
               <p className="text-xs text-slate-400">
-                qBittorrent, Transmission, SABnzbd, NZBGet & Go Plugin clients
+                qBittorrent, Transmission, Deluge, SABnzbd, NZBGet & Go Plugin clients
               </p>
             </div>
           </div>
@@ -524,6 +584,7 @@ export const QueueClientsTab: React.FC<QueueClientsTabProps> = ({
           onNotify={onNotify}
         />
       ) : null}
+      {dialog}
     </div>
   );
 };

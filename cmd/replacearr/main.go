@@ -71,6 +71,7 @@ func main() {
 	if sub := nativeSrv.Subtitles(); sub != nil {
 		monitor.SetSubtitleHook(sub)
 	}
+	nativeSrv.SetQueueProgressSyncer(monitor)
 	go monitor.Run(monitorCtx)
 
 	mux := http.NewServeMux()

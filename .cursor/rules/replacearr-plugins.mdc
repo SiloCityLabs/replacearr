@@ -1,0 +1,30 @@
+---
+description: Replacearr plugin contracts, host architecture, and Cardigann integration
+globs: "{pkg/pluginsdk,examples/plugins,internal/pluginhost,internal/plugincatalog,internal/indexers/cardigann}/**/*.go"
+alwaysApply: false
+---
+
+# Replacearr plugin architecture
+
+Replacearr has two extension mechanisms: out-of-process Go plugins and data-only Cardigann YAML definitions. Neither uses Go's `plugin.Open` or requires CGO.
+
+## Go plugin contract
+
+- External Go plugins use newline-delimited JSON-RPC 2.0 over stdin/stdout; do not replace this transport with in-process loading.
+- Implement `pluginsdk.Plugin` (`Manifest`, `Configure`) plus applicable capability interfaces: `IndexerPlugin`, `DownloadClientPlugin`, `MetadataPlugin`, `NotificationPlugin`, `NetworkProxyPlugin`, or `InboundWebhookPlugin`.
+- External plugin binaries call `pluginsdk.Serve` from `main`. Plugin code may depend on `pkg/pluginsdk` and the Go standard library, never the server's `internal/` packages.
+- `Manifest.ConfigSchema` drives the React plugin settings UI. Do not add per-plugin hard-coded settings forms.
+- Declare HTTP callbacks through `Manifest.InboundWebhooks` (secret setting and optional path aliases). The host exposes `POST /api/v1/webhooks/{pluginId}` and dispatches RPC `handle_webhook`; do not hard-code third-party callback routes into core.
+- Build plugin binaries with `CGO_ENABLED=0`. The host scans `REPLACEARR_PLUGIN_DIR` (`/config/plugins` in Docker). Marketplace installs verify SHA256 before writing executables into that directory.
+- The optional plugin marketplace reads `registry.json` from `replacearr/replacearr-plugins`; implementation lives in `internal/plugincatalog`. Override the catalog URL with `REPLACEARR_PLUGIN_CATALOG_URL`.
+
+## In-process exceptions
+
+- `PluginTypeCompat` shims (`builtin-compat-sonarr`, `builtin-compat-radarr`, `builtin-compat-prowlarr`, `builtin-compat-lidarr`, `builtin-compat-readarr`) remain in-process. Gate their HTTP mounts through `Manager.Gate`; they are not subprocess binaries.
+- `builtin-browser-notifications` bridges notification events to the SPA over SSE.
+
+## Cardigann definitions
+
+- Cardigann YAML is data, not a Go plugin. `internal/indexers/cardigann` loads definitions from `REPLACEARR_DEFINITIONS_DIR` (default `$REPLACEARR_CONFIG_DIR/definitions`). Mount or copy YAML into that directory. Built-in fallbacks apply when it is empty.
+
+When extending these systems, preserve the existing manifest, RPC, on-disk, and HTTP compatibility contracts rather than creating a parallel mechanism.

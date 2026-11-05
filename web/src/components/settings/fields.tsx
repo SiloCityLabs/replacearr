@@ -371,3 +371,34 @@ export const quietButtonClass =
 
 export const dangerButtonClass =
   'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/30 text-xs font-medium';
+
+export type ConnectionTestResult = {
+  ok: boolean;
+  message: string;
+};
+
+/** Test button turns green/red after the last connection check. */
+export function testButtonClass(ok: boolean | null | undefined): string {
+  if (ok === true) {
+    return 'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/40 text-xs font-medium';
+  }
+  if (ok === false) {
+    return 'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/40 text-xs font-medium';
+  }
+  return quietButtonClass;
+}
+
+export function TestResultMessage({ result }: { result: ConnectionTestResult }) {
+  return (
+    <p
+      className={`mt-3 px-3 py-2 rounded-lg border text-xs ${
+        result.ok
+          ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+          : 'bg-rose-500/10 border-rose-500/30 text-rose-300'
+      }`}
+      role="status"
+    >
+      {result.message}
+    </p>
+  );
+}

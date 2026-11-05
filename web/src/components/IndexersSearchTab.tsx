@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Radio,
   Search,
@@ -10,6 +10,7 @@ import {
   ShieldCheck,
   Activity,
   RefreshCw,
+  Unlock,
 } from 'lucide-react';
 import type {
   AppConfig,
@@ -23,6 +24,16 @@ import type {
 } from '../types';
 import { api } from '../api';
 import {
+  CONTENT_TYPE_OPTIONS,
+  emptyDefinitionFilters,
+  filterDefinitions,
+  definitionContentTypes,
+  languageLabel,
+  PRIVACY_TYPE_OPTIONS,
+  SEARCH_MODE_OPTIONS,
+  uniqueDefinitionLanguages,
+} from '../cardigannTaxonomy';
+import {
   blankIndexerForm,
   IndexerForm,
   IndexerModal,
@@ -34,6 +45,10 @@ import {
   IndexerProxyModal,
   indexerProxyToForm,
 } from './modals/IndexerProxyModal';
+import { useConfirm } from './modals/ConfirmModal';
+
+const filterSelectClass =
+  'w-full px-2.5 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white focus:outline-none focus:border-amber-500';
 
 interface IndexersSearchTabProps {
   indexers: Indexer[];
@@ -54,6 +69,7 @@ export const IndexersSearchTab: React.FC<IndexersSearchTabProps> = ({
   onRefresh,
   onNotify,
 }) => {
+  const { confirm, dialog } = useConfirm();
   const [subView, setSubView] = useState<'indexers' | 'cardigann' | 'flaresolverr'>('indexers');
   const [indexerOpts, setIndexerOpts] = useState<IndexerOptions | null>(appConfig?.indexerOptions ?? null);
   const [savingOpts, setSavingOpts] = useState(false);
@@ -63,7 +79,7 @@ export const IndexersSearchTab: React.FC<IndexersSearchTabProps> = ({
   }, [appConfig]);
 
   // Cardigann Definitions Filter
-  const [defFilter, setDefFilter] = useState('');
+  const [defFilters, setDefFilters] = useState(emptyDefinitionFilters);
 
   // FlareSolverr & Indexer Proxies State
   const [proxies, setProxies] = useState<IndexerProxy[]>([]);
@@ -72,6 +88,8 @@ export const IndexersSearchTab: React.FC<IndexersSearchTabProps> = ({
   const [healthByHost, setHealthByHost] = useState<Record<string, FlareSolverrHealth>>({});
   const [indexerForm, setIndexerForm] = useState<IndexerForm | null>(null);
   const [proxyForm, setProxyForm] = useState<IndexerProxyForm | null>(null);
+  const [testingIndexerId, setTestingIndexerId] = useState<number | null>(null);
+  const [indexerTestOk, setIndexerTestOk] = useState<Record<number, boolean>>({});
 
   // Interactive Solve Test State
   const [solveUrl, setSolveUrl] = useState('https://1337x.to/');
@@ -95,7 +113,31 @@ export const IndexersSearchTab: React.FC<IndexersSearchTabProps> = ({
     void loadProxiesAndClearances();
   }, []);
 
+  const handleTestIndexer = async (idx: Indexer) => {
+    setTestingIndexerId(idx.id);
+    try {
+      const result = await api.testIndexer({ id: idx.id });
+      setIndexerTestOk((prev) => ({ ...prev, [idx.id]: result.ok }));
+      if (result.ok) {
+        onNotify(`${idx.name}: ${result.message} (${result.latencyMs} ms)`);
+      } else {
+        onNotify(`${idx.name}: ${result.message}`, true);
+      }
+    } catch (err) {
+      setIndexerTestOk((prev) => ({ ...prev, [idx.id]: false }));
+      onNotify(err instanceof Error ? err.message : 'Indexer test failed', true);
+    } finally {
+      setTestingIndexerId(null);
+    }
+  };
+
   const handleDeleteIndexer = async (idx: Indexer) => {
+    const ok = await confirm({
+      title: 'Delete indexer',
+      message: `Delete indexer "${idx.name}"?`,
+      confirmLabel: 'Delete',
+    });
+    if (!ok) return;
     try {
       await api.deleteIndexer(idx.id);
       onNotify(`Removed indexer "${idx.name}"`);
@@ -106,6 +148,12 @@ export const IndexersSearchTab: React.FC<IndexersSearchTabProps> = ({
   };
 
   const handleDeleteProxy = async (proxy: IndexerProxy) => {
+    const ok = await confirm({
+      title: 'Delete proxy',
+      message: `Delete indexer proxy "${proxy.name}"?`,
+      confirmLabel: 'Delete',
+    });
+    if (!ok) return;
     try {
       await api.deleteIndexerProxy(proxy.id);
       onNotify(`Removed indexer proxy "${proxy.name}"`);
@@ -184,12 +232,45 @@ export const IndexersSearchTab: React.FC<IndexersSearchTabProps> = ({
     });
   };
 
-  const filteredDefs = definitions.filter(
-    (d) =>
-      d.name.toLowerCase().includes(defFilter.toLowerCase()) ||
-      d.id.toLowerCase().includes(defFilter.toLowerCase()) ||
-      (d.description || '').toLowerCase().includes(defFilter.toLowerCase())
+  const definitionLanguages = useMemo(
+    () => uniqueDefinitionLanguages(definitions),
+    [definitions]
   );
+
+  const filteredDefs = useMemo(
+    () => filterDefinitions(definitions, defFilters),
+    [definitions, defFilters]
+  );
+
+  const filtersActive =
+    Boolean(defFilters.query.trim()) ||
+    Boolean(defFilters.type) ||
+    Boolean(defFilters.language) ||
+    Boolean(defFilters.contentType) ||
+    Boolean(defFilters.searchMode);
+
+  const privacyBadge = (type: string | undefined) => {
+    const value = (type || 'public').toLowerCase();
+    if (value === 'private') {
+      return {
+        className: 'bg-rose-500/15 text-rose-300 border border-rose-500/30',
+        icon: <Lock className="w-2.5 h-2.5" />,
+        label: 'private',
+      };
+    }
+    if (value === 'semi-private') {
+      return {
+        className: 'bg-amber-500/15 text-amber-300 border border-amber-500/30',
+        icon: <Unlock className="w-2.5 h-2.5" />,
+        label: 'semi-private',
+      };
+    }
+    return {
+      className: 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30',
+      icon: <Globe className="w-2.5 h-2.5" />,
+      label: value || 'public',
+    };
+  };
 
   return (
     <div className="space-y-6">
@@ -313,6 +394,20 @@ export const IndexersSearchTab: React.FC<IndexersSearchTabProps> = ({
                 <div className="flex items-center gap-1">
                   <button
                     type="button"
+                    disabled={testingIndexerId === idx.id}
+                    onClick={() => void handleTestIndexer(idx)}
+                    className={`px-2 py-1 rounded-lg text-xs transition ${
+                      indexerTestOk[idx.id] === true
+                        ? 'text-emerald-300 hover:bg-emerald-500/10'
+                        : indexerTestOk[idx.id] === false
+                          ? 'text-rose-300 hover:bg-rose-500/10'
+                          : 'text-slate-300 hover:text-white hover:bg-slate-800'
+                    }`}
+                  >
+                    {testingIndexerId === idx.id ? 'Testing…' : 'Test'}
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => setIndexerForm(indexerToForm(idx))}
                     className="px-2 py-1 rounded-lg text-xs text-slate-300 hover:text-white hover:bg-slate-800 transition"
                   >
@@ -336,86 +431,186 @@ export const IndexersSearchTab: React.FC<IndexersSearchTabProps> = ({
       {/* SUBVIEW 3: Cardigann YAML Definitions Browser */}
       {subView === 'cardigann' && (
         <div className="space-y-4">
-          <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div className="flex items-center gap-2.5">
-              <FileCode2 className="w-5 h-5 text-amber-400" />
-              <div>
-                <h3 className="text-sm font-bold text-white">
-                  Indexer YAML Definitions
-                </h3>
-                <p className="text-xs text-slate-400">
-                  Click any definition to add and configure it as an active indexer
-                </p>
+          <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-4 space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <FileCode2 className="w-5 h-5 text-amber-400" />
+                <div>
+                  <h3 className="text-sm font-bold text-white">
+                    Indexer YAML Definitions
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Filter by privacy, language, and Newznab content types from the Cardigann YAML
+                  </p>
+                </div>
               </div>
+              <p className="text-xs text-slate-400 shrink-0">
+                Showing <strong className="text-slate-200">{filteredDefs.length}</strong> of{' '}
+                {definitions.length}
+              </p>
             </div>
 
-            <div className="relative w-full sm:w-72">
+            <div className="relative">
               <Search className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
-                value={defFilter}
-                onChange={(e) => setDefFilter(e.target.value)}
-                placeholder="Filter YAML definitions..."
+                value={defFilters.query}
+                onChange={(e) => setDefFilters({ ...defFilters, query: e.target.value })}
+                placeholder="Search name, id, description, or URL…"
                 className="w-full pl-9 pr-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
               />
             </div>
-          </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-            {filteredDefs.map((def) => (
-              <div
-                key={def.id}
-                className="bg-slate-900/90 border border-slate-800 hover:border-amber-500/40 rounded-xl p-4 flex flex-col justify-between transition"
-              >
-                <div>
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0 flex flex-wrap items-center gap-2">
-                      <h4 className="text-sm font-bold text-white break-words">{def.name}</h4>
-                      <code className="text-[11px] font-mono text-amber-300 bg-amber-500/10 px-1.5 py-0.5 rounded break-all">
-                        {def.id}.yml
-                      </code>
-                    </div>
-                    <span
-                      className={`inline-flex items-center gap-1 text-[10px] font-mono uppercase px-2 py-0.5 rounded shrink-0 ${
-                        def.type === 'private'
-                          ? 'bg-rose-500/15 text-rose-300 border border-rose-500/30'
-                          : 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30'
-                      }`}
-                    >
-                      {def.type === 'private' ? (
-                        <Lock className="w-2.5 h-2.5" />
-                      ) : (
-                        <Globe className="w-2.5 h-2.5" />
-                      )}
-                      {def.type || 'public'}
-                    </span>
-                  </div>
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
+              <label className="space-y-1 block min-w-0">
+                <span className="text-[11px] text-slate-500">Privacy</span>
+                <select
+                  value={defFilters.type}
+                  onChange={(e) => setDefFilters({ ...defFilters, type: e.target.value })}
+                  className={filterSelectClass}
+                >
+                  <option value="">All types</option>
+                  {PRIVACY_TYPE_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
 
-                  <p className="text-xs text-slate-400 mt-2 line-clamp-2">
-                    {def.description || `Cardigann YAML definition for ${def.name}`}
-                  </p>
+              <label className="space-y-1 block min-w-0">
+                <span className="text-[11px] text-slate-500">Language</span>
+                <select
+                  value={defFilters.language}
+                  onChange={(e) => setDefFilters({ ...defFilters, language: e.target.value })}
+                  className={filterSelectClass}
+                >
+                  <option value="">All languages</option>
+                  {definitionLanguages.map((lang) => (
+                    <option key={lang} value={lang}>
+                      {languageLabel(lang)}
+                    </option>
+                  ))}
+                </select>
+              </label>
 
-                  {def.links && def.links.length > 0 && (
-                    <div className="mt-2.5 text-[11px] font-mono text-slate-500 truncate">
-                      {def.links[0]}
-                    </div>
-                  )}
-                </div>
+              <label className="space-y-1 block min-w-0">
+                <span className="text-[11px] text-slate-500">Content type</span>
+                <select
+                  value={defFilters.contentType}
+                  onChange={(e) => setDefFilters({ ...defFilters, contentType: e.target.value })}
+                  className={filterSelectClass}
+                >
+                  <option value="">All content</option>
+                  {CONTENT_TYPE_OPTIONS.map((cat) => (
+                    <option key={cat} value={cat}>
+                      {cat}
+                    </option>
+                  ))}
+                </select>
+              </label>
 
-                <div className="mt-4 pt-3 border-t border-slate-800/80 flex items-center justify-between">
-                  <span className="text-[11px] text-slate-500 font-mono">
-                    {def.language || 'en-US'}
-                  </span>
-                  <button
-                    onClick={() => handleSelectCardigannDef(def)}
-                    className="px-3 py-1.5 rounded-lg bg-amber-500/15 hover:bg-amber-500 text-amber-300 hover:text-slate-950 border border-amber-500/30 text-xs font-semibold transition"
-                  >
-                    + Use Definition
-                  </button>
-                </div>
+              <label className="space-y-1 block min-w-0">
+                <span className="text-[11px] text-slate-500">Search mode</span>
+                <select
+                  value={defFilters.searchMode}
+                  onChange={(e) => setDefFilters({ ...defFilters, searchMode: e.target.value })}
+                  className={filterSelectClass}
+                >
+                  <option value="">All modes</option>
+                  {SEARCH_MODE_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+
+            {filtersActive ? (
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => setDefFilters(emptyDefinitionFilters())}
+                  className="text-xs text-slate-400 hover:text-white transition"
+                >
+                  Clear filters
+                </button>
               </div>
-            ))}
+            ) : null}
           </div>
+
+          {filteredDefs.length === 0 ? (
+            <div className="py-12 text-center text-sm text-slate-500 bg-slate-900/50 border border-slate-800 rounded-xl">
+              No definitions match these filters.
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+              {filteredDefs.map((def) => {
+                const badge = privacyBadge(def.type);
+                const contentTypes = definitionContentTypes(def);
+                return (
+                  <div
+                    key={def.id}
+                    className="bg-slate-900/90 border border-slate-800 hover:border-amber-500/40 rounded-xl p-4 flex flex-col justify-between transition"
+                  >
+                    <div>
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0 flex flex-wrap items-center gap-2">
+                          <h4 className="text-sm font-bold text-white break-words">{def.name}</h4>
+                          <code className="text-[11px] font-mono text-amber-300 bg-amber-500/10 px-1.5 py-0.5 rounded break-all">
+                            {def.id}.yml
+                          </code>
+                        </div>
+                        <span
+                          className={`inline-flex items-center gap-1 text-[10px] font-mono uppercase px-2 py-0.5 rounded shrink-0 ${badge.className}`}
+                        >
+                          {badge.icon}
+                          {badge.label}
+                        </span>
+                      </div>
+
+                      <p className="text-xs text-slate-400 mt-2 line-clamp-2">
+                        {def.description || `Cardigann YAML definition for ${def.name}`}
+                      </p>
+
+                      {def.links && def.links.length > 0 && (
+                        <div className="mt-2.5 text-[11px] font-mono text-slate-500 truncate">
+                          {def.links[0]}
+                        </div>
+                      )}
+
+                      {contentTypes.length > 0 ? (
+                        <div className="mt-2.5 flex flex-wrap gap-1">
+                          {contentTypes.map((cat) => (
+                            <span
+                              key={cat}
+                              className="text-[10px] px-1.5 py-0.5 rounded bg-slate-950 border border-slate-800 text-slate-400"
+                            >
+                              {cat}
+                            </span>
+                          ))}
+                        </div>
+                      ) : null}
+                    </div>
+
+                    <div className="mt-4 pt-3 border-t border-slate-800/80 flex items-center justify-between gap-2">
+                      <span className="text-[11px] text-slate-500 font-mono truncate" title={def.language}>
+                        {languageLabel(def.language || 'en-US')}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => handleSelectCardigannDef(def)}
+                        className="px-3 py-1.5 rounded-lg bg-amber-500/15 hover:bg-amber-500 text-amber-300 hover:text-slate-950 border border-amber-500/30 text-xs font-semibold transition shrink-0"
+                      >
+                        + Use Definition
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 
@@ -708,6 +903,7 @@ export const IndexersSearchTab: React.FC<IndexersSearchTabProps> = ({
           onNotify={onNotify}
         />
       ) : null}
+      {dialog}
     </div>
   );
 };

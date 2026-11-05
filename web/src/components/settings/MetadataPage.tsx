@@ -15,6 +15,7 @@ import {
   TextInput,
   useDraftState,
 } from './fields';
+import { useConfirm } from '../modals/ConfirmModal';
 
 interface MetadataPageProps {
   config: AppConfig;
@@ -37,6 +38,7 @@ function blankConsumer(): MetadataConsumer {
 }
 
 export const MetadataPage: React.FC<MetadataPageProps> = ({ config, onSave, onDirtyChange }) => {
+  const { confirm, dialog } = useConfirm();
   const { draft, setDraft, isDirty, saving, setSaving, commit } = useDraftState(config.metadata, onDirtyChange);
   const [form, setForm] = useState<{ index: number | null; value: MetadataConsumer } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -72,7 +74,12 @@ export const MetadataPage: React.FC<MetadataPageProps> = ({ config, onSave, onDi
 
   const deleteConsumer = async (index: number) => {
     const row = config.metadataConsumers[index];
-    if (!window.confirm(`Delete metadata consumer "${row?.name || 'consumer'}"?`)) return;
+    const ok = await confirm({
+      title: 'Delete metadata consumer',
+      message: `Delete metadata consumer "${row?.name || 'consumer'}"?`,
+      confirmLabel: 'Delete',
+    });
+    if (!ok) return;
     try {
       await onSave({
         ...config,
@@ -200,6 +207,7 @@ export const MetadataPage: React.FC<MetadataPageProps> = ({ config, onSave, onDi
           </form>
         </Modal>
       ) : null}
+      {dialog}
     </div>
   );
 };

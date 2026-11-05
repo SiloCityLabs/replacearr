@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { Music, Plus, Search, X, Disc3 } from 'lucide-react';
 import type { Album, Artist, QualityProfile, ReleaseSearchRequest, RootFolder } from '../types';
 import { api } from '../api';
+import { useConfirm } from './modals/ConfirmModal';
 
 interface MusicTabProps {
   artists: Artist[];
@@ -31,6 +32,7 @@ export const MusicTab: React.FC<MusicTabProps> = ({
   openAddNonce = 0,
   onAddPanelOpened,
 }) => {
+  const { confirm, dialog } = useConfirm();
   const musicRoots = useMemo(
     () => rootFolders.filter((r) => r.mediaType === 'music' || r.mediaType === 'all'),
     [rootFolders]
@@ -205,6 +207,12 @@ export const MusicTab: React.FC<MusicTabProps> = ({
                 type="button"
                 className="px-3 py-2 rounded-lg bg-rose-700/80 text-white text-sm"
                 onClick={async () => {
+                  const ok = await confirm({
+                    title: 'Remove artist',
+                    message: `Remove "${activeArtist.title}" from the Music library?`,
+                    confirmLabel: 'Remove',
+                  });
+                  if (!ok) return;
                   await api.deleteArtist(activeArtist.id);
                   onNotify(`Removed ${activeArtist.title}`);
                   setActiveArtist(null);
@@ -337,6 +345,7 @@ export const MusicTab: React.FC<MusicTabProps> = ({
           </div>
         </div>
       )}
+      {dialog}
     </div>
   );
 };

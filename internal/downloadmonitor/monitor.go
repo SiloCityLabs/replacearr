@@ -11,14 +11,24 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/replacearr/replacearr/internal/db"
 	"github.com/replacearr/replacearr/internal/domain"
+	"github.com/replacearr/replacearr/internal/downloadclient/deluge"
+	"github.com/replacearr/replacearr/internal/downloadclient/nzbget"
 	"github.com/replacearr/replacearr/internal/downloadclient/qbittorrent"
+	"github.com/replacearr/replacearr/internal/downloadclient/sabnzbd"
+	"github.com/replacearr/replacearr/internal/downloadclient/transmission"
 	"github.com/replacearr/replacearr/internal/mediafile"
 	"github.com/replacearr/replacearr/pkg/pluginsdk"
 )
+
+// downloadRemover deletes a finished torrent from its client (optional).
+type downloadRemover interface {
+	Remove(ctx context.Context, id string, deleteFiles bool) error
+}
 
 // Notifier is optional callback into the API notification bus.
 type Notifier interface {
@@ -37,13 +47,14 @@ type SubtitleHook interface {
 	OnEpisodeImported(ctx context.Context, episodeID int64)
 }
 
-// Monitor polls qBittorrent (and plugins) and runs completed-download import.
+// Monitor polls built-in download clients (and plugins) and runs completed-download import.
 type Monitor struct {
 	store     *db.Store
 	plugins   PluginDownloads
 	notify    Notifier
 	subtitles SubtitleHook
 	interval  time.Duration
+	mu        sync.Mutex
 }
 
 // New creates a Monitor with a default 15s tick.
@@ -76,7 +87,20 @@ func (m *Monitor) Run(ctx context.Context) {
 	}
 }
 
+// SyncProgress refreshes size/ETA from download clients without running imports.
+// Safe to call from HTTP handlers (e.g. GET /api/v1/queue).
+func (m *Monitor) SyncProgress(ctx context.Context) {
+	m.syncFromClients(ctx, false)
+}
+
 func (m *Monitor) tick(ctx context.Context) {
+	m.syncFromClients(ctx, true)
+}
+
+func (m *Monitor) syncFromClients(ctx context.Context, doImport bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	appCfg, err := m.store.GetAppConfig()
 	if err != nil {
 		return
@@ -104,28 +128,126 @@ func (m *Monitor) tick(ctx context.Context) {
 	byID := map[string]trackedDownload{}
 	clients, _ := m.store.ListDownloadClients()
 	for _, dc := range clients {
-		if !dc.Enable || !strings.EqualFold(dc.Implementation, "qBittorrent") {
+		if !dc.Enable {
 			continue
 		}
-		cli := qbittorrent.NewFromDownloadClient(dc)
-		items, err := cli.List(ctx)
-		if err != nil {
-			log.Printf("downloadmonitor: qBittorrent list failed (%s): %v", dc.Name, err)
-			continue
-		}
-		for _, it := range items {
-			byID[it.Hash] = trackedDownload{
-				ID:          it.Hash,
-				Title:       it.Name,
-				Completed:   qbittorrent.IsCompleted(it.State, it.Progress),
-				Progress:    it.Progress,
-				Size:        it.Size,
-				SizeLeft:    it.AmountLeft,
-				OutputPath:  firstNonEmpty(it.ContentPath, it.SavePath),
-				ContentPath: it.ContentPath,
-				Client:      cli,
-				RemoveDone:  dc.RemoveCompletedDownloads,
-				ClientName:  dc.Name,
+		switch {
+		case strings.EqualFold(dc.Implementation, "qBittorrent"):
+			cli := qbittorrent.NewFromDownloadClient(dc)
+			items, err := cli.List(ctx)
+			if err != nil {
+				log.Printf("downloadmonitor: qBittorrent list failed (%s): %v", dc.Name, err)
+				continue
+			}
+			for _, it := range items {
+				byID[it.Hash] = trackedDownload{
+					ID:          it.Hash,
+					Title:       it.Name,
+					Completed:   qbittorrent.IsCompleted(it.State, it.Progress),
+					Progress:    it.Progress,
+					Size:        it.Size,
+					SizeLeft:    it.AmountLeft,
+					Timeleft:    formatTimeleft(it.EtaSeconds, it.AmountLeft),
+					EtaSeconds:  it.EtaSeconds,
+					OutputPath:  firstNonEmpty(it.ContentPath, it.SavePath),
+					ContentPath: it.ContentPath,
+					Client:      cli,
+					RemoveDone:  dc.RemoveCompletedDownloads,
+					ClientName:  dc.Name,
+				}
+			}
+		case strings.EqualFold(dc.Implementation, "Transmission"):
+			cli := transmission.NewFromDownloadClient(dc)
+			items, err := cli.List(ctx)
+			if err != nil {
+				log.Printf("downloadmonitor: Transmission list failed (%s): %v", dc.Name, err)
+				continue
+			}
+			for _, it := range items {
+				byID[it.Hash] = trackedDownload{
+					ID:          it.Hash,
+					Title:       it.Name,
+					Completed:   transmission.IsCompleted(it.Status, it.Progress, it.AmountLeft),
+					Progress:    it.Progress,
+					Size:        it.Size,
+					SizeLeft:    it.AmountLeft,
+					Timeleft:    formatTimeleft(it.EtaSeconds, it.AmountLeft),
+					EtaSeconds:  it.EtaSeconds,
+					OutputPath:  it.DownloadDir,
+					ContentPath: it.DownloadDir,
+					Client:      cli,
+					RemoveDone:  dc.RemoveCompletedDownloads,
+					ClientName:  dc.Name,
+				}
+			}
+		case strings.EqualFold(dc.Implementation, "Deluge"):
+			cli := deluge.NewFromDownloadClient(dc)
+			items, err := cli.List(ctx)
+			if err != nil {
+				log.Printf("downloadmonitor: Deluge list failed (%s): %v", dc.Name, err)
+				continue
+			}
+			for _, it := range items {
+				byID[it.Hash] = trackedDownload{
+					ID:          it.Hash,
+					Title:       it.Name,
+					Completed:   deluge.IsCompleted(it.State, it.Progress),
+					Progress:    it.Progress,
+					Size:        it.Size,
+					SizeLeft:    it.AmountLeft,
+					Timeleft:    formatTimeleft(it.EtaSeconds, it.AmountLeft),
+					EtaSeconds:  it.EtaSeconds,
+					OutputPath:  firstNonEmpty(it.ContentPath, it.SavePath),
+					ContentPath: it.ContentPath,
+					Client:      cli,
+					RemoveDone:  dc.RemoveCompletedDownloads,
+					ClientName:  dc.Name,
+				}
+			}
+		case strings.EqualFold(dc.Implementation, "SABnzbd"):
+			cli := sabnzbd.NewFromDownloadClient(dc)
+			items, err := cli.List(ctx)
+			if err != nil {
+				log.Printf("downloadmonitor: SABnzbd list failed (%s): %v", dc.Name, err)
+				continue
+			}
+			for _, it := range items {
+				byID[it.ID] = trackedDownload{
+					ID:          it.ID,
+					Title:       it.Title,
+					Completed:   it.Completed,
+					Progress:    it.Progress,
+					Size:        it.Size,
+					SizeLeft:    it.SizeLeft,
+					Timeleft:    it.Timeleft,
+					OutputPath:  it.OutputPath,
+					ContentPath: it.OutputPath,
+					Client:      cli,
+					RemoveDone:  dc.RemoveCompletedDownloads,
+					ClientName:  dc.Name,
+				}
+			}
+		case strings.EqualFold(dc.Implementation, "NZBGet"):
+			cli := nzbget.NewFromDownloadClient(dc)
+			items, err := cli.List(ctx)
+			if err != nil {
+				log.Printf("downloadmonitor: NZBGet list failed (%s): %v", dc.Name, err)
+				continue
+			}
+			for _, it := range items {
+				byID[it.ID] = trackedDownload{
+					ID:          it.ID,
+					Title:       it.Title,
+					Completed:   it.Completed,
+					Progress:    it.Progress,
+					Size:        it.Size,
+					SizeLeft:    it.SizeLeft,
+					OutputPath:  it.OutputPath,
+					ContentPath: it.OutputPath,
+					Client:      cli,
+					RemoveDone:  dc.RemoveCompletedDownloads,
+					ClientName:  dc.Name,
+				}
 			}
 		}
 	}
@@ -154,6 +276,12 @@ func (m *Monitor) tick(ctx context.Context) {
 		}
 		q.Size = td.Size
 		q.Sizeleft = td.SizeLeft
+		q.Timeleft = td.Timeleft
+		if td.EtaSeconds > 0 && td.EtaSeconds < 8640000 {
+			q.EstimatedCompletion = time.Now().UTC().Add(time.Duration(td.EtaSeconds) * time.Second)
+		} else {
+			q.EstimatedCompletion = time.Time{}
+		}
 		mapped := applyRemotePathMapping(appCfg.RemotePathMappings, td.OutputPath)
 		if mapped != "" {
 			q.OutputPath = mapped
@@ -167,9 +295,10 @@ func (m *Monitor) tick(ctx context.Context) {
 		q.Status = "completed"
 		q.TrackedDownloadState = "importPending"
 		q.Sizeleft = 0
+		q.Timeleft = "00:00:00"
 		_ = m.store.UpdateQueueItem(q)
 
-		if !cdh {
+		if !doImport || !cdh {
 			continue
 		}
 		if q.SeriesID == 0 && q.MovieID == 0 && q.AlbumID == 0 && q.ArtistID == 0 && q.EditionID == 0 && q.BookID == 0 {
@@ -202,11 +331,38 @@ type trackedDownload struct {
 	Progress    float64
 	Size        int64
 	SizeLeft    int64
+	Timeleft    string
+	EtaSeconds  int64
 	OutputPath  string
 	ContentPath string
-	Client      *qbittorrent.Client
+	Client      downloadRemover
 	RemoveDone  bool
 	ClientName  string
+}
+
+// formatTimeleft turns client ETA seconds into a Sonarr-style timeleft string.
+// Returns empty when the client reports unknown/infinite ETA while data remains.
+func formatTimeleft(etaSeconds, sizeLeft int64) string {
+	if sizeLeft > 0 && (etaSeconds < 0 || etaSeconds >= 8640000) {
+		return ""
+	}
+	if sizeLeft > 0 && etaSeconds == 0 {
+		return ""
+	}
+	if etaSeconds < 0 {
+		return ""
+	}
+	if etaSeconds >= 8640000 {
+		return ""
+	}
+	days := etaSeconds / 86400
+	hours := (etaSeconds % 86400) / 3600
+	mins := (etaSeconds % 3600) / 60
+	secs := etaSeconds % 60
+	if days > 0 {
+		return fmt.Sprintf("%d.%02d:%02d:%02d", days, hours, mins, secs)
+	}
+	return fmt.Sprintf("%02d:%02d:%02d", hours, mins, secs)
 }
 
 func (m *Monitor) importCompleted(ctx context.Context, appCfg domain.AppConfig, q domain.QueueItem) error {

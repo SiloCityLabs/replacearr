@@ -1,0 +1,17 @@
+---
+description: Replacearr web application architecture and integration conventions
+globs: web/**
+alwaysApply: false
+---
+
+# Replacearr Web Architecture
+
+- `web/` is a React 18 + TypeScript + Vite SPA using Tailwind CSS and `lucide-react`.
+- The app has no router or external state library. `web/src/App.tsx` owns tab state and coordinates data loading. Don't introduce routing or global state management without a concrete need.
+- Define shared API response/request types in `web/src/types.ts` and API operations in `web/src/api.ts`. Presentational components in `web/src/components/` receive data and callbacks through props; don't call `fetch` directly from those components.
+- Use the shared `request()` helper for the native API at `/api/v1`; it handles the `replacearr_token` credential and `Authorization: Bearer` header. Don't duplicate token or request handling.
+- In development, Vite proxies `/api`, `/sonarr`, `/radarr`, and `/prowlarr` to `:8989`. Preserve the existing proxy/API integration.
+- Follow the existing function-component conventions and explicit TypeScript prop types.
+- After web changes, run `cd web && npm run typecheck`.
+- `make build-web` builds `web/dist` and copies it into `internal/webui/dist` for production. Don't edit generated distribution files as source.
+- Replacearr is an installable PWA. Its manifest and service worker live at `web/public/manifest.webmanifest` and `web/public/sw.js`; `web/src/main.tsx` registers the worker only in production. Preserve `display: standalone` and never cache non-GET API requests.

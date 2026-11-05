@@ -3,6 +3,7 @@ import { Archive, Download, Trash2, Upload } from 'lucide-react';
 import { api, formatBytes } from '../../api';
 import type { AppConfig, BackupFile } from '../../types';
 import { formatAppDate } from '../../uiPrefs';
+import { useConfirm } from '../modals/ConfirmModal';
 
 export interface SystemBackupPageProps {
   config: AppConfig | null;
@@ -17,6 +18,7 @@ export const SystemBackupPage: React.FC<SystemBackupPageProps> = ({
   onNotify,
   appUi,
 }) => {
+  const { confirm, dialog } = useConfirm();
   const [files, setFiles] = useState<BackupFile[]>([]);
   const [folder, setFolder] = useState(config?.backup.folder ?? 'Backups');
   const [interval, setIntervalDays] = useState(config?.backup.interval ?? 7);
@@ -70,7 +72,12 @@ export const SystemBackupPage: React.FC<SystemBackupPageProps> = ({
   };
 
   const remove = async (id: string) => {
-    if (!window.confirm('Delete this backup?')) return;
+    const ok = await confirm({
+      title: 'Delete backup',
+      message: 'Delete this backup?',
+      confirmLabel: 'Delete',
+    });
+    if (!ok) return;
     try {
       await api.deleteBackup(id);
       onNotify('Backup deleted');
@@ -81,7 +88,13 @@ export const SystemBackupPage: React.FC<SystemBackupPageProps> = ({
   };
 
   const restore = async (id: string) => {
-    if (!window.confirm('Restore this backup? The app may need a restart.')) return;
+    const ok = await confirm({
+      title: 'Restore backup',
+      message: 'Restore this backup? The app may need a restart.',
+      confirmLabel: 'Restore',
+      danger: false,
+    });
+    if (!ok) return;
     try {
       await api.restoreBackup(id);
       onNotify('Restore queued — restart recommended');
@@ -193,6 +206,7 @@ export const SystemBackupPage: React.FC<SystemBackupPageProps> = ({
           </tbody>
         </table>
       </div>
+      {dialog}
     </div>
   );
 };

@@ -1,0 +1,46 @@
+---
+description: Go implementation quality, error handling, testing, and maintainability rules
+globs: "**/*.go"
+alwaysApply: false
+---
+
+# Go implementation quality
+
+Produce straightforward, idiomatic, production-ready Go. Prefer explicit control flow and standard-library solutions over clever abstractions.
+
+## Scope and structure
+
+- Inspect neighboring code and reuse existing patterns before adding new helpers, interfaces, packages, or dependencies.
+- Keep changes focused on the task; avoid opportunistic refactors and speculative abstractions.
+- Design interfaces around actual consumers, not hypothetical future implementations.
+- Avoid unnecessary layers, generic frameworks, and one-use wrapper types.
+- Keep package boundaries clear and avoid circular dependencies.
+
+## Errors and reliability
+
+- Never discard returned errors unless the omission is intentional, safe, and documented.
+- Return actionable errors with context; use `%w` when callers may need to inspect the cause.
+- Handle errors at the appropriate boundary. Do not log and return the same error unless there is a clear reason.
+- Do not use `panic`, `log.Fatal`, or `log.Fatalf` for recoverable runtime failures; reserve process termination for unrecoverable startup failures at the executable entry point.
+- Validate untrusted inputs and handle absent, malformed, and unexpected values explicitly.
+- Close resources and cancel operations appropriately; propagate `context.Context` for request-scoped work and I/O where supported.
+
+## API and data behavior
+
+- Preserve existing public contracts and response shapes unless changes are explicitly requested.
+- Use appropriate HTTP status codes and consistent error responses; never report success after a failed operation.
+- Avoid exposing internal errors, credentials, or sensitive data to clients or logs.
+- Use parameterized SQL rather than interpolating input into queries.
+- Handle transactions and concurrent access deliberately; avoid introducing shared mutable state without synchronization.
+
+## Readability and testing
+
+- Prefer small, cohesive functions, early returns, clear names, and minimal nesting.
+- Put tests in neighboring `_test.go` files. Cover success, failures, boundary cases, and regressions relevant to the change.
+- Prefer table-driven tests when they improve clarity; do not force them on simple cases.
+- Use deterministic tests; avoid sleeps and brittle timing assumptions where possible.
+- Format touched Go code with `gofmt` and run relevant tests. Use the race detector for concurrency-sensitive changes when available.
+
+## Review before finishing
+
+Check that the change introduces no ignored errors, accidental API changes, unnecessary abstractions, or untested failure paths. Briefly identify any meaningful tradeoffs or tests not run; do not produce boilerplate compliance reports.

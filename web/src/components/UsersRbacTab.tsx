@@ -13,6 +13,7 @@ import {
 import type { APIKey, Role, User } from '../types';
 import { api } from '../api';
 import { SecretDisplay } from './settings/fields';
+import { useConfirm } from './modals/ConfirmModal';
 
 interface UsersRbacTabProps {
   users: User[];
@@ -59,6 +60,7 @@ export const UsersRbacTab: React.FC<UsersRbacTabProps> = ({
   onRefresh,
   onNotify,
 }) => {
+  const { confirm, dialog } = useConfirm();
   const allPerms = permissions.length > 0 ? permissions : DEFAULT_PERMISSIONS;
 
   // Create User Modal State
@@ -121,6 +123,12 @@ export const UsersRbacTab: React.FC<UsersRbacTabProps> = ({
   };
 
   const handleDeleteUser = async (u: User) => {
+    const ok = await confirm({
+      title: 'Delete user',
+      message: `Delete user "${u.username}"?`,
+      confirmLabel: 'Delete',
+    });
+    if (!ok) return;
     try {
       await api.deleteUser(u.id);
       onNotify(`Deleted user "${u.username}"`);
@@ -186,6 +194,12 @@ export const UsersRbacTab: React.FC<UsersRbacTabProps> = ({
   };
 
   const handleDeleteApiKey = async (k: APIKey) => {
+    const ok = await confirm({
+      title: 'Revoke API key',
+      message: `Revoke API key "${k.name}"?`,
+      confirmLabel: 'Revoke',
+    });
+    if (!ok) return;
     try {
       await api.deleteApiKey(k.id);
       onNotify(`Revoked API key "${k.name}"`);
@@ -682,6 +696,7 @@ export const UsersRbacTab: React.FC<UsersRbacTabProps> = ({
           </div>
         </div>
       )}
+      {dialog}
     </div>
   );
 };

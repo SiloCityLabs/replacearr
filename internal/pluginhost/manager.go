@@ -993,6 +993,29 @@ func (m *Manager) ConfigurePlugin(pluginID string, enabled bool, settings map[st
 	return &cp, nil
 }
 
+// SearchIndexer runs a search against one indexer plugin by id.
+func (m *Manager) SearchIndexer(ctx context.Context, pluginID string, req pluginsdk.SearchRequest) ([]domain.ReleaseResult, error) {
+	pluginID = strings.TrimSpace(pluginID)
+	if pluginID == "" {
+		return nil, fmt.Errorf("plugin id is required")
+	}
+
+	m.mu.RLock()
+	entry, ok := m.entries[pluginID]
+	m.mu.RUnlock()
+	if !ok {
+		return nil, fmt.Errorf("plugin not found: %s", pluginID)
+	}
+	if !entry.info.Enabled {
+		return nil, fmt.Errorf("plugin %s is disabled", pluginID)
+	}
+	if !hasPluginType(entry.info.Manifest.Types, pluginsdk.PluginTypeIndexer) {
+		return nil, fmt.Errorf("plugin %s is not an indexer", pluginID)
+	}
+
+	return m.searchIndexerEntry(ctx, entry, 1, req)
+}
+
 // SearchAllIndexers executes a search across all enabled indexer plugins and returns unified domain.ReleaseResult items.
 func (m *Manager) SearchAllIndexers(ctx context.Context, req pluginsdk.SearchRequest) ([]domain.ReleaseResult, error) {
 	m.mu.RLock()
@@ -1010,82 +1033,94 @@ func (m *Manager) SearchAllIndexers(ctx context.Context, req pluginsdk.SearchReq
 
 	var results []domain.ReleaseResult
 	for idx, entry := range targets {
-		indexerID := int64(idx + 1)
-		indexerName := entry.info.Manifest.Name
-
-		var releases []pluginsdk.Release
-		var err error
-
-		if entry.builtin != nil {
-			if ip, ok := entry.builtin.(pluginsdk.IndexerPlugin); ok {
-				releases, err = ip.Search(ctx, req)
-			}
-		} else if entry.proc != nil {
-			callCtx := ctx
-			if _, hasDeadline := ctx.Deadline(); !hasDeadline {
-				var cancel context.CancelFunc
-				callCtx, cancel = context.WithTimeout(ctx, 10*time.Second)
-				defer cancel()
-			}
-			err = entry.proc.call(callCtx, "search", req, &releases)
-		}
-
+		batch, err := m.searchIndexerEntry(ctx, entry, int64(idx+1), req)
 		if err != nil {
 			m.mu.Lock()
 			entry.info.LastError = err.Error()
 			m.mu.Unlock()
 			continue
 		}
-
-		for _, rel := range releases {
-			pubTime := time.Now().UTC()
-			if rel.PublishDate != "" {
-				if parsed, pErr := time.Parse(time.RFC3339, rel.PublishDate); pErr == nil {
-					pubTime = parsed
-				}
-			}
-			ageDays := int(time.Since(pubTime).Hours() / 24)
-			if ageDays < 0 {
-				ageDays = 0
-			}
-			leechers := rel.Peers - rel.Seeders
-			if leechers < 0 {
-				leechers = 0
-			}
-			protocol := rel.Protocol
-			if protocol == "" {
-				protocol = "torrent"
-			}
-			cats := rel.Categories
-			if cats == nil {
-				cats = []int{2000, 5000}
-			}
-
-			results = append(results, domain.ReleaseResult{
-				Guid:        rel.Guid,
-				Title:       rel.Title,
-				IndexerID:   indexerID,
-				Indexer:     indexerName,
-				Protocol:    protocol,
-				Size:        rel.Size,
-				Age:         ageDays,
-				PublishDate: pubTime,
-				DownloadURL: rel.DownloadURL,
-				InfoURL:     rel.InfoURL,
-				Seeders:     rel.Seeders,
-				Leechers:    leechers,
-				Peers:       rel.Peers,
-				Categories:  cats,
-				Quality:     rel.Quality,
-				TvdbID:      req.TvdbID,
-				TmdbID:      req.TmdbID,
-				ImdbID:      req.ImdbID,
-			})
-		}
+		results = append(results, batch...)
 	}
 
 	if results == nil {
 		results = []domain.ReleaseResult{}
+	}
+	return results, nil
+}
+
+func (m *Manager) searchIndexerEntry(ctx context.Context, entry *managedEntry, indexerID int64, req pluginsdk.SearchRequest) ([]domain.ReleaseResult, error) {
+	indexerName := entry.info.Manifest.Name
+
+	var releases []pluginsdk.Release
+	var err error
+
+	if entry.builtin != nil {
+		if ip, ok := entry.builtin.(pluginsdk.IndexerPlugin); ok {
+			releases, err = ip.Search(ctx, req)
+		} else {
+			return nil, fmt.Errorf("plugin %s does not implement IndexerPlugin", entry.info.Manifest.ID)
+		}
+	} else if entry.proc != nil {
+		callCtx := ctx
+		if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+			var cancel context.CancelFunc
+			callCtx, cancel = context.WithTimeout(ctx, 10*time.Second)
+			defer cancel()
+		}
+		err = entry.proc.call(callCtx, "search", req, &releases)
+	} else {
+		return nil, fmt.Errorf("plugin %s is not running", entry.info.Manifest.ID)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	results := make([]domain.ReleaseResult, 0, len(releases))
+	for _, rel := range releases {
+		pubTime := time.Now().UTC()
+		if rel.PublishDate != "" {
+			if parsed, pErr := time.Parse(time.RFC3339, rel.PublishDate); pErr == nil {
+				pubTime = parsed
+			}
+		}
+		ageDays := int(time.Since(pubTime).Hours() / 24)
+		if ageDays < 0 {
+			ageDays = 0
+		}
+		leechers := rel.Peers - rel.Seeders
+		if leechers < 0 {
+			leechers = 0
+		}
+		protocol := rel.Protocol
+		if protocol == "" {
+			protocol = "torrent"
+		}
+		cats := rel.Categories
+		if cats == nil {
+			cats = []int{2000, 5000}
+		}
+
+		results = append(results, domain.ReleaseResult{
+			Guid:        rel.Guid,
+			Title:       rel.Title,
+			IndexerID:   indexerID,
+			Indexer:     indexerName,
+			Protocol:    protocol,
+			Size:        rel.Size,
+			Age:         ageDays,
+			PublishDate: pubTime,
+			DownloadURL: rel.DownloadURL,
+			InfoURL:     rel.InfoURL,
+			Seeders:     rel.Seeders,
+			Leechers:    leechers,
+			Peers:       rel.Peers,
+			Categories:  cats,
+			Quality:     rel.Quality,
+			TvdbID:      req.TvdbID,
+			TmdbID:      req.TmdbID,
+			ImdbID:      req.ImdbID,
+		})
 	}
 	return results, nil
 }

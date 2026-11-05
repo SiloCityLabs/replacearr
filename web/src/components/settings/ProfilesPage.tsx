@@ -24,6 +24,7 @@ import {
   Select,
   TextInput,
 } from './fields';
+import { useConfirm } from '../modals/ConfirmModal';
 
 interface ProfilesPageProps {
   config: AppConfig;
@@ -63,6 +64,7 @@ export const ProfilesPage: React.FC<ProfilesPageProps> = ({
   onRefresh,
   onNotify,
 }) => {
+  const { confirm, dialog } = useConfirm();
   const [qualities, setQualities] = useState<QualityDefinition[]>(config.qualityDefinitions);
   const [profileForm, setProfileForm] = useState<ProfileForm | null>(null);
   const [delayForm, setDelayForm] = useState<{ index: number | null; value: DelayProfile } | null>(null);
@@ -146,7 +148,12 @@ export const ProfilesPage: React.FC<ProfilesPageProps> = ({
   };
 
   const deleteProfile = async (profile: QualityProfile) => {
-    if (!window.confirm(`Delete quality profile "${profile.name}"?`)) return;
+    const ok = await confirm({
+      title: 'Delete quality profile',
+      message: `Delete quality profile "${profile.name}"?`,
+      confirmLabel: 'Delete',
+    });
+    if (!ok) return;
     try {
       await api.deleteProfile(profile.id);
       onNotify(`Deleted quality profile "${profile.name}"`);
@@ -174,7 +181,12 @@ export const ProfilesPage: React.FC<ProfilesPageProps> = ({
   };
 
   const deleteDelay = async (index: number) => {
-    if (!window.confirm('Delete this delay profile?')) return;
+    const ok = await confirm({
+      title: 'Delete delay profile',
+      message: 'Delete this delay profile?',
+      confirmLabel: 'Delete',
+    });
+    if (!ok) return;
     try {
       await onSave({
         ...config,
@@ -208,7 +220,12 @@ export const ProfilesPage: React.FC<ProfilesPageProps> = ({
   };
 
   const deleteRelease = async (index: number) => {
-    if (!window.confirm('Delete this release profile?')) return;
+    const ok = await confirm({
+      title: 'Delete release profile',
+      message: 'Delete this release profile?',
+      confirmLabel: 'Delete',
+    });
+    if (!ok) return;
     try {
       await onSave({
         ...config,
@@ -616,6 +633,7 @@ export const ProfilesPage: React.FC<ProfilesPageProps> = ({
           </form>
         </Modal>
       ) : null}
+      {dialog}
     </div>
   );
 };

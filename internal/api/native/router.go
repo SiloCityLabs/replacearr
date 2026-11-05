@@ -2,6 +2,7 @@ package native
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -14,7 +15,11 @@ import (
 	"github.com/replacearr/replacearr/internal/config"
 	"github.com/replacearr/replacearr/internal/db"
 	"github.com/replacearr/replacearr/internal/domain"
+	"github.com/replacearr/replacearr/internal/downloadclient/deluge"
+	"github.com/replacearr/replacearr/internal/downloadclient/nzbget"
 	"github.com/replacearr/replacearr/internal/downloadclient/qbittorrent"
+	"github.com/replacearr/replacearr/internal/downloadclient/sabnzbd"
+	"github.com/replacearr/replacearr/internal/downloadclient/transmission"
 	"github.com/replacearr/replacearr/internal/flaresolverr"
 	"github.com/replacearr/replacearr/internal/httpclient"
 	"github.com/replacearr/replacearr/internal/indexers/cardigann"
@@ -27,6 +32,11 @@ import (
 	"github.com/replacearr/replacearr/pkg/pluginsdk"
 )
 
+// QueueProgressSyncer refreshes live download progress/ETA from clients.
+type QueueProgressSyncer interface {
+	SyncProgress(ctx context.Context)
+}
+
 type Server struct {
 	store         *db.Store
 	cfg           *config.Config
@@ -38,6 +48,7 @@ type Server struct {
 	covers        *mediacover.Store
 	subtitles     *subtitles.Service
 	scheduler     *tasks.Scheduler
+	queueSync     QueueProgressSyncer
 	version       string
 	startedAt     time.Time
 }
@@ -403,6 +414,7 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/indexers", s.authSvc.RequirePermission(domain.PermIndexersRead, s.handleListIndexers))
 	mux.HandleFunc("POST /api/v1/indexers", s.authSvc.RequirePermission(domain.PermIndexersWrite, s.handleCreateIndexer))
 	mux.HandleFunc("DELETE /api/v1/indexers/{id}", s.authSvc.RequirePermission(domain.PermIndexersWrite, s.handleDeleteIndexer))
+	mux.HandleFunc("POST /api/v1/indexers/test", s.authSvc.RequirePermission(domain.PermIndexersRead, s.handleTestIndexer))
 	mux.HandleFunc("GET /api/v1/indexers/definitions", s.authSvc.RequirePermission(domain.PermIndexersRead, s.handleListDefinitions))
 	mux.HandleFunc("GET /api/v1/search", s.authSvc.RequirePermission(domain.PermIndexersSearch, s.handleSearch))
 	mux.HandleFunc("POST /api/v1/releases/grab", s.authSvc.RequirePermission(domain.PermDownloadsWrite, s.handleGrabRelease))
@@ -936,24 +948,51 @@ func (s *Server) handleGrabRelease(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, item)
 }
 
-// enqueueToDownloadClient prefers enabled qBittorrent rows, then plugin download clients.
+// enqueueToDownloadClient sends to the first enabled built-in client matching
+// the release protocol (torrent → qBittorrent/Transmission/Deluge, usenet →
+// SABnzbd/NZBGet), then download-client plugins.
 func (s *Server) enqueueToDownloadClient(ctx context.Context, title, downloadURL, protocol string) (clientName, downloadID string, err error) {
+	wantProto := strings.ToLower(strings.TrimSpace(protocol))
+	if wantProto == "" {
+		wantProto = "torrent"
+	}
 	clients, err := s.store.ListDownloadClients()
 	if err != nil {
 		return "", "", err
 	}
+	var matchedEnabled bool
 	for _, c := range clients {
 		if !c.Enable {
 			continue
 		}
-		if strings.EqualFold(c.Implementation, "qBittorrent") {
-			cli := qbittorrent.NewFromDownloadClient(c)
-			id, addErr := cli.Add(ctx, title, downloadURL, protocol)
-			if addErr != nil {
-				return "", "", addErr
-			}
-			return c.Name, id, nil
+		if strings.EqualFold(c.Implementation, "Plugin") {
+			continue // handled via pluginMgr below
 		}
+		clientProto := domain.ProtocolForDownloadClientImplementation(c.Implementation, c.Protocol)
+		if !strings.EqualFold(clientProto, wantProto) {
+			continue
+		}
+		matchedEnabled = true
+		var id string
+		var addErr error
+		switch {
+		case strings.EqualFold(c.Implementation, "qBittorrent"):
+			id, addErr = qbittorrent.NewFromDownloadClient(c).Add(ctx, title, downloadURL, protocol)
+		case strings.EqualFold(c.Implementation, "Transmission"):
+			id, addErr = transmission.NewFromDownloadClient(c).Add(ctx, title, downloadURL, protocol)
+		case strings.EqualFold(c.Implementation, "Deluge"):
+			id, addErr = deluge.NewFromDownloadClient(c).Add(ctx, title, downloadURL, protocol)
+		case strings.EqualFold(c.Implementation, "SABnzbd"):
+			id, addErr = sabnzbd.NewFromDownloadClient(c).Add(ctx, title, downloadURL, protocol)
+		case strings.EqualFold(c.Implementation, "NZBGet"):
+			id, addErr = nzbget.NewFromDownloadClient(c).Add(ctx, title, downloadURL, protocol)
+		default:
+			continue
+		}
+		if addErr != nil {
+			return "", "", addErr
+		}
+		return c.Name, id, nil
 	}
 	if s.pluginMgr != nil {
 		id, qErr := s.pluginMgr.EnqueueDownload(ctx, title, downloadURL, protocol)
@@ -964,11 +1003,59 @@ func (s *Server) enqueueToDownloadClient(ctx context.Context, title, downloadURL
 			}
 			return name, id, nil
 		}
-		if qErr != nil {
+		if qErr != nil && !strings.Contains(qErr.Error(), "no enabled download client plugin") {
 			return "", "", qErr
 		}
 	}
-	return "", "", fmt.Errorf("no enabled download client configured; add qBittorrent in Queue & Clients before grabbing")
+	if matchedEnabled {
+		return "", "", fmt.Errorf("enabled download client(s) for %s could not accept the grab", wantProto)
+	}
+	return "", "", fmt.Errorf("no enabled %s download client configured; add one in Queue & Clients before grabbing", wantProto)
+}
+
+// enqueueTorrentFile sends a raw .torrent to the first enabled built-in torrent client.
+func (s *Server) enqueueTorrentFile(ctx context.Context, title, filename string, data []byte) (clientName, downloadID string, err error) {
+	if len(data) == 0 {
+		return "", "", fmt.Errorf("empty torrent file")
+	}
+	clients, err := s.store.ListDownloadClients()
+	if err != nil {
+		return "", "", err
+	}
+	var matchedEnabled bool
+	for _, c := range clients {
+		if !c.Enable {
+			continue
+		}
+		if strings.EqualFold(c.Implementation, "Plugin") {
+			continue
+		}
+		clientProto := domain.ProtocolForDownloadClientImplementation(c.Implementation, c.Protocol)
+		if !strings.EqualFold(clientProto, "torrent") {
+			continue
+		}
+		matchedEnabled = true
+		var id string
+		var addErr error
+		switch {
+		case strings.EqualFold(c.Implementation, "qBittorrent"):
+			id, addErr = qbittorrent.NewFromDownloadClient(c).AddFile(ctx, title, filename, data)
+		case strings.EqualFold(c.Implementation, "Transmission"):
+			id, addErr = transmission.NewFromDownloadClient(c).AddFile(ctx, title, filename, data)
+		case strings.EqualFold(c.Implementation, "Deluge"):
+			id, addErr = deluge.NewFromDownloadClient(c).AddFile(ctx, title, filename, data)
+		default:
+			continue
+		}
+		if addErr != nil {
+			return "", "", addErr
+		}
+		return c.Name, id, nil
+	}
+	if matchedEnabled {
+		return "", "", fmt.Errorf("enabled torrent download client(s) could not accept the torrent file")
+	}
+	return "", "", fmt.Errorf("no enabled torrent download client configured; add qBittorrent, Transmission, or Deluge before uploading a .torrent file")
 }
 
 // requireEnabledDownloadClient returns the name of an enabled DB download client, or an error.
@@ -983,6 +1070,32 @@ func (s *Server) requireEnabledDownloadClient() (string, error) {
 		}
 	}
 	return "", fmt.Errorf("no enabled download client configured; add one in Queue & Clients or Settings before grabbing")
+}
+
+const maxManualTorrentBytes = 16 << 20 // 16 MiB
+
+func decodeTorrentBase64(s string) ([]byte, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return nil, fmt.Errorf("torrentBase64 is empty")
+	}
+	if i := strings.Index(s, ","); i >= 0 && strings.Contains(strings.ToLower(s[:i]), "base64") {
+		s = s[i+1:]
+	}
+	raw, err := base64.StdEncoding.DecodeString(s)
+	if err != nil {
+		raw, err = base64.RawStdEncoding.DecodeString(s)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("invalid torrentBase64: %w", err)
+	}
+	if len(raw) == 0 {
+		return nil, fmt.Errorf("decoded torrent file is empty")
+	}
+	if len(raw) > maxManualTorrentBytes {
+		return nil, fmt.Errorf("torrent file too large (max %d bytes)", maxManualTorrentBytes)
+	}
+	return raw, nil
 }
 
 func (s *Server) handleManualRelease(w http.ResponseWriter, r *http.Request) {
@@ -1016,11 +1129,22 @@ func (s *Server) handleManualRelease(w http.ResponseWriter, r *http.Request) {
 		mediaType = "movie"
 	}
 	protocol := "torrent"
-	if url == "" && req.TorrentBase64 != "" {
-		writeErr(w, http.StatusBadRequest, fmt.Errorf("torrent file upload is not supported yet; use a magnet or HTTP .torrent URL"))
-		return
+	var clientName, downloadID string
+	var err error
+	if url != "" {
+		clientName, downloadID, err = s.enqueueToDownloadClient(r.Context(), req.Title, url, protocol)
+	} else {
+		raw, decErr := decodeTorrentBase64(req.TorrentBase64)
+		if decErr != nil {
+			writeErr(w, http.StatusBadRequest, decErr)
+			return
+		}
+		filename := req.Title
+		if !strings.HasSuffix(strings.ToLower(filename), ".torrent") {
+			filename = strings.TrimSpace(filename) + ".torrent"
+		}
+		clientName, downloadID, err = s.enqueueTorrentFile(r.Context(), req.Title, filename, raw)
 	}
-	clientName, downloadID, err := s.enqueueToDownloadClient(r.Context(), req.Title, url, protocol)
 	if err != nil {
 		writeErr(w, http.StatusUnprocessableEntity, err)
 		return
@@ -1074,6 +1198,9 @@ func (s *Server) handleManualRelease(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleListQueue(w http.ResponseWriter, r *http.Request) {
+	if s.queueSync != nil {
+		s.queueSync.SyncProgress(r.Context())
+	}
 	mediaType := r.URL.Query().Get("mediaType")
 	items, err := s.store.ListQueueItems(mediaType)
 	if err != nil {

@@ -413,9 +413,17 @@ export interface CardigannDefinition {
   description: string;
   language: string;
   type: string; // public, private, semi-private
+  encoding?: string;
   protocol?: string;
   links: string[];
   fileName?: string;
+  /** Raw Cardigann caps (categorymappings, modes, …) from the YAML. */
+  caps?: {
+    categorymappings?: Array<Record<string, unknown>>;
+    modes?: Record<string, string[]>;
+    allowrawsearch?: boolean;
+    [key: string]: unknown;
+  };
   categories?: number[];
   settings?: Array<{
     name: string;

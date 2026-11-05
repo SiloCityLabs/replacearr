@@ -318,6 +318,21 @@ export const api = {
     await request(`/api/v1/indexers/${id}`, { method: 'DELETE' });
   },
 
+  async testIndexer(payload: Partial<Indexer>): Promise<{
+    ok: boolean;
+    message: string;
+    latencyMs: number;
+    releases?: number;
+  }> {
+    return request<{ ok: boolean; message: string; latencyMs: number; releases?: number }>(
+      '/api/v1/indexers/test',
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }
+    );
+  },
+
   async getCardigannDefinitions(): Promise<CardigannDefinition[]> {
     const res = await request<unknown>('/api/v1/indexers/definitions');
     return unwrapArray<CardigannDefinition>(res, 'definitions');

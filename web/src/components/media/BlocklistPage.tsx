@@ -6,6 +6,7 @@ import { mediaTypeApi } from '../../nav';
 import type { BlocklistItem } from '../../types';
 import { formatAppDate } from '../../uiPrefs';
 import type { AppConfig } from '../../types';
+import { useConfirm } from '../modals/ConfirmModal';
 
 export interface BlocklistPageProps {
   media: MediaNavType;
@@ -14,6 +15,7 @@ export interface BlocklistPageProps {
 }
 
 export const BlocklistPage: React.FC<BlocklistPageProps> = ({ media, appUi, onNotify }) => {
+  const { confirm, dialog } = useConfirm();
   const [items, setItems] = useState<BlocklistItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<Set<number>>(new Set());
@@ -36,6 +38,12 @@ export const BlocklistPage: React.FC<BlocklistPageProps> = ({ media, appUi, onNo
   }, [load]);
 
   const removeOne = async (id: number) => {
+    const ok = await confirm({
+      title: 'Remove from blocklist',
+      message: 'Remove this release from the blocklist?',
+      confirmLabel: 'Remove',
+    });
+    if (!ok) return;
     try {
       await api.deleteBlocklist(id);
       onNotify('Removed from blocklist');
@@ -47,6 +55,12 @@ export const BlocklistPage: React.FC<BlocklistPageProps> = ({ media, appUi, onNo
 
   const removeSelected = async () => {
     if (!selected.size) return;
+    const ok = await confirm({
+      title: 'Remove from blocklist',
+      message: `Remove ${selected.size} item(s) from the blocklist?`,
+      confirmLabel: 'Remove',
+    });
+    if (!ok) return;
     try {
       await api.deleteBlocklistBulk([...selected]);
       onNotify(`Removed ${selected.size} item(s)`);
@@ -152,6 +166,7 @@ export const BlocklistPage: React.FC<BlocklistPageProps> = ({ media, appUi, onNo
           </div>
         </div>
       )}
+      {dialog}
     </div>
   );
 };

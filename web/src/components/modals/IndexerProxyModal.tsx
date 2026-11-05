@@ -3,13 +3,15 @@ import type { IndexerProxy } from '../../types';
 import { api } from '../../api';
 import {
   Checkbox,
+  type ConnectionTestResult,
   errorText,
   FieldRow,
   Modal,
   NumberInput,
   primaryButtonClass,
-  quietButtonClass,
   Select,
+  testButtonClass,
+  TestResultMessage,
   TextInput,
 } from '../settings/fields';
 
@@ -64,7 +66,7 @@ export const IndexerProxyModal: React.FC<IndexerProxyModalProps> = ({
   onNotify,
 }) => {
   const [form, setForm] = useState<IndexerProxyForm>(initial);
-  const [testResult, setTestResult] = useState('');
+  const [testResult, setTestResult] = useState<ConnectionTestResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [testing, setTesting] = useState(false);
 
@@ -100,15 +102,18 @@ export const IndexerProxyModal: React.FC<IndexerProxyModalProps> = ({
   };
 
   const test = async () => {
-    setTestResult('');
+    setTestResult(null);
     setTesting(true);
     try {
       const health = await api.testIndexerProxy(form.host);
-      setTestResult(health.message || (health.healthy ? 'OK' : 'Unreachable'));
+      setTestResult({
+        ok: health.healthy,
+        message: health.message || (health.healthy ? 'OK' : 'Unreachable'),
+      });
       if (!health.healthy) onNotify(health.message || 'Proxy unreachable', true);
     } catch (err) {
       const message = errorText(err, 'Proxy test failed');
-      setTestResult(message);
+      setTestResult({ ok: false, message });
       onNotify(message, true);
     } finally {
       setTesting(false);
@@ -134,7 +139,13 @@ export const IndexerProxyModal: React.FC<IndexerProxyModalProps> = ({
           />
         </FieldRow>
         <FieldRow label="Host" helpText="Full URL, e.g. http://localhost:8191/">
-          <TextInput value={form.host} onChange={(value) => setForm({ ...form, host: value })} />
+          <TextInput
+            value={form.host}
+            onChange={(value) => {
+              setTestResult(null);
+              setForm({ ...form, host: value });
+            }}
+          />
         </FieldRow>
         <FieldRow label="Request Timeout">
           <NumberInput
@@ -157,12 +168,12 @@ export const IndexerProxyModal: React.FC<IndexerProxyModalProps> = ({
         <FieldRow label="Enable">
           <Checkbox checked={form.enable} onChange={(value) => setForm({ ...form, enable: value })} />
         </FieldRow>
-        {testResult ? <p className="text-xs text-slate-300 mt-3">{testResult}</p> : null}
+        {testResult ? <TestResultMessage result={testResult} /> : null}
         <div className="pt-3 flex justify-end gap-2">
           <button
             type="button"
             disabled={testing}
-            className={quietButtonClass}
+            className={testButtonClass(testResult?.ok)}
             onClick={() => void test()}
           >
             {testing ? 'Testing…' : 'Test'}

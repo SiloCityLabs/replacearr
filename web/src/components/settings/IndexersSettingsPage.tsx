@@ -25,6 +25,7 @@ import {
   Section,
   useDraftState,
 } from './fields';
+import { useConfirm } from '../modals/ConfirmModal';
 
 interface IndexersSettingsPageProps {
   config: AppConfig;
@@ -47,6 +48,7 @@ export const IndexersSettingsPage: React.FC<IndexersSettingsPageProps> = ({
   onRefresh,
   onNotify,
 }) => {
+  const { confirm, dialog } = useConfirm();
   const { draft, setDraft, isDirty, saving, setSaving, commit } = useDraftState(
     config.indexerOptions,
     onDirtyChange
@@ -55,6 +57,7 @@ export const IndexersSettingsPage: React.FC<IndexersSettingsPageProps> = ({
   const [clearanceCount, setClearanceCount] = useState(0);
   const [indexerForm, setIndexerForm] = useState<IndexerForm | null>(null);
   const [proxyForm, setProxyForm] = useState<IndexerProxyForm | null>(null);
+  const [testingIndexerId, setTestingIndexerId] = useState<number | null>(null);
 
   const loadProxies = async () => {
     const [rows, clearances] = await Promise.all([api.getIndexerProxies(), api.getClearances()]);
@@ -90,8 +93,29 @@ export const IndexersSettingsPage: React.FC<IndexersSettingsPageProps> = ({
     }
   };
 
+  const testIndexer = async (indexer: Indexer) => {
+    setTestingIndexerId(indexer.id);
+    try {
+      const result = await api.testIndexer({ id: indexer.id });
+      if (result.ok) {
+        onNotify(`${indexer.name}: ${result.message} (${result.latencyMs} ms)`);
+      } else {
+        onNotify(`${indexer.name}: ${result.message}`, true);
+      }
+    } catch (err) {
+      onNotify(errorText(err, 'Indexer test failed'), true);
+    } finally {
+      setTestingIndexerId(null);
+    }
+  };
+
   const deleteIndexer = async (indexer: Indexer) => {
-    if (!window.confirm(`Delete indexer "${indexer.name}"?`)) return;
+    const ok = await confirm({
+      title: 'Delete indexer',
+      message: `Delete indexer "${indexer.name}"?`,
+      confirmLabel: 'Delete',
+    });
+    if (!ok) return;
     try {
       await api.deleteIndexer(indexer.id);
       onNotify(`Removed indexer "${indexer.name}"`);
@@ -102,7 +126,12 @@ export const IndexersSettingsPage: React.FC<IndexersSettingsPageProps> = ({
   };
 
   const deleteProxy = async (proxy: IndexerProxy) => {
-    if (!window.confirm(`Delete indexer proxy "${proxy.name}"?`)) return;
+    const ok = await confirm({
+      title: 'Delete proxy',
+      message: `Delete indexer proxy "${proxy.name}"?`,
+      confirmLabel: 'Delete',
+    });
+    if (!ok) return;
     try {
       await api.deleteIndexerProxy(proxy.id);
       onNotify(`Removed indexer proxy "${proxy.name}"`);
@@ -159,6 +188,14 @@ export const IndexersSettingsPage: React.FC<IndexersSettingsPageProps> = ({
                       <p className="text-[11px] font-mono text-slate-500 truncate">{indexer.baseUrl}</p>
                     </div>
                     <div className="flex gap-2 shrink-0">
+                      <button
+                        type="button"
+                        className={quietButtonClass}
+                        disabled={testingIndexerId === indexer.id}
+                        onClick={() => void testIndexer(indexer)}
+                      >
+                        {testingIndexerId === indexer.id ? 'Testing…' : 'Test'}
+                      </button>
                       <button type="button" className={quietButtonClass} onClick={() => setIndexerForm(indexerToForm(indexer))}>
                         Edit
                       </button>
@@ -258,6 +295,7 @@ export const IndexersSettingsPage: React.FC<IndexersSettingsPageProps> = ({
           onNotify={onNotify}
         />
       ) : null}
+      {dialog}
     </div>
   );
 };

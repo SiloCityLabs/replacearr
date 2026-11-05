@@ -43,3 +43,24 @@ func TestApplyRemotePathMapping(t *testing.T) {
 		t.Fatalf("%q", mapped)
 	}
 }
+
+func TestFormatTimeleft(t *testing.T) {
+	cases := []struct {
+		eta, left int64
+		want      string
+	}{
+		{125, 100, "00:02:05"},
+		{3723, 100, "01:02:03"},
+		{90061, 100, "1.01:01:01"},
+		{-1, 100, ""},
+		{-2, 100, ""},
+		{8640000, 100, ""},
+		{0, 100, ""},
+		{0, 0, "00:00:00"},
+	}
+	for _, tc := range cases {
+		if got := formatTimeleft(tc.eta, tc.left); got != tc.want {
+			t.Fatalf("formatTimeleft(%d,%d)=%q want %q", tc.eta, tc.left, got, tc.want)
+		}
+	}
+}

@@ -48,6 +48,12 @@ func (s *Server) SetScheduler(sched *tasks.Scheduler) {
 	s.scheduler = sched
 }
 
+// SetQueueProgressSyncer wires the download monitor so GET /api/v1/queue
+// refreshes live progress and ETA from download clients.
+func (s *Server) SetQueueProgressSyncer(syncer QueueProgressSyncer) {
+	s.queueSync = syncer
+}
+
 func (s *Server) handleListBlocklist(w http.ResponseWriter, r *http.Request) {
 	items, err := s.store.ListBlocklist(r.URL.Query().Get("mediaType"))
 	if err != nil {
@@ -560,10 +566,10 @@ func (s *Server) handleSystemLogs(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, applog.List(r.URL.Query().Get("level"), limit))
 }
 
-func (s *Server) handleChangelog(w http.ResponseWriter, _ *http.Request) {
-	sections, err := changelog.Sections()
+func (s *Server) handleChangelog(w http.ResponseWriter, r *http.Request) {
+	sections, err := changelog.Sections(r.Context())
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err)
+		writeErr(w, http.StatusBadGateway, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, sections)

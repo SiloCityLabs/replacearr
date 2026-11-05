@@ -20,6 +20,7 @@ import {
   TextInput,
   useDraftState,
 } from './fields';
+import { useConfirm } from '../modals/ConfirmModal';
 
 interface DownloadClientsPageProps {
   config: AppConfig;
@@ -43,6 +44,7 @@ export const DownloadClientsPage: React.FC<DownloadClientsPageProps> = ({
   onRefresh,
   onNotify,
 }) => {
+  const { confirm, dialog } = useConfirm();
   const source: HandlingDraft = {
     downloadClientOptions: config.downloadClientOptions,
     remotePathMappings: config.remotePathMappings,
@@ -78,7 +80,12 @@ export const DownloadClientsPage: React.FC<DownloadClientsPageProps> = ({
   };
 
   const deleteClient = async (client: DownloadClient) => {
-    if (!window.confirm(`Delete download client "${client.name}"?`)) return;
+    const ok = await confirm({
+      title: 'Delete download client',
+      message: `Delete download client "${client.name}"?`,
+      confirmLabel: 'Delete',
+    });
+    if (!ok) return;
     try {
       await api.deleteDownloadClient(client.id);
       onNotify(`Removed download client "${client.name}"`);
@@ -256,6 +263,7 @@ export const DownloadClientsPage: React.FC<DownloadClientsPageProps> = ({
           onNotify={onNotify}
         />
       ) : null}
+      {dialog}
     </div>
   );
 };

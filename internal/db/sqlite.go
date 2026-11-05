@@ -1477,13 +1477,18 @@ func (s *Store) DeleteQueueItem(id int64) error {
 
 // UpdateQueueItem persists progress / CDH state for an existing queue row.
 func (s *Store) UpdateQueueItem(q domain.QueueItem) error {
+	var estimated any
+	if !q.EstimatedCompletion.IsZero() {
+		estimated = q.EstimatedCompletion.UTC()
+	}
 	_, err := s.db.Exec(`
 		UPDATE queue_items SET
 			status = ?, tracked_download_status = ?, tracked_download_state = ?,
-			size = ?, sizeleft = ?, timeleft = ?, output_path = ?, download_id = ?
+			size = ?, sizeleft = ?, timeleft = ?, estimated_completion = COALESCE(?, estimated_completion),
+			output_path = ?, download_id = ?
 		WHERE id = ?`,
 		q.Status, q.TrackedDownloadStatus, q.TrackedDownloadState,
-		q.Size, q.Sizeleft, q.Timeleft, q.OutputPath, q.DownloadID, q.ID,
+		q.Size, q.Sizeleft, q.Timeleft, estimated, q.OutputPath, q.DownloadID, q.ID,
 	)
 	return err
 }

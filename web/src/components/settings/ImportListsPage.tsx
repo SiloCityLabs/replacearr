@@ -16,6 +16,7 @@ import {
   TextInput,
   useDraftState,
 } from './fields';
+import { useConfirm } from '../modals/ConfirmModal';
 
 interface ImportListsPageProps {
   config: AppConfig;
@@ -47,6 +48,7 @@ export const ImportListsPage: React.FC<ImportListsPageProps> = ({
   onSave,
   onDirtyChange,
 }) => {
+  const { confirm, dialog } = useConfirm();
   const { draft, setDraft, isDirty, saving, setSaving, commit } = useDraftState(
     config.importListOptions,
     onDirtyChange
@@ -85,7 +87,12 @@ export const ImportListsPage: React.FC<ImportListsPageProps> = ({
 
   const deleteList = async (index: number) => {
     const row = config.importLists[index];
-    if (!window.confirm(`Delete import list "${row?.name || 'list'}"?`)) return;
+    const ok = await confirm({
+      title: 'Delete import list',
+      message: `Delete import list "${row?.name || 'list'}"?`,
+      confirmLabel: 'Delete',
+    });
+    if (!ok) return;
     try {
       await onSave({
         ...config,
@@ -227,6 +234,7 @@ export const ImportListsPage: React.FC<ImportListsPageProps> = ({
           </form>
         </Modal>
       ) : null}
+      {dialog}
     </div>
   );
 };

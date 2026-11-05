@@ -277,7 +277,7 @@ export const SearchTab: React.FC<SearchTabProps> = ({
                         <span className="text-amber-400">NZB</span>
                       ) : (
                         <span className="text-emerald-400">
-                          {rel.seeders ?? 0} S / {rel.peers ?? 0} P
+                          {rel.seeders ?? 0} S / {rel.leechers ?? 0} P
                         </span>
                       )}
                     </td>

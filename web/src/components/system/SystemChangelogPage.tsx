@@ -32,12 +32,12 @@ export const SystemChangelogPage: React.FC<SystemChangelogPageProps> = ({ onNoti
           <p className="text-xs text-slate-400 mt-1">What changed in each Replacearr release.</p>
         </div>
         <a
-          href="https://github.com/replacearr/replacearr/releases"
+          href="https://github.com/replacearr/replacearr/blob/main/CHANGELOG.md"
           target="_blank"
           rel="noreferrer"
           className="inline-flex items-center gap-1.5 text-xs text-indigo-300 hover:underline"
         >
-          GitHub Releases
+          View on GitHub
           <ExternalLink className="w-3 h-3" />
         </a>
       </div>

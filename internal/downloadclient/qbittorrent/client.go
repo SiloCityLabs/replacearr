@@ -2,10 +2,12 @@
 package qbittorrent
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
@@ -24,6 +26,7 @@ type Item struct {
 	Progress    float64
 	Size        int64
 	AmountLeft  int64
+	EtaSeconds  int64 // 8640000 means unknown/infinite
 	SavePath    string
 	ContentPath string
 	Category    string
@@ -97,6 +100,63 @@ func (c *Client) Add(ctx context.Context, title, downloadURL, _protocol string) 
 	if hash != "" {
 		return strings.ToLower(hash), nil
 	}
+	return c.resolveAddedHash(ctx, title)
+}
+
+// AddFile enqueues a raw .torrent file and returns the infohash when available.
+func (c *Client) AddFile(ctx context.Context, title, filename string, data []byte) (string, error) {
+	if len(data) == 0 {
+		return "", fmt.Errorf("empty torrent file")
+	}
+	if err := c.ensureLogin(ctx); err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(filename) == "" {
+		filename = "manual.torrent"
+	}
+	if !strings.HasSuffix(strings.ToLower(filename), ".torrent") {
+		filename += ".torrent"
+	}
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	part, err := mw.CreateFormFile("torrents", filename)
+	if err != nil {
+		return "", err
+	}
+	if _, err := part.Write(data); err != nil {
+		return "", err
+	}
+	if c.category != "" {
+		if err := mw.WriteField("category", c.category); err != nil {
+			return "", err
+		}
+	}
+	if title != "" {
+		if err := mw.WriteField("rename", title); err != nil {
+			return "", err
+		}
+	}
+	if err := mw.Close(); err != nil {
+		return "", err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint("/api/v2/torrents/add"), &buf)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("qBittorrent add file failed: %s (%s)", resp.Status, strings.TrimSpace(string(body)))
+	}
+	return c.resolveAddedHash(ctx, title)
+}
+
+func (c *Client) resolveAddedHash(ctx context.Context, title string) (string, error) {
 	time.Sleep(400 * time.Millisecond)
 	items, err := c.List(ctx)
 	if err != nil {
@@ -148,6 +208,7 @@ func (c *Client) List(ctx context.Context) ([]Item, error) {
 		Progress    float64 `json:"progress"`
 		Size        int64   `json:"size"`
 		AmountLeft  int64   `json:"amount_left"`
+		Eta         int64   `json:"eta"`
 		SavePath    string  `json:"save_path"`
 		ContentPath string  `json:"content_path"`
 		Category    string  `json:"category"`
@@ -164,6 +225,7 @@ func (c *Client) List(ctx context.Context) ([]Item, error) {
 			Progress:    r.Progress,
 			Size:        r.Size,
 			AmountLeft:  r.AmountLeft,
+			EtaSeconds:  r.Eta,
 			SavePath:    r.SavePath,
 			ContentPath: r.ContentPath,
 			Category:    r.Category,

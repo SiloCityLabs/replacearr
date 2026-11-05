@@ -8,6 +8,7 @@ import {
   primaryButtonClass,
   TextInput,
 } from './fields';
+import { useConfirm } from '../modals/ConfirmModal';
 
 const TAG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
@@ -27,6 +28,7 @@ interface TagsPageProps {
 }
 
 export const TagsPage: React.FC<TagsPageProps> = ({ onNotify }) => {
+  const { confirm, dialog } = useConfirm();
   const [tags, setTags] = useState<Tag[]>([]);
   const [label, setLabel] = useState('');
   const [error, setError] = useState('');
@@ -75,7 +77,12 @@ export const TagsPage: React.FC<TagsPageProps> = ({ onNotify }) => {
   };
 
   const handleDelete = async (tag: Tag) => {
-    if (!window.confirm(`Delete tag "${tag.label}"?`)) return;
+    const ok = await confirm({
+      title: 'Delete tag',
+      message: `Delete tag "${tag.label}"?`,
+      confirmLabel: 'Delete',
+    });
+    if (!ok) return;
     try {
       await api.deleteTag(tag.id);
       if (details?.id === tag.id) setDetails(null);
@@ -148,6 +155,7 @@ export const TagsPage: React.FC<TagsPageProps> = ({ onNotify }) => {
           )}
         </div>
       ) : null}
+      {dialog}
     </div>
   );
 };

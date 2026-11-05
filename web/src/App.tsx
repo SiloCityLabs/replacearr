@@ -62,6 +62,7 @@ import { SystemLogsPage } from './components/system/SystemLogsPage';
 import { SystemChangelogPage } from './components/system/SystemChangelogPage';
 import { useGamepad } from './htpc/useGamepad';
 import { useRovingFocus } from './htpc/useRovingFocus';
+import { useConfirm } from './components/modals/ConfirmModal';
 
 function settingsPageFromView(view: NavView): SettingsPageId | null {
   if (!view.startsWith('settings.')) return null;
@@ -70,6 +71,7 @@ function settingsPageFromView(view: NavView): SettingsPageId | null {
 }
 
 export const App: React.FC = () => {
+  const { confirm, dialog: confirmDialog } = useConfirm();
   const [user, setUser] = useState<User | null>(null);
   const [masterApiKey, setMasterApiKey] = useState<string>('');
   const [authChecking, setAuthChecking] = useState<boolean>(true);
@@ -116,7 +118,9 @@ export const App: React.FC = () => {
 
   useEffect(() => {
     if (!toast) return;
-    const timer = setTimeout(() => setToast(null), 4000);
+    // Errors often need copy/paste time; success can clear quickly.
+    const ms = toast.isError ? 20000 : 4000;
+    const timer = setTimeout(() => setToast(null), ms);
     return () => clearTimeout(timer);
   }, [toast]);
 
@@ -222,6 +226,15 @@ export const App: React.FC = () => {
     }
   }, []);
 
+  const refreshQueue = useCallback(async () => {
+    try {
+      const q = await api.getQueue();
+      setQueue(q);
+    } catch {
+      /* keep last known queue on transient poll failures */
+    }
+  }, []);
+
   useEffect(() => {
     const checkSession = async () => {
       const token = getStoredToken();
@@ -305,18 +318,25 @@ export const App: React.FC = () => {
         setMobileNavOpen(false);
         return;
       }
-      if (
-        settingsDirtyRef.current &&
-        activeViewRef.current.startsWith('settings.') &&
-        !view.startsWith('settings.')
-      ) {
-        if (!window.confirm('Discard unsaved settings changes?')) return;
-        setSettingsDirty(false);
-      }
-      applyView(view);
-      syncViewToHistory(view, 'push');
+      void (async () => {
+        if (
+          settingsDirtyRef.current &&
+          activeViewRef.current.startsWith('settings.') &&
+          !view.startsWith('settings.')
+        ) {
+          const ok = await confirm({
+            title: 'Unsaved changes',
+            message: 'Discard unsaved settings changes?',
+            confirmLabel: 'Discard',
+          });
+          if (!ok) return;
+          setSettingsDirty(false);
+        }
+        applyView(view);
+        syncViewToHistory(view, 'push');
+      })();
     },
-    [applyView]
+    [applyView, confirm]
   );
 
   useEffect(() => {
@@ -325,23 +345,30 @@ export const App: React.FC = () => {
       const view =
         (typeof stateView === 'string' && isKnownView(stateView) && stateView) ||
         readViewFromLocation();
-      if (
-        settingsDirtyRef.current &&
-        activeViewRef.current.startsWith('settings.') &&
-        !view.startsWith('settings.')
-      ) {
-        if (!window.confirm('Discard unsaved settings changes?')) {
-          // Stay on the settings page; put the current view back on the stack.
-          syncViewToHistory(activeViewRef.current, 'push');
-          return;
+      void (async () => {
+        if (
+          settingsDirtyRef.current &&
+          activeViewRef.current.startsWith('settings.') &&
+          !view.startsWith('settings.')
+        ) {
+          const ok = await confirm({
+            title: 'Unsaved changes',
+            message: 'Discard unsaved settings changes?',
+            confirmLabel: 'Discard',
+          });
+          if (!ok) {
+            // Stay on the settings page; put the current view back on the stack.
+            syncViewToHistory(activeViewRef.current, 'push');
+            return;
+          }
+          setSettingsDirty(false);
         }
-        setSettingsDirty(false);
-      }
-      applyView(view);
+        applyView(view);
+      })();
     };
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
-  }, [applyView]);
+  }, [applyView, confirm]);
 
   const handleOpenAddLibrary = (tab: 'series' | 'movies' | 'music' | 'books') => {
     setPendingOpenAdd(true);
@@ -659,18 +686,18 @@ export const App: React.FC = () => {
 
         {toast && (
           <div
-            className={`fixed top-[4.5rem] left-1/2 -translate-x-1/2 z-40 max-w-[calc(100vw-1.5rem)] inline-flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium border shadow-lg ${
+            className={`fixed top-[4.5rem] left-1/2 -translate-x-1/2 z-[60] max-w-[calc(100vw-1.5rem)] inline-flex items-start gap-2 px-3 py-2 rounded-lg text-xs font-medium border shadow-lg ${
               toast.isError
                 ? 'bg-rose-950 border-rose-500/40 text-rose-200'
                 : 'bg-emerald-950 border-emerald-500/40 text-emerald-200'
             }`}
           >
             {toast.isError ? (
-              <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+              <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
             ) : (
-              <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+              <CheckCircle2 className="w-3.5 h-3.5 shrink-0 mt-0.5" />
             )}
-            <span className="break-words">{toast.message}</span>
+            <span className="break-words select-text">{toast.message}</span>
           </div>
         )}
 
@@ -682,6 +709,8 @@ export const App: React.FC = () => {
             onNotify={notify}
           />
         )}
+
+        {confirmDialog}
 
         <main className="flex-1 p-4 sm:p-6 max-w-7xl w-full mx-auto">
           {activeView === 'dashboard' && (
@@ -757,6 +786,7 @@ export const App: React.FC = () => {
               appConfig={appConfig}
               onSaveConfig={saveAppConfig}
               onRefresh={loadAllData}
+              onRefreshQueue={refreshQueue}
               onNotify={notify}
             />
           )}

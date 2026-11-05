@@ -3,14 +3,16 @@ import type { DownloadClient } from '../../types';
 import { api } from '../../api';
 import {
   Checkbox,
+  type ConnectionTestResult,
   errorText,
   FieldRow,
   Modal,
   NumberInput,
   PasswordInput,
   primaryButtonClass,
-  quietButtonClass,
   Select,
+  testButtonClass,
+  TestResultMessage,
   TextInput,
 } from '../settings/fields';
 
@@ -94,7 +96,7 @@ export const DownloadClientModal: React.FC<DownloadClientModalProps> = ({
   onNotify,
 }) => {
   const [form, setForm] = useState<DownloadClientForm>(initial);
-  const [testResult, setTestResult] = useState('');
+  const [testResult, setTestResult] = useState<ConnectionTestResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [testing, setTesting] = useState(false);
 
@@ -134,15 +136,18 @@ export const DownloadClientModal: React.FC<DownloadClientModalProps> = ({
   };
 
   const test = async () => {
-    setTestResult('');
+    setTestResult(null);
     setTesting(true);
     try {
       const result = await api.testDownloadClient({ baseUrl: form.baseUrl });
-      setTestResult(`${result.ok ? 'OK' : 'Failed'} — ${result.message} (${result.latencyMs} ms)`);
+      setTestResult({
+        ok: result.ok,
+        message: `${result.ok ? 'OK' : 'Failed'} — ${result.message} (${result.latencyMs} ms)`,
+      });
       if (!result.ok) onNotify(result.message, true);
     } catch (err) {
       const message = errorText(err, 'Download client test failed');
-      setTestResult(message);
+      setTestResult({ ok: false, message });
       onNotify(message, true);
     } finally {
       setTesting(false);
@@ -205,14 +210,28 @@ export const DownloadClientModal: React.FC<DownloadClientModalProps> = ({
         >
           <TextInput
             value={form.baseUrl}
-            onChange={(value) => setForm({ ...form, baseUrl: value })}
+            onChange={(value) => {
+              setTestResult(null);
+              setForm({ ...form, baseUrl: value });
+            }}
             placeholder="http://localhost:8080"
           />
         </FieldRow>
-        <FieldRow label="Username">
-          <TextInput value={form.username} onChange={(value) => setForm({ ...form, username: value })} />
-        </FieldRow>
-        <FieldRow label="Password">
+        {form.implementation === 'SABnzbd' ? null : (
+          <FieldRow label="Username">
+            <TextInput value={form.username} onChange={(value) => setForm({ ...form, username: value })} />
+          </FieldRow>
+        )}
+        <FieldRow
+          label={form.implementation === 'SABnzbd' ? 'API Key' : 'Password'}
+          helpText={
+            form.implementation === 'SABnzbd'
+              ? 'SABnzbd Config → General → API Key'
+              : form.implementation === 'Deluge'
+                ? 'Deluge WebUI password (default often “deluge”)'
+                : undefined
+          }
+        >
           <PasswordInput value={form.password} onChange={(value) => setForm({ ...form, password: value })} />
         </FieldRow>
         <FieldRow label="Category">
@@ -230,12 +249,12 @@ export const DownloadClientModal: React.FC<DownloadClientModalProps> = ({
             onChange={(value) => setForm({ ...form, removeFailedDownloads: value })}
           />
         </FieldRow>
-        {testResult ? <p className="text-xs text-slate-300 mt-3">{testResult}</p> : null}
+        {testResult ? <TestResultMessage result={testResult} /> : null}
         <div className="pt-3 flex justify-end gap-2">
           <button
             type="button"
             disabled={testing}
-            className={quietButtonClass}
+            className={testButtonClass(testResult?.ok)}
             onClick={() => void test()}
           >
             {testing ? 'Testing…' : 'Test'}

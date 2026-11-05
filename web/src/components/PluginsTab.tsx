@@ -25,7 +25,14 @@ import {
 import type { CatalogPlugin, DiscoveredPlugin } from '../types';
 import { api } from '../api';
 import { isBrowserNotificationPlugin, notifyBrowser, requestPermission } from '../notifications';
-import { PasswordInput, SecretDisplay } from './settings/fields';
+import {
+  type ConnectionTestResult,
+  PasswordInput,
+  SecretDisplay,
+  testButtonClass,
+  TestResultMessage,
+} from './settings/fields';
+import { useConfirm } from './modals/ConfirmModal';
 
 interface PluginsTabProps {
   plugins: DiscoveredPlugin[];
@@ -98,13 +105,14 @@ export const PluginsTab: React.FC<PluginsTabProps> = ({
   onRefresh,
   onNotify,
 }) => {
+  const { confirm, dialog } = useConfirm();
   const [reloading, setReloading] = useState(false);
   const [editingPlugin, setEditingPlugin] = useState<DiscoveredPlugin | null>(null);
   const [formSettings, setFormSettings] = useState<Record<string, unknown>>({});
   const [formEnabled, setFormEnabled] = useState(true);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
-  const [testResult, setTestResult] = useState('');
+  const [testResult, setTestResult] = useState<ConnectionTestResult | null>(null);
   const [copiedSnippet, setCopiedSnippet] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [sdkExpanded, setSdkExpanded] = useState(false);
@@ -164,6 +172,12 @@ export const PluginsTab: React.FC<PluginsTabProps> = ({
   };
 
   const handleUninstallCatalog = async (entry: CatalogPlugin) => {
+    const ok = await confirm({
+      title: 'Uninstall plugin',
+      message: `Uninstall plugin "${entry.name}"?`,
+      confirmLabel: 'Uninstall',
+    });
+    if (!ok) return;
     setCatalogBusyId(entry.id);
     try {
       await api.uninstallCatalogPlugin(entry.id);
@@ -273,28 +287,29 @@ export const PluginsTab: React.FC<PluginsTabProps> = ({
     }
     setFormSettings({ ...initial, ...(p.settings || {}) });
     setFormEnabled(p.enabled);
-    setTestResult('');
+    setTestResult(null);
     setEditingPlugin(p);
   };
 
   const handleTestNotification = async () => {
     if (!editingPlugin || !isNotificationPlugin(editingPlugin)) return;
-    setTestResult('');
+    setTestResult(null);
     setTesting(true);
     try {
       if (isBrowserNotificationPlugin(editingPlugin.manifest.id)) {
         const perm = await requestPermission();
         if (perm !== 'granted') {
           const message = 'Browser notification permission was not granted';
-          setTestResult(message);
+          setTestResult({ ok: false, message });
           onNotify(message, true);
           return;
         }
       }
       const result = await api.testNotificationPlugin(editingPlugin.manifest.id, formSettings);
-      setTestResult(
-        `${result.ok ? 'OK' : 'Failed'} — ${result.message} (${result.latencyMs} ms)`
-      );
+      setTestResult({
+        ok: result.ok,
+        message: `${result.ok ? 'OK' : 'Failed'} — ${result.message} (${result.latencyMs} ms)`,
+      });
       if (result.ok) {
         // When the browser channel is disabled, the SSE stream is not subscribed —
         // show the OS notification locally so Test still proves permission + rendering.
@@ -310,7 +325,7 @@ export const PluginsTab: React.FC<PluginsTabProps> = ({
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Notification test failed';
-      setTestResult(message);
+      setTestResult({ ok: false, message });
       onNotify(message, true);
     } finally {
       setTesting(false);
@@ -997,7 +1012,7 @@ export const PluginsTab: React.FC<PluginsTabProps> = ({
               )}
 
               {isNotificationPlugin(editingPlugin) && testResult ? (
-                <p className="text-xs text-slate-300">{testResult}</p>
+                <TestResultMessage result={testResult} />
               ) : null}
 
               <div className="pt-3 border-t border-slate-800 flex flex-col-reverse sm:flex-row sm:justify-end gap-2">
@@ -1013,9 +1028,17 @@ export const PluginsTab: React.FC<PluginsTabProps> = ({
                     type="button"
                     disabled={testing || saving}
                     onClick={() => void handleTestNotification()}
-                    className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium transition disabled:opacity-50 touch-manipulation"
+                    className={`w-full sm:w-auto justify-center px-4 py-2.5 transition disabled:opacity-50 touch-manipulation ${testButtonClass(testResult?.ok)}`}
                   >
-                    <FlaskConical className="w-3.5 h-3.5 text-amber-400" />
+                    <FlaskConical
+                      className={`w-3.5 h-3.5 ${
+                        testResult?.ok === true
+                          ? 'text-emerald-300'
+                          : testResult?.ok === false
+                            ? 'text-rose-300'
+                            : 'text-amber-400'
+                      }`}
+                    />
                     <span>{testing ? 'Testing…' : 'Test'}</span>
                   </button>
                 ) : null}
@@ -1031,6 +1054,7 @@ export const PluginsTab: React.FC<PluginsTabProps> = ({
           </div>
         </div>
       )}
+      {dialog}
     </div>
   );
 };
