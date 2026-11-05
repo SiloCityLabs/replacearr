@@ -40,11 +40,14 @@ func (s *Service) wantedLanguages(cfg domain.AppConfig) []string {
 		return []string{"en"}
 	}
 	out := make([]string, 0, len(langs))
+	seen := map[string]bool{}
 	for _, l := range langs {
-		l = normalizeLang(l)
-		if l != "" {
-			out = append(out, l)
+		l = canonicalLang(l)
+		if l == "" || seen[l] {
+			continue
 		}
+		seen[l] = true
+		out = append(out, l)
 	}
 	if len(out) == 0 {
 		return []string{"en"}
@@ -173,7 +176,9 @@ func (s *Service) mergeDiskSidecarsEpisode(episodeID int64, file *domain.Episode
 func missingLanguages(wanted []string, tracks []domain.SubtitleTrack) []string {
 	have := map[string]bool{}
 	for _, t := range tracks {
-		have[primaryLang(t.Language)] = true
+		if code := primaryLang(t.Language); code != "" {
+			have[code] = true
+		}
 	}
 	var missing []string
 	for _, w := range wanted {
@@ -185,11 +190,7 @@ func missingLanguages(wanted []string, tracks []domain.SubtitleTrack) []string {
 }
 
 func primaryLang(lang string) string {
-	lang = normalizeLang(lang)
-	if i := strings.Index(lang, "-"); i > 0 {
-		return lang[:i]
-	}
-	return lang
+	return canonicalLang(lang)
 }
 
 // SearchMovie queries OpenSubtitles for a movie file.

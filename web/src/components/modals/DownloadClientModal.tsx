@@ -31,14 +31,27 @@ export interface DownloadClientForm {
   removeFailedDownloads: boolean;
 }
 
-export function blankDownloadClientForm(): DownloadClientForm {
+/** Next unused default: max existing priority + 1, or 1 when none exist. */
+export function nextDownloadClientPriority(
+  existing: Array<{ priority: number }> = [],
+): number {
+  let max = 0;
+  for (const client of existing) {
+    if (client.priority > max) max = client.priority;
+  }
+  return max + 1;
+}
+
+export function blankDownloadClientForm(
+  existing: Array<{ priority: number }> = [],
+): DownloadClientForm {
   return {
     id: null,
     name: '',
     implementation: 'qBittorrent',
     protocol: 'torrent',
     enable: true,
-    priority: 1,
+    priority: nextDownloadClientPriority(existing),
     baseUrl: 'http://localhost:8080',
     username: '',
     password: '',
@@ -65,9 +78,12 @@ export function downloadClientToForm(client: DownloadClient): DownloadClientForm
   };
 }
 
-export function discoveredToForm(hit: DiscoveredDownloadClient): DownloadClientForm {
+export function discoveredToForm(
+  hit: DiscoveredDownloadClient,
+  existing: Array<{ priority: number }> = [],
+): DownloadClientForm {
   return {
-    ...blankDownloadClientForm(),
+    ...blankDownloadClientForm(existing),
     name: hit.nameHint || hit.implementation,
     implementation: hit.implementation,
     protocol: protocolForImplementation(hit.implementation, hit.protocol),
@@ -94,6 +110,8 @@ function protocolForImplementation(implementation: string, current = 'torrent'):
 
 interface DownloadClientModalProps {
   initial: DownloadClientForm;
+  /** Used to warn when priority collides with another configured client. */
+  existingClients?: Array<{ id: number; name: string; priority: number }>;
   onClose: () => void;
   onSaved: () => Promise<void> | void;
   onNotify: (msg: string, isError?: boolean) => void;
@@ -101,6 +119,7 @@ interface DownloadClientModalProps {
 
 export const DownloadClientModal: React.FC<DownloadClientModalProps> = ({
   initial,
+  existingClients = [],
   onClose,
   onSaved,
   onNotify,
@@ -109,6 +128,10 @@ export const DownloadClientModal: React.FC<DownloadClientModalProps> = ({
   const [testResult, setTestResult] = useState<ConnectionTestResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [testing, setTesting] = useState(false);
+
+  const priorityConflict = existingClients.find(
+    (client) => client.priority === form.priority && client.id !== form.id,
+  );
 
   const save = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -211,8 +234,17 @@ export const DownloadClientModal: React.FC<DownloadClientModalProps> = ({
         <FieldRow label="Enable">
           <Checkbox checked={form.enable} onChange={(value) => setForm({ ...form, enable: value })} />
         </FieldRow>
-        <FieldRow label="Priority">
+        <FieldRow
+          label="Priority"
+          helpText="Lower numbers are preferred. New clients default to the next free priority."
+        >
           <NumberInput value={form.priority} onChange={(value) => setForm({ ...form, priority: value })} />
+          {priorityConflict ? (
+            <p className="text-xs text-amber-200/90 bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2 mt-2">
+              Priority {form.priority} is already used by "{priorityConflict.name}". Prefer a unique value so
+              clients are ordered predictably.
+            </p>
+          ) : null}
         </FieldRow>
         <FieldRow
           label="Base URL"

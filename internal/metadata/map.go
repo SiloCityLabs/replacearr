@@ -63,29 +63,81 @@ type skyHookTimeOfDay struct {
 	Minutes int `json:"minutes"`
 }
 
-// radarrMovie matches api.radarr.video PascalCase (and camelCase) JSON.
+// radarrMovie matches api.radarr.video PascalCase JSON.
 type radarrMovie struct {
-	TmdbID          int            `json:"TmdbId"`
-	ImdbID          string         `json:"ImdbId"`
-	Title           string         `json:"Title"`
-	OriginalTitle   string         `json:"OriginalTitle"`
-	Overview        string         `json:"Overview"`
-	TitleSlug       string         `json:"TitleSlug"`
-	Runtime         *int           `json:"Runtime"`
-	Year            int            `json:"Year"`
-	Studio          string         `json:"Studio"`
-	Status          string         `json:"Status"`
-	Website         string         `json:"Homepage"`
-	InCinema        *time.Time     `json:"InCinema"`
-	PhysicalRelease *time.Time     `json:"PhysicalRelease"`
-	DigitalRelease  *time.Time     `json:"DigitalRelease"`
-	Genres          []string       `json:"Genres"`
-	Images          []radarrImage  `json:"Images"`
+	TmdbID             int                     `json:"TmdbId"`
+	ImdbID             string                  `json:"ImdbId"`
+	Title              string                  `json:"Title"`
+	OriginalTitle      string                  `json:"OriginalTitle"`
+	OriginalLanguage   string                  `json:"OriginalLanguage"`
+	Overview           string                  `json:"Overview"`
+	TitleSlug          string                  `json:"TitleSlug"`
+	Runtime            *int                    `json:"Runtime"`
+	Year               int                     `json:"Year"`
+	Studio             string                  `json:"Studio"`
+	Status             string                  `json:"Status"`
+	Website            string                  `json:"Homepage"`
+	YouTubeTrailerID   string                  `json:"YoutubeTrailerId"`
+	InCinema           *time.Time              `json:"InCinema"`
+	PhysicalRelease    *time.Time              `json:"PhysicalRelease"`
+	DigitalRelease     *time.Time              `json:"DigitalRelease"`
+	Genres             []string                `json:"Genres"`
+	Images             []radarrImage           `json:"Images"`
+	Certifications     []radarrCertification   `json:"Certifications"`
+	Collection         *radarrCollection       `json:"Collection"`
+	MovieRatings       *radarrMovieRatings     `json:"MovieRatings"`
+	Credits            *radarrCredits          `json:"Credits"`
+	AlternativeTitles  []radarrAltTitle        `json:"AlternativeTitles"`
 }
 
 type radarrImage struct {
 	CoverType string `json:"CoverType"`
 	URL       string `json:"Url"`
+}
+
+type radarrCertification struct {
+	Country string `json:"Country"`
+	Certification string `json:"Certification"`
+}
+
+type radarrCollection struct {
+	TmdbID int    `json:"TmdbId"`
+	Name   string `json:"Name"`
+}
+
+type radarrRating struct {
+	Count int     `json:"Count"`
+	Value float64 `json:"Value"`
+	Type  string  `json:"Type"`
+}
+
+type radarrMovieRatings struct {
+	Tmdb           *radarrRating `json:"Tmdb"`
+	Imdb           *radarrRating `json:"Imdb"`
+	Metacritic     *radarrRating `json:"Metacritic"`
+	RottenTomatoes *radarrRating `json:"RottenTomatoes"`
+	Trakt          *radarrRating `json:"Trakt"`
+}
+
+type radarrAltTitle struct {
+	Title    string `json:"Title"`
+	Type     string `json:"Type"`
+	Language string `json:"Language"`
+}
+
+type radarrCredits struct {
+	Cast []radarrPerson `json:"Cast"`
+	Crew []radarrPerson `json:"Crew"`
+}
+
+type radarrPerson struct {
+	Name       string        `json:"Name"`
+	Order      int           `json:"Order"`
+	Character  string        `json:"Character"`
+	Job        string        `json:"Job"`
+	Department string        `json:"Department"`
+	TmdbID     int           `json:"TmdbId"`
+	Images     []radarrImage `json:"Images"`
 }
 
 func mapSeries(show skyHookShow) domain.Series {
@@ -153,6 +205,7 @@ func mapMovie(m radarrMovie) domain.Movie {
 	out := domain.Movie{
 		Title:               m.Title,
 		OriginalTitle:       m.OriginalTitle,
+		OriginalLanguage:    strings.ToLower(strings.TrimSpace(m.OriginalLanguage)),
 		SortTitle:           strings.ToLower(m.Title),
 		CleanTitle:          strings.ToLower(m.Title),
 		Status:              status,
@@ -164,11 +217,22 @@ func mapMovie(m radarrMovie) domain.Movie {
 		TmdbID:              m.TmdbID,
 		TitleSlug:           m.TitleSlug,
 		Studio:              m.Studio,
+		YouTubeTrailerID:    m.YouTubeTrailerID,
+		Certification:       pickCertification(m.Certifications),
 		Monitored:           true,
 		MinimumAvailability: "released",
 		IsAvailable:         true,
 		Genres:              append([]string(nil), m.Genres...),
 		Images:              mapRadarrImages(m.Images),
+		Ratings:             mapMovieRatings(m.MovieRatings),
+		Credits:             mapMovieCredits(m.Credits),
+		AlternateTitles:     mapMovieAltTitles(m.AlternativeTitles),
+	}
+	if m.Collection != nil && (m.Collection.TmdbID > 0 || m.Collection.Name != "") {
+		out.Collection = &domain.MovieCollection{
+			TmdbID: m.Collection.TmdbID,
+			Name:   m.Collection.Name,
+		}
 	}
 	if m.InCinema != nil {
 		out.InCinemas = m.InCinema.UTC().Format(time.RFC3339)
@@ -184,6 +248,104 @@ func mapMovie(m radarrMovie) domain.Movie {
 	}
 	if out.FolderName == "" {
 		out.FolderName = out.Title
+	}
+	return out
+}
+
+func pickCertification(certs []radarrCertification) string {
+	if len(certs) == 0 {
+		return ""
+	}
+	prefer := []string{"US", "GB", "CA", "AU"}
+	for _, country := range prefer {
+		for _, c := range certs {
+			if strings.EqualFold(c.Country, country) && strings.TrimSpace(c.Certification) != "" {
+				return strings.TrimSpace(c.Certification)
+			}
+		}
+	}
+	for _, c := range certs {
+		if strings.TrimSpace(c.Certification) != "" {
+			return strings.TrimSpace(c.Certification)
+		}
+	}
+	return ""
+}
+
+func mapRating(r *radarrRating) *domain.RatingValue {
+	if r == nil {
+		return nil
+	}
+	return &domain.RatingValue{Votes: r.Count, Value: r.Value, Type: r.Type}
+}
+
+func mapMovieRatings(r *radarrMovieRatings) domain.MovieRatings {
+	if r == nil {
+		return domain.MovieRatings{}
+	}
+	return domain.MovieRatings{
+		Tmdb:           mapRating(r.Tmdb),
+		Imdb:           mapRating(r.Imdb),
+		RottenTomatoes: mapRating(r.RottenTomatoes),
+		Metacritic:     mapRating(r.Metacritic),
+		Trakt:          mapRating(r.Trakt),
+	}
+}
+
+func mapMovieAltTitles(alts []radarrAltTitle) []domain.MovieAlternateTitle {
+	if len(alts) == 0 {
+		return []domain.MovieAlternateTitle{}
+	}
+	out := make([]domain.MovieAlternateTitle, 0, len(alts))
+	seen := map[string]struct{}{}
+	for _, a := range alts {
+		title := strings.TrimSpace(a.Title)
+		if title == "" {
+			continue
+		}
+		key := strings.ToLower(title) + "|" + strings.ToLower(a.Language)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, domain.MovieAlternateTitle{
+			Title:    title,
+			Type:     a.Type,
+			Language: a.Language,
+		})
+	}
+	return out
+}
+
+func mapMovieCredits(c *radarrCredits) domain.MovieCredits {
+	if c == nil {
+		return domain.MovieCredits{Cast: []domain.MoviePersonCredit{}, Crew: []domain.MoviePersonCredit{}}
+	}
+	return domain.MovieCredits{
+		Cast: mapMoviePeople(c.Cast),
+		Crew: mapMoviePeople(c.Crew),
+	}
+}
+
+func mapMoviePeople(people []radarrPerson) []domain.MoviePersonCredit {
+	if len(people) == 0 {
+		return []domain.MoviePersonCredit{}
+	}
+	out := make([]domain.MoviePersonCredit, 0, len(people))
+	for _, p := range people {
+		name := strings.TrimSpace(p.Name)
+		if name == "" {
+			continue
+		}
+		out = append(out, domain.MoviePersonCredit{
+			Name:       name,
+			Order:      p.Order,
+			Character:  p.Character,
+			Job:        p.Job,
+			Department: p.Department,
+			TmdbID:     p.TmdbID,
+			Images:     mapRadarrImages(p.Images),
+		})
 	}
 	return out
 }

@@ -1009,13 +1009,16 @@ func (s *Store) ReplaceEpisodesForSeries(seriesID int64, eps []domain.Episode) e
 
 // --- Movies ---
 
+const movieSelectCols = `
+		id, title, original_title, sort_title, status, overview, in_cinemas, physical_release, digital_release,
+		images_json, website, year, has_file, movie_file_id, path, quality_profile_id, monitored,
+		minimum_availability, is_available, folder_name, runtime, clean_title, imdb_id, tmdb_id,
+		title_slug, root_folder_path, studio, genres_json, tags_json, size_on_disk, added,
+		original_language, certification, youtube_trailer_id, collection_json, ratings_json,
+		credits_json, alternate_titles_json`
+
 func (s *Store) ListMovies() ([]domain.Movie, error) {
-	rows, err := s.db.Query(`
-		SELECT id, title, original_title, sort_title, status, overview, in_cinemas, physical_release, digital_release,
-		       images_json, website, year, has_file, movie_file_id, path, quality_profile_id, monitored,
-		       minimum_availability, is_available, folder_name, runtime, clean_title, imdb_id, tmdb_id,
-		       title_slug, root_folder_path, studio, genres_json, tags_json, size_on_disk, added
-		FROM movies ORDER BY id ASC`)
+	rows, err := s.db.Query(`SELECT ` + movieSelectCols + ` FROM movies ORDER BY id ASC`)
 	if err != nil {
 		return nil, err
 	}
@@ -1032,12 +1035,7 @@ func (s *Store) ListMovies() ([]domain.Movie, error) {
 }
 
 func (s *Store) GetMovieByID(id int64) (*domain.Movie, error) {
-	rows, err := s.db.Query(`
-		SELECT id, title, original_title, sort_title, status, overview, in_cinemas, physical_release, digital_release,
-		       images_json, website, year, has_file, movie_file_id, path, quality_profile_id, monitored,
-		       minimum_availability, is_available, folder_name, runtime, clean_title, imdb_id, tmdb_id,
-		       title_slug, root_folder_path, studio, genres_json, tags_json, size_on_disk, added
-		FROM movies WHERE id = ?`, id)
+	rows, err := s.db.Query(`SELECT `+movieSelectCols+` FROM movies WHERE id = ?`, id)
 	if err != nil {
 		return nil, err
 	}
@@ -1056,6 +1054,7 @@ func scanMovie(rows *sql.Rows) (domain.Movie, error) {
 	var mv domain.Movie
 	var hasFile, mon, isAvail int
 	var imagesJSON, genresJSON, tagsJSON string
+	var collectionJSON, ratingsJSON, creditsJSON, altsJSON string
 	err := rows.Scan(
 		&mv.ID, &mv.Title, &mv.OriginalTitle, &mv.SortTitle, &mv.Status, &mv.Overview,
 		&mv.InCinemas, &mv.PhysicalRelease, &mv.DigitalRelease, &imagesJSON, &mv.Website,
@@ -1063,6 +1062,8 @@ func scanMovie(rows *sql.Rows) (domain.Movie, error) {
 		&mv.MinimumAvailability, &isAvail, &mv.FolderName, &mv.Runtime, &mv.CleanTitle,
 		&mv.ImdbID, &mv.TmdbID, &mv.TitleSlug, &mv.RootFolderPath, &mv.Studio,
 		&genresJSON, &tagsJSON, &mv.SizeOnDisk, &mv.Added,
+		&mv.OriginalLanguage, &mv.Certification, &mv.YouTubeTrailerID,
+		&collectionJSON, &ratingsJSON, &creditsJSON, &altsJSON,
 	)
 	if err != nil {
 		return mv, err
@@ -1073,6 +1074,15 @@ func scanMovie(rows *sql.Rows) (domain.Movie, error) {
 	_ = json.Unmarshal([]byte(imagesJSON), &mv.Images)
 	_ = json.Unmarshal([]byte(genresJSON), &mv.Genres)
 	_ = json.Unmarshal([]byte(tagsJSON), &mv.Tags)
+	_ = json.Unmarshal([]byte(ratingsJSON), &mv.Ratings)
+	_ = json.Unmarshal([]byte(creditsJSON), &mv.Credits)
+	_ = json.Unmarshal([]byte(altsJSON), &mv.AlternateTitles)
+	if strings.TrimSpace(collectionJSON) != "" && collectionJSON != "null" {
+		var col domain.MovieCollection
+		if err := json.Unmarshal([]byte(collectionJSON), &col); err == nil && (col.TmdbID > 0 || col.Name != "") {
+			mv.Collection = &col
+		}
+	}
 	if mv.Images == nil {
 		mv.Images = []domain.MediaImage{}
 	}
@@ -1082,11 +1092,34 @@ func scanMovie(rows *sql.Rows) (domain.Movie, error) {
 	if mv.Tags == nil {
 		mv.Tags = []int64{}
 	}
+	if mv.AlternateTitles == nil {
+		mv.AlternateTitles = []domain.MovieAlternateTitle{}
+	}
+	if mv.Credits.Cast == nil {
+		mv.Credits.Cast = []domain.MoviePersonCredit{}
+	}
+	if mv.Credits.Crew == nil {
+		mv.Credits.Crew = []domain.MoviePersonCredit{}
+	}
 	mv.Statistics = map[string]any{
 		"movieFileCount": boolToInt(mv.HasFile),
 		"sizeOnDisk":     mv.SizeOnDisk,
 	}
 	return mv, nil
+}
+
+func marshalMovieDetailJSON(mv domain.Movie) (images, genres, tags, collection, ratings, credits, alts string) {
+	imgB, _ := json.Marshal(mv.Images)
+	genB, _ := json.Marshal(mv.Genres)
+	tagB, _ := json.Marshal(mv.Tags)
+	ratB, _ := json.Marshal(mv.Ratings)
+	credB, _ := json.Marshal(mv.Credits)
+	altB, _ := json.Marshal(mv.AlternateTitles)
+	colB := []byte("")
+	if mv.Collection != nil {
+		colB, _ = json.Marshal(mv.Collection)
+	}
+	return string(imgB), string(genB), string(tagB), string(colB), string(ratB), string(credB), string(altB)
 }
 
 func (s *Store) CreateMovie(mv domain.Movie) (*domain.Movie, error) {
@@ -1128,20 +1161,21 @@ func (s *Store) CreateMovie(mv domain.Movie) (*domain.Movie, error) {
 	if mv.QualityProfileID == 0 {
 		mv.QualityProfileID = 1
 	}
-	imgB, _ := json.Marshal(mv.Images)
-	genB, _ := json.Marshal(mv.Genres)
-	tagB, _ := json.Marshal(mv.Tags)
+	imgB, genB, tagB, colB, ratB, credB, altB := marshalMovieDetailJSON(mv)
 	res, err := s.db.Exec(`
 		INSERT INTO movies (
 			title, original_title, sort_title, status, overview, in_cinemas, physical_release, digital_release,
 			images_json, website, year, has_file, movie_file_id, path, quality_profile_id, monitored,
 			minimum_availability, is_available, folder_name, runtime, clean_title, imdb_id, tmdb_id,
-			title_slug, root_folder_path, studio, genres_json, tags_json, size_on_disk
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			title_slug, root_folder_path, studio, genres_json, tags_json, size_on_disk,
+			original_language, certification, youtube_trailer_id, collection_json, ratings_json,
+			credits_json, alternate_titles_json
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		mv.Title, mv.OriginalTitle, mv.SortTitle, mv.Status, mv.Overview, mv.InCinemas, mv.PhysicalRelease, mv.DigitalRelease,
-		string(imgB), mv.Website, mv.Year, boolToInt(mv.HasFile), mv.MovieFileID, mv.Path, mv.QualityProfileID,
+		imgB, mv.Website, mv.Year, boolToInt(mv.HasFile), mv.MovieFileID, mv.Path, mv.QualityProfileID,
 		boolToInt(mv.Monitored), mv.MinimumAvailability, mv.FolderName, mv.Runtime, mv.CleanTitle,
-		mv.ImdbID, mv.TmdbID, mv.TitleSlug, mv.RootFolderPath, mv.Studio, string(genB), string(tagB), mv.SizeOnDisk,
+		mv.ImdbID, mv.TmdbID, mv.TitleSlug, mv.RootFolderPath, mv.Studio, genB, tagB, mv.SizeOnDisk,
+		mv.OriginalLanguage, mv.Certification, mv.YouTubeTrailerID, colB, ratB, credB, altB,
 	)
 	if err != nil {
 		return nil, err
@@ -1151,18 +1185,26 @@ func (s *Store) CreateMovie(mv domain.Movie) (*domain.Movie, error) {
 }
 
 func (s *Store) UpdateMovie(mv domain.Movie) (*domain.Movie, error) {
-	imgB, _ := json.Marshal(mv.Images)
-	genB, _ := json.Marshal(mv.Genres)
-	tagB, _ := json.Marshal(mv.Tags)
+	imgB, genB, tagB, colB, ratB, credB, altB := marshalMovieDetailJSON(mv)
 	_, err := s.db.Exec(`
 		UPDATE movies SET
-			title = ?, sort_title = ?, status = ?, overview = ?, images_json = ?, year = ?,
+			title = ?, original_title = ?, sort_title = ?, status = ?, overview = ?,
+			in_cinemas = ?, physical_release = ?, digital_release = ?,
+			images_json = ?, website = ?, year = ?,
 			has_file = ?, path = ?, quality_profile_id = ?, monitored = ?, minimum_availability = ?,
-			runtime = ?, studio = ?, genres_json = ?, tags_json = ?
+			runtime = ?, studio = ?, genres_json = ?, tags_json = ?,
+			original_language = ?, certification = ?, youtube_trailer_id = ?,
+			collection_json = ?, ratings_json = ?, credits_json = ?, alternate_titles_json = ?,
+			root_folder_path = ?, folder_name = ?
 		WHERE id = ?`,
-		mv.Title, mv.SortTitle, mv.Status, mv.Overview, string(imgB), mv.Year,
+		mv.Title, mv.OriginalTitle, mv.SortTitle, mv.Status, mv.Overview,
+		mv.InCinemas, mv.PhysicalRelease, mv.DigitalRelease,
+		imgB, mv.Website, mv.Year,
 		boolToInt(mv.HasFile), mv.Path, mv.QualityProfileID, boolToInt(mv.Monitored),
-		mv.MinimumAvailability, mv.Runtime, mv.Studio, string(genB), string(tagB), mv.ID,
+		mv.MinimumAvailability, mv.Runtime, mv.Studio, genB, tagB,
+		mv.OriginalLanguage, mv.Certification, mv.YouTubeTrailerID,
+		colB, ratB, credB, altB,
+		mv.RootFolderPath, mv.FolderName, mv.ID,
 	)
 	if err != nil {
 		return nil, err

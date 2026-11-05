@@ -59,7 +59,8 @@ RUN apk add --no-cache \
     ca-certificates \
     tzdata \
     su-exec \
-    curl && \
+    curl \
+    ffmpeg && \
     mkdir -p \
       /config \
       /config/plugins \

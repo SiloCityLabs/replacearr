@@ -283,6 +283,10 @@ export interface MediaFileInfo {
   size: number;
   sceneName: string;
   releaseGroup: string;
+  quality?: string;
+  resolution?: number;
+  videoCodec?: string;
+  audioCodec?: string;
   dateAdded: string;
   seriesId?: number;
   episodeId?: number;
@@ -339,10 +343,64 @@ export interface SubtitlesConfig {
   openSubtitles: OpenSubtitlesConfig;
 }
 
+export interface RatingValue {
+  votes: number;
+  value: number;
+  type?: string;
+}
+
+export interface MovieRatings {
+  tmdb?: RatingValue;
+  imdb?: RatingValue;
+  rottenTomatoes?: RatingValue;
+  metacritic?: RatingValue;
+  trakt?: RatingValue;
+}
+
+export interface MovieCollection {
+  tmdbId: number;
+  name: string;
+}
+
+export interface MovieAlternateTitle {
+  title: string;
+  type?: string;
+  language?: string;
+}
+
+export interface MoviePersonCredit {
+  name: string;
+  order: number;
+  character?: string;
+  job?: string;
+  department?: string;
+  tmdbId: number;
+  images: MediaImage[];
+}
+
+export interface MovieCredits {
+  cast: MoviePersonCredit[];
+  crew: MoviePersonCredit[];
+}
+
+export interface MovieExtraFile {
+  relativePath: string;
+  path: string;
+  extension: string;
+  type: string;
+  size: number;
+}
+
+export interface MovieFilesResponse {
+  media: MediaFileInfo[];
+  extra: MovieExtraFile[];
+}
+
 export interface Movie {
   id: number;
   title: string;
   originalTitle: string;
+  originalLanguage: string;
   sortTitle: string;
   status: string;
   overview: string;
@@ -367,8 +425,14 @@ export interface Movie {
   titleSlug: string;
   rootFolderPath: string;
   studio: string;
+  certification: string;
+  youTubeTrailerId: string;
   genres: string[];
   tags: number[];
+  collection?: MovieCollection | null;
+  ratings: MovieRatings;
+  credits: MovieCredits;
+  alternateTitles: MovieAlternateTitle[];
   added: string;
   sizeOnDisk: number;
   statistics?: Record<string, unknown>;

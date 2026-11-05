@@ -205,6 +205,10 @@ type EpisodeFile struct {
 	Size         int64     `json:"size"`
 	SceneName    string    `json:"sceneName"`
 	ReleaseGroup string    `json:"releaseGroup"`
+	Quality      string    `json:"quality"`
+	Resolution   int       `json:"resolution"`
+	VideoCodec   string    `json:"videoCodec"`
+	AudioCodec   string    `json:"audioCodec"`
 	DateAdded    time.Time `json:"dateAdded"`
 }
 
@@ -217,6 +221,10 @@ type MovieFile struct {
 	Size         int64     `json:"size"`
 	SceneName    string    `json:"sceneName"`
 	ReleaseGroup string    `json:"releaseGroup"`
+	Quality      string    `json:"quality"`
+	Resolution   int       `json:"resolution"`
+	VideoCodec   string    `json:"videoCodec"`
+	AudioCodec   string    `json:"audioCodec"`
 	DateAdded    time.Time `json:"dateAdded"`
 }
 
@@ -262,41 +270,103 @@ type SubtitleCandidate struct {
 	Score           int    `json:"score"`
 }
 
+// RatingValue is a single ratings provider score.
+type RatingValue struct {
+	Votes int     `json:"votes"`
+	Value float64 `json:"value"`
+	Type  string  `json:"type,omitempty"`
+}
+
+// MovieRatings holds IMDb / TMDB / RT / Metacritic / Trakt scores.
+type MovieRatings struct {
+	Tmdb           *RatingValue `json:"tmdb,omitempty"`
+	Imdb           *RatingValue `json:"imdb,omitempty"`
+	RottenTomatoes *RatingValue `json:"rottenTomatoes,omitempty"`
+	Metacritic     *RatingValue `json:"metacritic,omitempty"`
+	Trakt          *RatingValue `json:"trakt,omitempty"`
+}
+
+// MovieCollection is a TMDB franchise/collection membership.
+type MovieCollection struct {
+	TmdbID int    `json:"tmdbId"`
+	Name   string `json:"name"`
+}
+
+// MovieAlternateTitle is an alternate / translated title.
+type MovieAlternateTitle struct {
+	Title    string `json:"title"`
+	Type     string `json:"type,omitempty"`
+	Language string `json:"language,omitempty"`
+}
+
+// MoviePersonCredit is a cast or crew member.
+type MoviePersonCredit struct {
+	Name       string       `json:"name"`
+	Order      int          `json:"order"`
+	Character  string       `json:"character,omitempty"`
+	Job        string       `json:"job,omitempty"`
+	Department string       `json:"department,omitempty"`
+	TmdbID     int          `json:"tmdbId"`
+	Images     []MediaImage `json:"images"`
+}
+
+// MovieCredits groups cast and crew for a movie.
+type MovieCredits struct {
+	Cast []MoviePersonCredit `json:"cast"`
+	Crew []MoviePersonCredit `json:"crew"`
+}
+
+// MovieExtraFile is a non-video file next to the movie (subtitle, image, nfo, …).
+type MovieExtraFile struct {
+	RelativePath string `json:"relativePath"`
+	Path         string `json:"path"`
+	Extension    string `json:"extension"`
+	Type         string `json:"type"` // subtitle | image | nfo | other
+	Size         int64  `json:"size"`
+}
+
 // Radarr Movie Domain Models
 
 type Movie struct {
-	ID                  int64          `json:"id"`
-	Title               string         `json:"title"`
-	OriginalTitle       string         `json:"originalTitle"`
-	SortTitle           string         `json:"sortTitle"`
-	Status              string         `json:"status"` // released, inCinemas, announced
-	Overview            string         `json:"overview"`
-	InCinemas           string         `json:"inCinemas,omitempty"`
-	PhysicalRelease     string         `json:"physicalRelease,omitempty"`
-	DigitalRelease      string         `json:"digitalRelease,omitempty"`
-	Images              []MediaImage   `json:"images"`
-	Website             string         `json:"website"`
-	Year                int            `json:"year"`
-	HasFile             bool           `json:"hasFile"`
-	MovieFileID         int64          `json:"movieFileId"`
-	Path                string         `json:"path"`
-	QualityProfileID    int64          `json:"qualityProfileId"`
-	Monitored           bool           `json:"monitored"`
-	MinimumAvailability string         `json:"minimumAvailability"` // announced, inCinemas, released
-	IsAvailable         bool           `json:"isAvailable"`
-	FolderName          string         `json:"folderName"`
-	Runtime             int            `json:"runtime"`
-	CleanTitle          string         `json:"cleanTitle"`
-	ImdbID              string         `json:"imdbId"`
-	TmdbID              int            `json:"tmdbId"`
-	TitleSlug           string         `json:"titleSlug"`
-	RootFolderPath      string         `json:"rootFolderPath"`
-	Studio              string         `json:"studio"`
-	Genres              []string       `json:"genres"`
-	Tags                []int64        `json:"tags"`
-	Added               time.Time      `json:"added"`
-	SizeOnDisk          int64          `json:"sizeOnDisk"`
-	Statistics          map[string]any `json:"statistics,omitempty"`
+	ID                  int64                  `json:"id"`
+	Title               string                 `json:"title"`
+	OriginalTitle       string                 `json:"originalTitle"`
+	OriginalLanguage    string                 `json:"originalLanguage"`
+	SortTitle           string                 `json:"sortTitle"`
+	Status              string                 `json:"status"` // released, inCinemas, announced
+	Overview            string                 `json:"overview"`
+	InCinemas           string                 `json:"inCinemas,omitempty"`
+	PhysicalRelease     string                 `json:"physicalRelease,omitempty"`
+	DigitalRelease      string                 `json:"digitalRelease,omitempty"`
+	Images              []MediaImage           `json:"images"`
+	Website             string                 `json:"website"`
+	Year                int                    `json:"year"`
+	HasFile             bool                   `json:"hasFile"`
+	MovieFileID         int64                  `json:"movieFileId"`
+	Path                string                 `json:"path"`
+	QualityProfileID    int64                  `json:"qualityProfileId"`
+	Monitored           bool                   `json:"monitored"`
+	MinimumAvailability string                 `json:"minimumAvailability"` // announced, inCinemas, released
+	IsAvailable         bool                   `json:"isAvailable"`
+	FolderName          string                 `json:"folderName"`
+	Runtime             int                    `json:"runtime"`
+	CleanTitle          string                 `json:"cleanTitle"`
+	ImdbID              string                 `json:"imdbId"`
+	TmdbID              int                    `json:"tmdbId"`
+	TitleSlug           string                 `json:"titleSlug"`
+	RootFolderPath      string                 `json:"rootFolderPath"`
+	Studio              string                 `json:"studio"`
+	Certification       string                 `json:"certification"`
+	YouTubeTrailerID    string                 `json:"youTubeTrailerId"`
+	Genres              []string               `json:"genres"`
+	Tags                []int64                `json:"tags"`
+	Collection          *MovieCollection       `json:"collection,omitempty"`
+	Ratings             MovieRatings           `json:"ratings"`
+	Credits             MovieCredits           `json:"credits"`
+	AlternateTitles     []MovieAlternateTitle  `json:"alternateTitles"`
+	Added               time.Time              `json:"added"`
+	SizeOnDisk          int64                  `json:"sizeOnDisk"`
+	Statistics          map[string]any         `json:"statistics,omitempty"`
 }
 
 // Music (Lidarr-like) Domain Models

@@ -107,7 +107,7 @@ export const DownloadClientsPage: React.FC<DownloadClientsPageProps> = ({
           <button
             type="button"
             className={primaryButtonClass}
-            onClick={() => setForm(blankDownloadClientForm())}
+            onClick={() => setForm(blankDownloadClientForm(clients))}
           >
             Add Download Client
           </button>
@@ -239,7 +239,10 @@ export const DownloadClientsPage: React.FC<DownloadClientsPageProps> = ({
           />
         </FieldRow>
         {showAdvanced ? (
-          <FieldRow label="Download Client Working Folders">
+          <FieldRow
+            label="Download Client Working Folders"
+            helpText="Pipe-separated folder name prefixes to skip while importing (default _UNPACK_|_FAILED_). Clients like SABnzbd create these temp folders while unpacking or after a failed job — ignoring them avoids importing incomplete downloads."
+          >
             <TextInput
               value={draft.downloadClientOptions.downloadClientWorkingFolders}
               onChange={(value) => patchOptions('downloadClientWorkingFolders', value)}
@@ -258,6 +261,7 @@ export const DownloadClientsPage: React.FC<DownloadClientsPageProps> = ({
       {form ? (
         <DownloadClientModal
           initial={form}
+          existingClients={clients}
           onClose={() => setForm(null)}
           onSaved={onRefresh}
           onNotify={onNotify}

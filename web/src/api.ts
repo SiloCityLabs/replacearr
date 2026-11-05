@@ -29,6 +29,7 @@ import type {
   LogEntry,
   MediaStatistics,
   Movie,
+  MovieFilesResponse,
   OverviewResponse,
   QualityDefinition,
   QualityProfile,
@@ -196,6 +197,10 @@ export const api = {
     return unwrapArray<Movie>(res);
   },
 
+  async getMovie(id: number): Promise<Movie> {
+    return request<Movie>(`/api/v1/movies/${id}`);
+  },
+
   async lookupMovies(term: string): Promise<Movie[]> {
     const res = await request<unknown>(`/api/v1/movies/lookup?term=${encodeURIComponent(term)}`);
     return unwrapArray<Movie>(res);
@@ -206,6 +211,21 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(payload),
     });
+  },
+
+  async updateMovie(id: number, payload: Partial<Movie>): Promise<Movie> {
+    return request<Movie>(`/api/v1/movies/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async refreshMovie(id: number): Promise<Movie> {
+    return request<Movie>(`/api/v1/movies/${id}/refresh`, { method: 'POST' });
+  },
+
+  async getMovieFiles(id: number): Promise<MovieFilesResponse> {
+    return request<MovieFilesResponse>(`/api/v1/movies/${id}/files`);
   },
 
   async deleteMovie(id: number): Promise<void> {

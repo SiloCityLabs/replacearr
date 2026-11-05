@@ -9,7 +9,7 @@ import {
   X,
   Sparkles,
 } from 'lucide-react';
-import type { Movie, QualityProfile, ReleaseSearchRequest, RootFolder } from '../types';
+import type { Movie, QualityProfile, ReleaseSearchRequest, RootFolder, Tag } from '../types';
 import { api, formatBytes, truncateText } from '../api';
 import { useRovingFocus } from '../htpc/useRovingFocus';
 import { ManualTorrentForm, type ManualTorrentTarget } from './ManualTorrentForm';
@@ -55,6 +55,14 @@ export const MoviesTab: React.FC<MoviesTabProps> = ({
   const [minAvailability, setMinAvailability] = useState('released');
   const [manualTarget, setManualTarget] = useState<ManualTorrentTarget | null>(null);
   const [activeMovie, setActiveMovie] = useState<Movie | null>(null);
+  const [tags, setTags] = useState<Tag[]>([]);
+
+  useEffect(() => {
+    void api
+      .getTags()
+      .then(setTags)
+      .catch(() => setTags([]));
+  }, []);
 
   const filteredMovies = movies.filter(
     (m) =>
@@ -154,11 +162,17 @@ export const MoviesTab: React.FC<MoviesTabProps> = ({
         <MovieDetailPanel
           movie={activeMovie}
           posterUrl={getPosterUrl(activeMovie)}
+          profiles={profiles}
+          tags={tags}
           onBack={() => setActiveMovie(null)}
           onDelete={() => void handleDeleteMovie(activeMovie)}
           onSearchReleases={onSearchReleases}
           onManualTorrent={setManualTarget}
           onNotify={onNotify}
+          onUpdated={(m) => {
+            setActiveMovie(m);
+            void onRefresh();
+          }}
         />
         {manualTarget && (
           <ManualTorrentForm

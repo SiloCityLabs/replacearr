@@ -399,8 +399,12 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	// Movies (Radarr)
 	mux.HandleFunc("GET /api/v1/movies", s.authSvc.RequirePermission(domain.PermMoviesRead, s.handleListMovies))
 	mux.HandleFunc("POST /api/v1/movies", s.authSvc.RequirePermission(domain.PermMoviesWrite, s.handleCreateMovie))
-	mux.HandleFunc("DELETE /api/v1/movies/{id}", s.authSvc.RequirePermission(domain.PermMoviesDelete, s.handleDeleteMovie))
 	mux.HandleFunc("GET /api/v1/movies/lookup", s.authSvc.RequirePermission(domain.PermMoviesRead, s.handleLookupMovies))
+	mux.HandleFunc("GET /api/v1/movies/{id}", s.authSvc.RequirePermission(domain.PermMoviesRead, s.handleGetMovie))
+	mux.HandleFunc("PUT /api/v1/movies/{id}", s.authSvc.RequirePermission(domain.PermMoviesWrite, s.handleUpdateMovie))
+	mux.HandleFunc("DELETE /api/v1/movies/{id}", s.authSvc.RequirePermission(domain.PermMoviesDelete, s.handleDeleteMovie))
+	mux.HandleFunc("POST /api/v1/movies/{id}/refresh", s.authSvc.RequirePermission(domain.PermMoviesWrite, s.handleRefreshMovieMetadata))
+	mux.HandleFunc("GET /api/v1/movies/{id}/files", s.authSvc.RequirePermission(domain.PermMoviesRead, s.handleMovieFiles))
 	mux.HandleFunc("GET /api/v1/movies/{id}/subtitles", s.authSvc.RequirePermission(domain.PermMoviesRead, s.handleMovieSubtitles))
 	mux.HandleFunc("GET /api/v1/movies/{id}/subtitles/search", s.authSvc.RequirePermission(domain.PermMoviesRead, s.handleSearchMovieSubtitles))
 	mux.HandleFunc("POST /api/v1/movies/{id}/subtitles/download", s.authSvc.RequirePermission(domain.PermMoviesWrite, s.handleDownloadMovieSubtitle))
@@ -638,6 +642,14 @@ func (s *Server) handleCreateMovie(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, http.StatusBadRequest, err)
 		return
+	}
+	if req.TmdbID > 0 && s.meta != nil {
+		if meta, err := s.meta.GetMovieByTMDB(r.Context(), req.TmdbID); err == nil {
+			mergeMovieMetadata(&req, meta)
+			if req.Title == "" {
+				req.Title = meta.Title
+			}
+		}
 	}
 	created, err := s.store.CreateMovie(req)
 	if err != nil {

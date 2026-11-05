@@ -363,7 +363,7 @@ export const QueueClientsTab: React.FC<QueueClientsTabProps> = ({
             </button>
             <button
               type="button"
-              onClick={() => setClientForm(blankDownloadClientForm())}
+              onClick={() => setClientForm(blankDownloadClientForm(clients))}
               className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-lg transition"
             >
               <Plus className="w-4 h-4" />
@@ -382,7 +382,7 @@ export const QueueClientsTab: React.FC<QueueClientsTabProps> = ({
                 <li key={`${hit.implementation}:${hit.baseUrl}`}>
                   <button
                     type="button"
-                    onClick={() => setClientForm(discoveredToForm(hit))}
+                    onClick={() => setClientForm(discoveredToForm(hit, clients))}
                     className="w-full text-left px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 hover:border-sky-500/40 transition"
                   >
                     <div className="text-sm font-semibold text-white">
@@ -430,6 +430,9 @@ export const QueueClientsTab: React.FC<QueueClientsTabProps> = ({
                 <div className="mt-3 flex flex-wrap gap-2 text-[11px] text-slate-400">
                   <span className="px-2 py-0.5 rounded bg-slate-900 border border-slate-800">
                     Impl: <strong className="text-slate-200">{dc.implementation}</strong>
+                  </span>
+                  <span className="px-2 py-0.5 rounded bg-slate-900 border border-slate-800">
+                    Priority: <strong className="text-slate-200">{dc.priority}</strong>
                   </span>
                   <span className="px-2 py-0.5 rounded bg-slate-900 border border-slate-800">
                     Category: <strong className="text-slate-200">{dc.category || 'replacearr'}</strong>
@@ -604,6 +607,12 @@ export const QueueClientsTab: React.FC<QueueClientsTabProps> = ({
                 onChange={(e) => setOpts({ ...opts, downloadClientWorkingFolders: e.target.value })}
                 className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white"
               />
+              <p className="text-[11px] text-slate-500 leading-relaxed">
+                Pipe-separated folder name prefixes to skip while importing. Default{' '}
+                <span className="font-mono text-slate-400">_UNPACK_|_FAILED_</span> matches temp
+                folders clients like SABnzbd create while unpacking or after a failed job, so
+                incomplete downloads are not imported.
+              </p>
             </label>
           </div>
 
@@ -691,6 +700,7 @@ export const QueueClientsTab: React.FC<QueueClientsTabProps> = ({
       {clientForm ? (
         <DownloadClientModal
           initial={clientForm}
+          existingClients={clients}
           onClose={() => setClientForm(null)}
           onSaved={onRefresh}
           onNotify={onNotify}

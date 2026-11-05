@@ -18,7 +18,8 @@ RUN apk add --no-cache \
     curl \
     make \
     ca-certificates \
-    tzdata
+    tzdata \
+    ffmpeg
 
 # Install Air into the image PATH (/go/bin is already on PATH in the official Go image).
 RUN go install "github.com/air-verse/air@${AIR_VERSION}"
