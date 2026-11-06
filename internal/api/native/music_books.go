@@ -72,6 +72,21 @@ func (s *Server) syncArtistDiscography(r *http.Request, artist *domain.Artist) {
 
 func (s *Server) handleDeleteArtist(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	deleteFiles := queryFlag(r, "deleteFiles")
+
+	artist, err := s.store.GetArtistByID(id)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, err)
+		return
+	}
+
+	if deleteFiles {
+		if err := s.store.DeleteArtistDiskFiles(artist, s.recycleBinPath()); err != nil {
+			writeErr(w, http.StatusInternalServerError, err)
+			return
+		}
+	}
+
 	if err := s.store.DeleteArtist(id); err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
@@ -295,6 +310,20 @@ func (s *Server) handleCreateBook(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleDeleteBook(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	deleteFiles := queryFlag(r, "deleteFiles")
+
+	if _, err := s.store.GetBookByID(id); err != nil {
+		writeErr(w, http.StatusNotFound, err)
+		return
+	}
+
+	if deleteFiles {
+		if err := s.store.DeleteBookDiskFiles(id, s.recycleBinPath()); err != nil {
+			writeErr(w, http.StatusInternalServerError, err)
+			return
+		}
+	}
+
 	if err := s.store.DeleteBook(id); err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return

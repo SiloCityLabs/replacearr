@@ -21,6 +21,12 @@ import (
 
 const MasterKeyName = "System Master API Key"
 
+// Session / remember-me JWT lifetimes. Cookie MaxAge tracks these.
+const (
+	SessionTokenTTL  = 24 * time.Hour
+	RememberTokenTTL = 30 * 24 * time.Hour
+)
+
 var (
 	ErrInvalidCredentials = errors.New("invalid username or password")
 	ErrInactiveUser       = errors.New("user account is inactive")
@@ -30,10 +36,18 @@ var (
 )
 
 type Claims struct {
-	UserID   int64  `json:"userId"`
-	Username string `json:"username"`
-	Role     string `json:"role"`
+	UserID    int64  `json:"userId"`
+	Username  string `json:"username"`
+	Role      string `json:"role"`
+	SessionID string `json:"sid,omitempty"`
 	jwt.RegisteredClaims
+}
+
+// LoginOptions carries browser metadata for a new auth session.
+type LoginOptions struct {
+	RememberMe bool
+	UserAgent  string
+	IPAddress  string
 }
 
 type Service struct {
@@ -98,8 +112,8 @@ func (s *Service) EnsureBootstrap() error {
 			return fmt.Errorf("create bootstrap admin user: %w", err)
 		}
 
-		rawKey := strings.TrimSpace(s.cfg.DefaultAPIKey)
-		if rawKey == "" && keyFilePath != "" {
+		rawKey := ""
+		if keyFilePath != "" {
 			if b, err := os.ReadFile(keyFilePath); err == nil {
 				candidate := strings.TrimSpace(string(b))
 				if len(candidate) >= 16 {
@@ -176,30 +190,56 @@ func (s *Service) VerifyPassword(hash, plain string) bool {
 	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(plain)) == nil
 }
 
-func (s *Service) Authenticate(username, password string) (*domain.User, string, error) {
+func (s *Service) Authenticate(username, password string, opts LoginOptions) (*domain.User, string, *domain.AuthSession, error) {
 	u, err := s.store.GetUserByUsername(strings.TrimSpace(username))
 	if err != nil {
-		return nil, "", ErrInvalidCredentials
+		return nil, "", nil, ErrInvalidCredentials
 	}
 	if !u.IsActive {
-		return nil, "", ErrInactiveUser
+		return nil, "", nil, ErrInactiveUser
 	}
 	if !s.VerifyPassword(u.PasswordHash, password) {
-		return nil, "", ErrInvalidCredentials
+		return nil, "", nil, ErrInvalidCredentials
 	}
 
 	s.store.TouchUserLogin(u.ID)
 	now := time.Now().UTC()
 	u.LastLoginAt = &now
 
+	ttl := SessionTokenTTL
+	if opts.RememberMe {
+		ttl = RememberTokenTTL
+	}
+
+	sessionID, err := generateRandomHex(16)
+	if err != nil {
+		return nil, "", nil, fmt.Errorf("generate session id: %w", err)
+	}
+
+	sess := &domain.AuthSession{
+		ID:         sessionID,
+		UserID:     u.ID,
+		CreatedAt:  now,
+		LastSeenAt: now,
+		ExpiresAt:  now.Add(ttl),
+		RememberMe: opts.RememberMe,
+		UserAgent:  truncateMeta(opts.UserAgent, 512),
+		IPAddress:  truncateMeta(opts.IPAddress, 64),
+	}
+	if err := s.store.CreateAuthSession(sess); err != nil {
+		return nil, "", nil, err
+	}
+
 	claims := Claims{
-		UserID:   u.ID,
-		Username: u.Username,
-		Role:     u.RoleName,
+		UserID:    u.ID,
+		Username:  u.Username,
+		Role:      u.RoleName,
+		SessionID: sessionID,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Subject:   fmt.Sprintf("%d", u.ID),
+			ID:        sessionID,
 			IssuedAt:  jwt.NewNumericDate(now),
-			ExpiresAt: jwt.NewNumericDate(now.Add(24 * time.Hour)),
+			ExpiresAt: jwt.NewNumericDate(sess.ExpiresAt),
 			Issuer:    "replacearr",
 		},
 	}
@@ -207,16 +247,16 @@ func (s *Service) Authenticate(username, password string) (*domain.User, string,
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	signed, err := token.SignedString([]byte(s.cfg.JWTSecret))
 	if err != nil {
-		return nil, "", fmt.Errorf("sign jwt: %w", err)
+		return nil, "", nil, fmt.Errorf("sign jwt: %w", err)
 	}
 
-	return u, signed, nil
+	return u, signed, sess, nil
 }
 
-func (s *Service) ValidateToken(tokenStr string) (*domain.User, error) {
+func (s *Service) ValidateToken(tokenStr string) (*domain.User, *domain.AuthSession, error) {
 	tokenStr = strings.TrimSpace(tokenStr)
 	if tokenStr == "" {
-		return nil, ErrInvalidToken
+		return nil, nil, ErrInvalidToken
 	}
 
 	claims := &Claims{}
@@ -227,17 +267,83 @@ func (s *Service) ValidateToken(tokenStr string) (*domain.User, error) {
 		return []byte(s.cfg.JWTSecret), nil
 	})
 	if err != nil || !token.Valid || claims.UserID <= 0 {
-		return nil, ErrInvalidToken
+		return nil, nil, ErrInvalidToken
+	}
+
+	var sess *domain.AuthSession
+	sessionID := claims.SessionID
+	if sessionID == "" {
+		sessionID = claims.ID
+	}
+	if sessionID != "" {
+		row, err := s.store.GetAuthSession(sessionID)
+		if err != nil || row.UserID != claims.UserID || row.RevokedAt != nil {
+			return nil, nil, ErrInvalidToken
+		}
+		if time.Now().UTC().After(row.ExpiresAt) {
+			return nil, nil, ErrInvalidToken
+		}
+		sess = row
+		// Throttle last-seen writes to avoid SQLite churn on every request.
+		if time.Since(row.LastSeenAt) > 5*time.Minute {
+			_ = s.store.TouchAuthSession(row.ID, time.Now().UTC())
+			sess.LastSeenAt = time.Now().UTC()
+		}
 	}
 
 	u, err := s.store.GetUserByID(claims.UserID)
 	if err != nil {
-		return nil, ErrInvalidToken
+		return nil, nil, ErrInvalidToken
 	}
 	if !u.IsActive {
-		return nil, ErrInactiveUser
+		return nil, nil, ErrInactiveUser
 	}
-	return u, nil
+	return u, sess, nil
+}
+
+func (s *Service) RevokeSession(sessionID string) error {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return ErrInvalidToken
+	}
+	return s.store.RevokeAuthSession(sessionID, time.Now().UTC())
+}
+
+func (s *Service) RevokeOtherSessions(userID int64, keepSessionID string) (int64, error) {
+	return s.store.RevokeOtherAuthSessions(userID, keepSessionID, time.Now().UTC())
+}
+
+func (s *Service) ListSessions(userID int64) ([]domain.AuthSession, error) {
+	return s.store.ListAuthSessionsForUser(userID)
+}
+
+func (s *Service) SessionIDFromToken(tokenStr string) string {
+	tokenStr = strings.TrimSpace(tokenStr)
+	if tokenStr == "" {
+		return ""
+	}
+	claims := &Claims{}
+	token, err := jwt.ParseWithClaims(tokenStr, claims, func(t *jwt.Token) (any, error) {
+		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
+		}
+		return []byte(s.cfg.JWTSecret), nil
+	})
+	if err != nil || !token.Valid {
+		return ""
+	}
+	if claims.SessionID != "" {
+		return claims.SessionID
+	}
+	return claims.ID
+}
+
+func truncateMeta(v string, max int) string {
+	v = strings.TrimSpace(v)
+	if max > 0 && len(v) > max {
+		return v[:max]
+	}
+	return v
 }
 
 func (s *Service) GenerateAPIKey(name string, userID int64, scope string, permissions []string) (*domain.APIKey, error) {

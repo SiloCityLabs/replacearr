@@ -11,6 +11,7 @@ import (
 	"github.com/replacearr/replacearr/internal/config"
 	"github.com/replacearr/replacearr/internal/db"
 	"github.com/replacearr/replacearr/internal/domain"
+	"github.com/replacearr/replacearr/internal/mediafile"
 )
 
 // SearchFunc matches native SearchReleases signature.
@@ -76,7 +77,22 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, a)
 	case strings.HasPrefix(path, "/artist/") && r.Method == http.MethodDelete:
 		id, _ := strconv.ParseInt(strings.TrimPrefix(path, "/artist/"), 10, 64)
-		_ = h.store.DeleteArtist(id)
+		deleteFiles := queryFlag(r, "deleteFiles")
+		artist, err := h.store.GetArtistByID(id)
+		if err != nil {
+			writeErr(w, http.StatusNotFound, "artist not found")
+			return
+		}
+		if deleteFiles {
+			if err := h.store.DeleteArtistDiskFiles(artist, h.recycleBinPath()); err != nil {
+				writeErr(w, http.StatusInternalServerError, "delete artist files: "+err.Error())
+				return
+			}
+		}
+		if err := h.store.DeleteArtist(id); err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 		w.WriteHeader(http.StatusOK)
 	case path == "/album" && r.Method == http.MethodGet:
 		artistID, _ := strconv.ParseInt(r.URL.Query().Get("artistId"), 10, 64)
@@ -139,6 +155,23 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeErr(w, http.StatusNotFound, "not found")
 	}
+}
+
+func (h *Handler) recycleBinPath() string {
+	configured := ""
+	if cfg, err := h.store.GetAppConfig(); err == nil {
+		configured = cfg.MediaManagement.RecycleBin
+	}
+	configDir := "./config"
+	if h.cfg != nil && h.cfg.ConfigDir != "" {
+		configDir = h.cfg.ConfigDir
+	}
+	return mediafile.ResolveRecycleBin(configured, configDir)
+}
+
+func queryFlag(r *http.Request, name string) bool {
+	v := strings.TrimSpace(strings.ToLower(r.URL.Query().Get(name)))
+	return v == "true" || v == "1" || v == "yes"
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

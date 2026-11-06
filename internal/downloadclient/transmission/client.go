@@ -31,6 +31,8 @@ type Item struct {
 	DownloadDir string
 	// ContentPath is downloadDir/name — the torrent payload root Transmission writes.
 	ContentPath string
+	// IsFinished is Transmission's seeding-complete flag (ratio/idle goals met).
+	IsFinished bool
 }
 
 // Client talks to a Transmission daemon over RPC.
@@ -164,7 +166,7 @@ func (c *Client) List(ctx context.Context) ([]Item, error) {
 	args := map[string]any{
 		"fields": []string{
 			"id", "hashString", "name", "status", "totalSize",
-			"leftUntilDone", "percentDone", "eta", "downloadDir",
+			"leftUntilDone", "percentDone", "eta", "downloadDir", "isFinished",
 		},
 	}
 	var out struct {
@@ -178,6 +180,7 @@ func (c *Client) List(ctx context.Context) ([]Item, error) {
 			PercentDone   float64 `json:"percentDone"`
 			Eta           int64   `json:"eta"`
 			DownloadDir   string  `json:"downloadDir"`
+			IsFinished    bool    `json:"isFinished"`
 		} `json:"torrents"`
 	}
 	if err := c.call(ctx, "torrent-get", args, &out); err != nil {
@@ -202,6 +205,7 @@ func (c *Client) List(ctx context.Context) ([]Item, error) {
 			EtaSeconds:  t.Eta,
 			DownloadDir: dir,
 			ContentPath: content,
+			IsFinished:  t.IsFinished,
 		})
 	}
 	return items, nil
@@ -238,6 +242,15 @@ func IsCompleted(status int, progress float64, left int64) bool {
 	default:
 		return false
 	}
+}
+
+// IsSeedingComplete reports whether Transmission considers seeding finished.
+// Matches Sonarr/Radarr: isFinished (ratio/idle goals) and status stopped (0).
+func IsSeedingComplete(status int, progress float64, left int64, isFinished bool) bool {
+	if !IsCompleted(status, progress, left) {
+		return false
+	}
+	return isFinished && status == 0
 }
 
 func (c *Client) call(ctx context.Context, method string, arguments any, out any) error {

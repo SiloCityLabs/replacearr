@@ -113,6 +113,9 @@ func TestAddListRemove(t *testing.T) {
 	if IsCompleted("Downloading", 0.1) || !IsCompleted("Seeding", 1) {
 		t.Fatal("IsCompleted logic")
 	}
+	if IsSeedingComplete("Seeding", 1) || !IsSeedingComplete("Paused", 1) {
+		t.Fatal("IsSeedingComplete logic")
+	}
 	if err := cli.Remove(context.Background(), id, false); err != nil {
 		t.Fatalf("Remove: %v", err)
 	}

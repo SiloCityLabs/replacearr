@@ -21,9 +21,11 @@ type Options struct {
 	SSDPWait time.Duration
 	// Existing clients are excluded from suggestions (URL / IP:port / impl+port).
 	Existing []ExistingClient
-	// ExtraSubnets are optional CIDR overrides. Empty uses REPLACEARR_DISCOVER_SUBNETS
-	// when set; normally LAN is learned from the router (IGD) and host routes.
+	// ExtraSubnets are optional CIDR overrides from AppConfig; normally LAN is
+	// learned from the router (IGD) and host routes.
 	ExtraSubnets []string
+	// HostProcNet is an optional path to a bind-mounted host /proc/net directory.
+	HostProcNet string
 }
 
 // Discover finds nearby download clients via SSDP/IGD/host routes + TCP/HTTP fingerprints.
@@ -35,14 +37,11 @@ func Discover(ctx context.Context, opts Options) ([]Result, error) {
 	}
 
 	extra := opts.ExtraSubnets
-	if len(extra) == 0 {
-		extra = ExtraSubnetsFromEnv()
-	}
 
 	local := localHostHints()
 	ssdp := discoverSSDP(ctx, opts.SSDPWait)
 	routerNets := discoverRouterLANNetworks(ctx, ssdp.LocationURLs)
-	hostNets := hostLANNetworksFromProcRoute()
+	hostNets := hostLANNetworksFromProcRoute(opts.HostProcNet)
 	subnet := subnetHostHints(append(append([]lanNetwork{}, routerNets...), hostNets...), extra)
 	hosts := mergeHostHints(local, ssdp.Hosts, subnet)
 

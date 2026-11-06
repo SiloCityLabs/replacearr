@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/replacearr/replacearr/internal/domain"
+	"github.com/replacearr/replacearr/internal/mediafile"
 	"github.com/replacearr/replacearr/internal/mediainfo"
 )
 
@@ -185,14 +186,28 @@ func (s *Store) UpdateMovieFile(id int64, patch domain.MovieFileUpdate) (*domain
 	return s.GetMovieFileByID(id)
 }
 
-// DeleteMovieFile removes the movie file DB row, unlinks the movie, and optionally deletes the file on disk.
-func (s *Store) DeleteMovieFile(id int64, deleteFromDisk bool) error {
+// DeleteMovieFile removes the movie file DB row, unlinks the movie, and optionally moves the file to the recycle bin.
+func (s *Store) DeleteMovieFile(id int64, deleteFromDisk bool, recycleBin string) error {
 	f, err := s.GetMovieFileByID(id)
 	if err != nil {
 		return err
 	}
 	if deleteFromDisk && strings.TrimSpace(f.Path) != "" {
-		if err := removePath(f.Path); err != nil {
+		mv, err := s.GetMovieByID(f.MovieID)
+		if err != nil {
+			return err
+		}
+		root := ""
+		if mv != nil {
+			root = mv.RootFolderPath
+			if root == "" {
+				root = mv.Path
+			}
+		}
+		if root == "" {
+			root = filepath.Dir(f.Path)
+		}
+		if err := mediafile.DeleteUnderRoot(f.Path, root, recycleBin); err != nil {
 			return fmt.Errorf("delete file from disk: %w", err)
 		}
 	}
@@ -207,13 +222,24 @@ func (s *Store) DeleteMovieFile(id int64, deleteFromDisk bool) error {
 	return err
 }
 
-// DeleteMovieExtraFile deletes a non-video file under the movie folder.
-func (s *Store) DeleteMovieExtraFile(movieID int64, relativePath string) error {
+// DeleteMovieExtraFile moves a non-video file under the movie folder into the recycle bin.
+func (s *Store) DeleteMovieExtraFile(movieID int64, relativePath, recycleBin string) error {
 	full, err := s.resolveMovieExtraPath(movieID, relativePath)
 	if err != nil {
 		return err
 	}
-	return removePath(full)
+	mv, err := s.GetMovieByID(movieID)
+	if err != nil {
+		return err
+	}
+	root := mv.RootFolderPath
+	if root == "" {
+		root = mv.Path
+	}
+	if root == "" {
+		root = filepath.Dir(full)
+	}
+	return mediafile.DeleteUnderRoot(full, root, recycleBin)
 }
 
 // RenameMovieExtraFile renames a sidecar file within the movie folder.
@@ -288,13 +314,6 @@ func (s *Store) resolveMovieExtraPath(movieID int64, relativePath string) (strin
 	return full, nil
 }
 
-func removePath(path string) error {
-	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-		return err
-	}
-	return nil
-}
-
 func (s *Store) GetEpisodeFileByID(id int64) (*domain.EpisodeFile, error) {
 	row := s.db.QueryRow(`SELECT `+episodeFileSelectCols+` FROM episode_files WHERE id = ?`, id)
 	return scanEpisodeFile(row)
@@ -340,6 +359,32 @@ func (s *Store) ListEpisodeFiles(seriesID int64) ([]domain.EpisodeFile, error) {
 	return out, nil
 }
 
+// ListEpisodeFilePaths returns on-disk paths for episode files without probing media info.
+func (s *Store) ListEpisodeFilePaths(seriesID int64) ([]string, error) {
+	q := `SELECT path FROM episode_files`
+	args := []any{}
+	if seriesID > 0 {
+		q += ` WHERE series_id = ?`
+		args = append(args, seriesID)
+	}
+	rows, err := s.db.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []string{}
+	for rows.Next() {
+		var p string
+		if err := rows.Scan(&p); err != nil {
+			return nil, err
+		}
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out, rows.Err()
+}
+
 func (s *Store) ListMovieFiles(movieID int64) ([]domain.MovieFile, error) {
 	q := `SELECT ` + movieFileSelectCols + ` FROM movie_files`
 	args := []any{}
@@ -366,6 +411,32 @@ func (s *Store) ListMovieFiles(movieID int64) ([]domain.MovieFile, error) {
 		s.EnsureMovieFileMediaInfo(&out[i])
 	}
 	return out, nil
+}
+
+// ListMovieFilePaths returns on-disk paths for movie files without probing media info.
+func (s *Store) ListMovieFilePaths(movieID int64) ([]string, error) {
+	q := `SELECT path FROM movie_files`
+	args := []any{}
+	if movieID > 0 {
+		q += ` WHERE movie_id = ?`
+		args = append(args, movieID)
+	}
+	rows, err := s.db.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []string{}
+	for rows.Next() {
+		var p string
+		if err := rows.Scan(&p); err != nil {
+			return nil, err
+		}
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out, rows.Err()
 }
 
 // ListMovieExtraFiles inventories non-video files in the movie folder.

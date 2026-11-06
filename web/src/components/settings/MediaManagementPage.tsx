@@ -40,7 +40,6 @@ export const MediaManagementPage: React.FC<MediaManagementPageProps> = ({
     config.mediaManagement,
     onDirtyChange
   );
-  const [showAdvanced, setShowAdvanced] = useState(false);
   const [folderPath, setFolderPath] = useState('');
   const [folderType, setFolderType] = useState('all');
   const [folderBusy, setFolderBusy] = useState(false);
@@ -185,87 +184,83 @@ export const MediaManagementPage: React.FC<MediaManagementPageProps> = ({
         </FieldRow>
       </Section>
 
-      {showAdvanced ? (
-        <>
-          <Section title="Folders">
-            <FieldRow label="Series Folder Format">
-              <TextInput
-                value={draft.seriesFolderFormat}
-                onChange={(value) => patch('seriesFolderFormat', value)}
-              />
-            </FieldRow>
-            <FieldRow label="Season Folder Format">
-              <TextInput
-                value={draft.seasonFolderFormat}
-                onChange={(value) => patch('seasonFolderFormat', value)}
-              />
-            </FieldRow>
-            <FieldRow label="Specials Folder Format">
-              <TextInput
-                value={draft.specialsFolderFormat}
-                onChange={(value) => patch('specialsFolderFormat', value)}
-              />
-            </FieldRow>
-            <FieldRow label="Create Empty Series Folders">
-              <Checkbox
-                checked={draft.createEmptySeriesFolders}
-                onChange={(value) => patch('createEmptySeriesFolders', value)}
-              />
-            </FieldRow>
-            <FieldRow label="Create Empty Movie Folders">
-              <Checkbox
-                checked={draft.createEmptyMovieFolders}
-                onChange={(value) => patch('createEmptyMovieFolders', value)}
-              />
-            </FieldRow>
-            <FieldRow label="Delete Empty Folders">
-              <Checkbox
-                checked={draft.deleteEmptyFolders}
-                onChange={(value) => patch('deleteEmptyFolders', value)}
-              />
-            </FieldRow>
-          </Section>
+      <Section title="Folders">
+        <FieldRow label="Series Folder Format">
+          <TextInput
+            value={draft.seriesFolderFormat}
+            onChange={(value) => patch('seriesFolderFormat', value)}
+          />
+        </FieldRow>
+        <FieldRow label="Season Folder Format">
+          <TextInput
+            value={draft.seasonFolderFormat}
+            onChange={(value) => patch('seasonFolderFormat', value)}
+          />
+        </FieldRow>
+        <FieldRow label="Specials Folder Format">
+          <TextInput
+            value={draft.specialsFolderFormat}
+            onChange={(value) => patch('specialsFolderFormat', value)}
+          />
+        </FieldRow>
+        <FieldRow label="Create Empty Series Folders">
+          <Checkbox
+            checked={draft.createEmptySeriesFolders}
+            onChange={(value) => patch('createEmptySeriesFolders', value)}
+          />
+        </FieldRow>
+        <FieldRow label="Create Empty Movie Folders">
+          <Checkbox
+            checked={draft.createEmptyMovieFolders}
+            onChange={(value) => patch('createEmptyMovieFolders', value)}
+          />
+        </FieldRow>
+        <FieldRow label="Delete Empty Folders">
+          <Checkbox
+            checked={draft.deleteEmptyFolders}
+            onChange={(value) => patch('deleteEmptyFolders', value)}
+          />
+        </FieldRow>
+      </Section>
 
-          <Section title="Importing">
-            <FieldRow label="Skip Free Space Check">
-              <Checkbox
-                checked={draft.skipFreeSpaceCheckWhenImporting}
-                onChange={(value) => patch('skipFreeSpaceCheckWhenImporting', value)}
-              />
-            </FieldRow>
-            <FieldRow label="Minimum Free Space">
-              <NumberInput
-                value={draft.minimumFreeSpaceWhenImporting}
-                onChange={(value) => patch('minimumFreeSpaceWhenImporting', value)}
-              />
-            </FieldRow>
-            <FieldRow label="Copy Using Hardlinks">
-              <Checkbox
-                checked={draft.copyUsingHardlinks}
-                onChange={(value) => patch('copyUsingHardlinks', value)}
-              />
-            </FieldRow>
-            <FieldRow label="Use Script Import">
-              <Checkbox checked={draft.useScriptImport} onChange={(value) => patch('useScriptImport', value)} />
-            </FieldRow>
-            <FieldRow label="Script Import Path">
-              <TextInput value={draft.scriptImportPath} onChange={(value) => patch('scriptImportPath', value)} />
-            </FieldRow>
-            <FieldRow label="Import Extra Files">
-              <Checkbox
-                checked={draft.importExtraFiles}
-                onChange={(value) => patch('importExtraFiles', value)}
-              />
-            </FieldRow>
-            <FieldRow label="Extra File Extensions">
-              <TextInput
-                value={draft.extraFileExtensions}
-                onChange={(value) => patch('extraFileExtensions', value)}
-              />
-            </FieldRow>
-          </Section>
-        </>
-      ) : null}
+      <Section title="Importing">
+        <FieldRow label="Skip Free Space Check">
+          <Checkbox
+            checked={draft.skipFreeSpaceCheckWhenImporting}
+            onChange={(value) => patch('skipFreeSpaceCheckWhenImporting', value)}
+          />
+        </FieldRow>
+        <FieldRow label="Minimum Free Space">
+          <NumberInput
+            value={draft.minimumFreeSpaceWhenImporting}
+            onChange={(value) => patch('minimumFreeSpaceWhenImporting', value)}
+          />
+        </FieldRow>
+        <FieldRow label="Copy Using Hardlinks">
+          <Checkbox
+            checked={draft.copyUsingHardlinks}
+            onChange={(value) => patch('copyUsingHardlinks', value)}
+          />
+        </FieldRow>
+        <FieldRow label="Use Script Import">
+          <Checkbox checked={draft.useScriptImport} onChange={(value) => patch('useScriptImport', value)} />
+        </FieldRow>
+        <FieldRow label="Script Import Path">
+          <TextInput value={draft.scriptImportPath} onChange={(value) => patch('scriptImportPath', value)} />
+        </FieldRow>
+        <FieldRow label="Import Extra Files">
+          <Checkbox
+            checked={draft.importExtraFiles}
+            onChange={(value) => patch('importExtraFiles', value)}
+          />
+        </FieldRow>
+        <FieldRow label="Extra File Extensions">
+          <TextInput
+            value={draft.extraFileExtensions}
+            onChange={(value) => patch('extraFileExtensions', value)}
+          />
+        </FieldRow>
+      </Section>
 
       <Section
         title="Unwanted File Filters"
@@ -358,41 +353,24 @@ export const MediaManagementPage: React.FC<MediaManagementPageProps> = ({
             ]}
           />
         </FieldRow>
-        <FieldRow label="Recycle Bin">
-          <TextInput value={draft.recycleBin} onChange={(value) => patch('recycleBin', value)} />
-        </FieldRow>
-        <FieldRow label="Recycle Bin Cleanup Days">
-          <NumberInput
-            value={draft.recycleBinCleanupDays}
-            onChange={(value) => patch('recycleBinCleanupDays', value)}
+      </Section>
+
+      <Section title="Permissions">
+        <FieldRow label="Set Permissions">
+          <Checkbox
+            checked={draft.setPermissionsLinux}
+            onChange={(value) => patch('setPermissionsLinux', value)}
           />
+        </FieldRow>
+        <FieldRow label="chmod Folder">
+          <TextInput value={draft.chmodFolder} onChange={(value) => patch('chmodFolder', value)} />
+        </FieldRow>
+        <FieldRow label="chown Group">
+          <TextInput value={draft.chownGroup} onChange={(value) => patch('chownGroup', value)} />
         </FieldRow>
       </Section>
 
-      {showAdvanced ? (
-        <Section title="Permissions">
-          <FieldRow label="Set Permissions">
-            <Checkbox
-              checked={draft.setPermissionsLinux}
-              onChange={(value) => patch('setPermissionsLinux', value)}
-            />
-          </FieldRow>
-          <FieldRow label="chmod Folder">
-            <TextInput value={draft.chmodFolder} onChange={(value) => patch('chmodFolder', value)} />
-          </FieldRow>
-          <FieldRow label="chown Group">
-            <TextInput value={draft.chownGroup} onChange={(value) => patch('chownGroup', value)} />
-          </FieldRow>
-        </Section>
-      ) : null}
-
-      <SaveBar
-        disabled={!isDirty}
-        saving={saving}
-        onSave={() => void handleSave()}
-        showAdvanced={showAdvanced}
-        onToggleAdvanced={() => setShowAdvanced((current) => !current)}
-      />
+      <SaveBar disabled={!isDirty} saving={saving} onSave={() => void handleSave()} />
 
       <section className="bg-slate-900/90 border border-slate-800 rounded-xl p-5 mt-4 space-y-4">
         <div>

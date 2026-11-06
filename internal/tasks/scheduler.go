@@ -46,7 +46,7 @@ type Scheduler struct {
 type taskState struct {
 	info     TaskInfo
 	interval time.Duration
-	fn       func(context.Context) error
+	fn       func(ctx context.Context, manual bool) error
 	running  bool
 }
 
@@ -57,17 +57,21 @@ func New(store *db.Store, configDir, dbPath string) *Scheduler {
 		dbPath:    dbPath,
 		tasks:     map[string]*taskState{},
 	}
-	s.register("backup", "Backup", 24*time.Hour, s.runBackup)
-	s.register("historyCleanup", "History Cleanup", 24*time.Hour, s.runHistoryCleanup)
+	s.register("backup", "Backup", 24*time.Hour, func(ctx context.Context, _ bool) error {
+		return s.runBackup(ctx)
+	})
+	s.register("historyCleanup", "History Cleanup", 24*time.Hour, func(ctx context.Context, _ bool) error {
+		return s.runHistoryCleanup(ctx)
+	})
 	s.register("recycleBinCleanup", "Recycle Bin Cleanup", 24*time.Hour, s.runRecycleCleanup)
-	s.register("healthRefresh", "Health Refresh", 5*time.Minute, func(context.Context) error {
+	s.register("healthRefresh", "Health Refresh", 5*time.Minute, func(context.Context, bool) error {
 		applog.Info("tasks", "health refresh tick")
 		return nil
 	})
 	return s
 }
 
-func (s *Scheduler) register(name, label string, interval time.Duration, fn func(context.Context) error) {
+func (s *Scheduler) register(name, label string, interval time.Duration, fn func(context.Context, bool) error) {
 	now := time.Now().UTC()
 	next := now.Add(interval)
 	s.tasks[name] = &taskState{
@@ -104,11 +108,11 @@ func (s *Scheduler) tick(ctx context.Context) {
 		if ts.running || ts.info.NextRunAt == nil || ts.info.NextRunAt.After(now) {
 			continue
 		}
-		go s.execute(ctx, ts.info.Name)
+		go s.execute(ctx, ts.info.Name, false)
 	}
 }
 
-func (s *Scheduler) execute(ctx context.Context, name string) {
+func (s *Scheduler) execute(ctx context.Context, name string, manual bool) {
 	s.mu.Lock()
 	ts := s.tasks[name]
 	if ts == nil || ts.running {
@@ -120,7 +124,7 @@ func (s *Scheduler) execute(ctx context.Context, name string) {
 	s.mu.Unlock()
 
 	start := time.Now().UTC()
-	err := ts.fn(ctx)
+	err := ts.fn(ctx, manual)
 	dur := time.Since(start).Milliseconds()
 
 	s.mu.Lock()
@@ -157,7 +161,7 @@ func (s *Scheduler) RunNow(name string) error {
 	if ts == nil {
 		return fmt.Errorf("unknown task %q", name)
 	}
-	go s.execute(context.Background(), name)
+	go s.execute(context.Background(), name, true)
 	return nil
 }
 
@@ -380,31 +384,39 @@ func (s *Scheduler) runHistoryCleanup(ctx context.Context) error {
 	return s.store.DeleteHistoryOlderThan(time.Now().UTC().AddDate(0, 0, -days))
 }
 
-func (s *Scheduler) runRecycleCleanup(ctx context.Context) error {
+func (s *Scheduler) runRecycleCleanup(_ context.Context, manual bool) error {
 	cfg, err := s.store.GetAppConfig()
 	if err != nil {
 		return err
 	}
 	bin := strings.TrimSpace(cfg.MediaManagement.RecycleBin)
 	if bin == "" {
-		return nil
+		bin = filepath.Join(s.configDir, "RecycleBin")
+	}
+	entries, err := os.ReadDir(bin)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
 	}
 	days := cfg.MediaManagement.RecycleBinCleanupDays
 	if days <= 0 {
-		return nil
+		days = 30
 	}
 	cutoff := time.Now().AddDate(0, 0, -days)
-	entries, err := os.ReadDir(bin)
-	if err != nil {
-		return nil
-	}
 	for _, e := range entries {
+		full := filepath.Join(bin, e.Name())
+		if manual {
+			_ = os.RemoveAll(full)
+			continue
+		}
 		fi, err := e.Info()
 		if err != nil {
 			continue
 		}
 		if fi.ModTime().Before(cutoff) {
-			_ = os.RemoveAll(filepath.Join(bin, e.Name()))
+			_ = os.RemoveAll(full)
 		}
 	}
 	return nil

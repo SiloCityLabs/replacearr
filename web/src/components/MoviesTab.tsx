@@ -144,7 +144,8 @@ export const MoviesTab: React.FC<MoviesTabProps> = ({
         {
           id: 'deleteFiles',
           label: `Delete ${fileCount} Movie Files`,
-          description: 'Permanently delete the movie files and folder from disk.',
+          description:
+            'Move the movie files and folder to the recycle bin. Nightly cleanup permanently removes items after the configured retention; System → Tasks → Recycle Bin Cleanup empties the bin immediately.',
           defaultChecked: false,
         },
       ],

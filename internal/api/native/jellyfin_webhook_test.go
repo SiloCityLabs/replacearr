@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -146,13 +145,8 @@ func newJellyfinWebhookStack(t *testing.T) (*Server, *pluginhost.Manager, *http.
 	t.Helper()
 	dir := t.TempDir()
 	t.Setenv("REPLACEARR_CONFIG_DIR", dir)
-	t.Setenv("REPLACEARR_DB_PATH", filepath.Join(dir, "replacearr.db"))
-	t.Setenv("REPLACEARR_PLUGIN_DIR", filepath.Join(dir, "plugins"))
-	t.Setenv("REPLACEARR_DEFINITIONS_DIR", filepath.Join(dir, "definitions"))
 	t.Setenv("REPLACEARR_ADMIN_USER", "admin")
 	t.Setenv("REPLACEARR_ADMIN_PASS", "replacearr")
-	t.Setenv("REPLACEARR_JWT_SECRET", "test-jwt-secret-at-least-32-bytes-long")
-	t.Setenv("REPLACEARR_FLARESOLVERR_URL", "http://127.0.0.1:1/")
 
 	cfg := config.Load()
 	store, err := db.Open(cfg.DatabasePath)

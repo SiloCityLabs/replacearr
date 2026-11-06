@@ -38,7 +38,6 @@ export const GeneralPage: React.FC<GeneralPageProps> = ({
     config,
     onDirtyChange
   );
-  const [showAdvanced, setShowAdvanced] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
 
   const patchHost = <K extends keyof HostConfig>(key: K, value: HostConfig[K]) => {
@@ -194,71 +193,67 @@ export const GeneralPage: React.FC<GeneralPageProps> = ({
         </FieldRow>
       </Section>
 
-      {showAdvanced ? (
-        <Section
-          title="SSL"
-          caption="Replacearr does not terminate TLS in-process. Use a reverse proxy in front of the bind address."
-        >
-          <FieldRow label="Enable SSL">
-            <Checkbox checked={draft.host.enableSsl} onChange={(value) => patchHost('enableSsl', value)} />
-          </FieldRow>
-          <FieldRow label="SSL Port">
-            <NumberInput value={draft.host.sslPort} onChange={(value) => patchHost('sslPort', value)} />
-          </FieldRow>
-          <FieldRow label="SSL Certificate Path">
-            <TextInput value={draft.host.sslCertPath} onChange={(value) => patchHost('sslCertPath', value)} />
-          </FieldRow>
-          <FieldRow label="SSL Key Path">
-            <TextInput value={draft.host.sslKeyPath} onChange={(value) => patchHost('sslKeyPath', value)} />
-          </FieldRow>
-          <FieldRow label="SSL Certificate Password">
-            <PasswordInput
-              value={draft.host.sslCertPassword}
-              onChange={(value) => patchHost('sslCertPassword', value)}
-            />
-          </FieldRow>
-        </Section>
-      ) : null}
+      <Section
+        title="SSL"
+        caption="Replacearr does not terminate TLS in-process. Use a reverse proxy in front of the bind address."
+      >
+        <FieldRow label="Enable SSL">
+          <Checkbox checked={draft.host.enableSsl} onChange={(value) => patchHost('enableSsl', value)} />
+        </FieldRow>
+        <FieldRow label="SSL Port">
+          <NumberInput value={draft.host.sslPort} onChange={(value) => patchHost('sslPort', value)} />
+        </FieldRow>
+        <FieldRow label="SSL Certificate Path">
+          <TextInput value={draft.host.sslCertPath} onChange={(value) => patchHost('sslCertPath', value)} />
+        </FieldRow>
+        <FieldRow label="SSL Key Path">
+          <TextInput value={draft.host.sslKeyPath} onChange={(value) => patchHost('sslKeyPath', value)} />
+        </FieldRow>
+        <FieldRow label="SSL Certificate Password">
+          <PasswordInput
+            value={draft.host.sslCertPassword}
+            onChange={(value) => patchHost('sslCertPassword', value)}
+          />
+        </FieldRow>
+      </Section>
 
-      {showAdvanced ? (
-        <Section title="Proxy">
-          <FieldRow label="Use Proxy">
-            <Checkbox checked={draft.proxy.enabled} onChange={(value) => patchProxy('enabled', value)} />
-          </FieldRow>
-          <FieldRow label="Proxy Type">
-            <Select
-              value={draft.proxy.type}
-              onChange={(value) => patchProxy('type', value)}
-              options={[
-                { value: 'http', label: 'HTTP' },
-                { value: 'socks4', label: 'SOCKS4' },
-                { value: 'socks5', label: 'SOCKS5' },
-              ]}
-            />
-          </FieldRow>
-          <FieldRow label="Hostname">
-            <TextInput value={draft.proxy.hostname} onChange={(value) => patchProxy('hostname', value)} />
-          </FieldRow>
-          <FieldRow label="Port">
-            <NumberInput value={draft.proxy.port} onChange={(value) => patchProxy('port', value)} />
-          </FieldRow>
-          <FieldRow label="Username">
-            <TextInput value={draft.proxy.username} onChange={(value) => patchProxy('username', value)} />
-          </FieldRow>
-          <FieldRow label="Password">
-            <PasswordInput value={draft.proxy.password} onChange={(value) => patchProxy('password', value)} />
-          </FieldRow>
-          <FieldRow label="Bypass Filter">
-            <TextInput value={draft.proxy.bypassFilter} onChange={(value) => patchProxy('bypassFilter', value)} />
-          </FieldRow>
-          <FieldRow label="Bypass Local Addresses">
-            <Checkbox
-              checked={draft.proxy.bypassLocalAddresses}
-              onChange={(value) => patchProxy('bypassLocalAddresses', value)}
-            />
-          </FieldRow>
-        </Section>
-      ) : null}
+      <Section title="Proxy">
+        <FieldRow label="Use Proxy">
+          <Checkbox checked={draft.proxy.enabled} onChange={(value) => patchProxy('enabled', value)} />
+        </FieldRow>
+        <FieldRow label="Proxy Type">
+          <Select
+            value={draft.proxy.type}
+            onChange={(value) => patchProxy('type', value)}
+            options={[
+              { value: 'http', label: 'HTTP' },
+              { value: 'socks4', label: 'SOCKS4' },
+              { value: 'socks5', label: 'SOCKS5' },
+            ]}
+          />
+        </FieldRow>
+        <FieldRow label="Hostname">
+          <TextInput value={draft.proxy.hostname} onChange={(value) => patchProxy('hostname', value)} />
+        </FieldRow>
+        <FieldRow label="Port">
+          <NumberInput value={draft.proxy.port} onChange={(value) => patchProxy('port', value)} />
+        </FieldRow>
+        <FieldRow label="Username">
+          <TextInput value={draft.proxy.username} onChange={(value) => patchProxy('username', value)} />
+        </FieldRow>
+        <FieldRow label="Password">
+          <PasswordInput value={draft.proxy.password} onChange={(value) => patchProxy('password', value)} />
+        </FieldRow>
+        <FieldRow label="Bypass Filter">
+          <TextInput value={draft.proxy.bypassFilter} onChange={(value) => patchProxy('bypassFilter', value)} />
+        </FieldRow>
+        <FieldRow label="Bypass Local Addresses">
+          <Checkbox
+            checked={draft.proxy.bypassLocalAddresses}
+            onChange={(value) => patchProxy('bypassLocalAddresses', value)}
+          />
+        </FieldRow>
+      </Section>
 
       <Section title="Logging">
         <FieldRow label="Log Level">
@@ -303,33 +298,12 @@ export const GeneralPage: React.FC<GeneralPageProps> = ({
         </FieldRow>
       </Section>
 
-      {showAdvanced ? (
-        <>
-          <Section title="Analytics" caption="Replacearr does not send telemetry. This value is stored only.">
-            <FieldRow label="Send Analytics">
-              <Checkbox
-                checked={draft.analytics.enabled}
-                onChange={(value) =>
-                  setDraft((current) => ({ ...current, analytics: { ...current.analytics, enabled: value } }))
-                }
-              />
-            </FieldRow>
-          </Section>
+      <p className="text-xs text-slate-400 mb-4">
+        Backup settings live under <span className="text-slate-200">System → Backup</span>. Check for
+        Docker image updates under <span className="text-slate-200">System → Updates</span>.
+      </p>
 
-          <p className="text-xs text-slate-400 mb-4">
-            Backup settings live under <span className="text-slate-200">System → Backup</span>. Check for
-            Docker image updates under <span className="text-slate-200">System → Updates</span>.
-          </p>
-        </>
-      ) : null}
-
-      <SaveBar
-        disabled={!isDirty}
-        saving={saving}
-        onSave={() => void handleSave()}
-        showAdvanced={showAdvanced}
-        onToggleAdvanced={() => setShowAdvanced((current) => !current)}
-      />
+      <SaveBar disabled={!isDirty} saving={saving} onSave={() => void handleSave()} />
       {dialog}
     </div>
   );

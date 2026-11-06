@@ -50,7 +50,6 @@ export const DownloadClientsPage: React.FC<DownloadClientsPageProps> = ({
     remotePathMappings: config.remotePathMappings,
   };
   const { draft, setDraft, isDirty, saving, setSaving, commit } = useDraftState(source, onDirtyChange);
-  const [showAdvanced, setShowAdvanced] = useState(false);
   const [form, setForm] = useState<DownloadClientForm | null>(null);
 
   const patchOptions = <K extends keyof DownloadClientOptions>(key: K, value: DownloadClientOptions[K]) => {
@@ -238,25 +237,83 @@ export const DownloadClientsPage: React.FC<DownloadClientsPageProps> = ({
             onChange={(value) => patchOptions('autoRedownloadFailedFromInteractiveSearch', value)}
           />
         </FieldRow>
-        {showAdvanced ? (
-          <FieldRow
-            label="Download Client Working Folders"
-            helpText="Pipe-separated folder name prefixes to skip while importing (default _UNPACK_|_FAILED_). Clients like SABnzbd create these temp folders while unpacking or after a failed job — ignoring them avoids importing incomplete downloads."
-          >
-            <TextInput
-              value={draft.downloadClientOptions.downloadClientWorkingFolders}
-              onChange={(value) => patchOptions('downloadClientWorkingFolders', value)}
-            />
-          </FieldRow>
-        ) : null}
+        <FieldRow
+          label="Delete Torrent and Data When Complete"
+          helpText="After a successful import, remove the torrent from the download client and delete its data."
+        >
+          <Checkbox
+            checked={draft.downloadClientOptions.deleteTorrentAndDataWhenComplete}
+            onChange={(value) =>
+              setDraft((current) => ({
+                ...current,
+                downloadClientOptions: {
+                  ...current.downloadClientOptions,
+                  deleteTorrentAndDataWhenComplete: value,
+                  deleteWhenSeedingComplete: value
+                    ? current.downloadClientOptions.deleteWhenSeedingComplete
+                    : false,
+                },
+              }))
+            }
+          />
+        </FieldRow>
+        <FieldRow
+          label="Delete When Seeding Complete"
+          helpText="Wait until the client reports seeding finished (stopped after ratio/idle goals), then delete torrent and data. Checking this also enables Delete Torrent and Data When Complete."
+        >
+          <Checkbox
+            checked={draft.downloadClientOptions.deleteWhenSeedingComplete}
+            onChange={(value) =>
+              setDraft((current) => ({
+                ...current,
+                downloadClientOptions: {
+                  ...current.downloadClientOptions,
+                  deleteWhenSeedingComplete: value,
+                  deleteTorrentAndDataWhenComplete: value
+                    ? true
+                    : current.downloadClientOptions.deleteTorrentAndDataWhenComplete,
+                },
+              }))
+            }
+          />
+        </FieldRow>
+        <FieldRow
+          label="Download Client Working Folders"
+          helpText="Pipe-separated folder name prefixes to skip while importing (default _UNPACK_|_FAILED_). Clients like SABnzbd create these temp folders while unpacking or after a failed job — ignoring them avoids importing incomplete downloads."
+        >
+          <TextInput
+            value={draft.downloadClientOptions.downloadClientWorkingFolders}
+            onChange={(value) => patchOptions('downloadClientWorkingFolders', value)}
+          />
+        </FieldRow>
       </Section>
-      <SaveBar
-        disabled={!isDirty}
-        saving={saving}
-        onSave={() => void handleSave()}
-        showAdvanced={showAdvanced}
-        onToggleAdvanced={() => setShowAdvanced((current) => !current)}
-      />
+
+      <Section
+        title="Client Discovery"
+        caption="Used by Find nearby and the setup wizard. LAN is also learned from SSDP/IGD when available."
+      >
+        <FieldRow
+          label="Extra Subnets"
+          helpText="Comma-separated CIDRs to probe in addition to auto-discovered LAN ranges (e.g. 10.5.0.0/21,192.168.1.0/24)."
+        >
+          <TextInput
+            value={draft.downloadClientOptions.discoverSubnets ?? ''}
+            placeholder="10.5.0.0/21"
+            onChange={(value) => patchOptions('discoverSubnets', value)}
+          />
+        </FieldRow>
+        <FieldRow
+          label="Host /proc/net Path"
+          helpText="Bind-mounted host routing table for Docker bridge mode (default /host/proc/net)."
+        >
+          <TextInput
+            value={draft.downloadClientOptions.hostProcNet ?? ''}
+            placeholder="/host/proc/net"
+            onChange={(value) => patchOptions('hostProcNet', value)}
+          />
+        </FieldRow>
+      </Section>
+      <SaveBar disabled={!isDirty} saving={saving} onSave={() => void handleSave()} />
 
       {form ? (
         <DownloadClientModal

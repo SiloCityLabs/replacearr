@@ -8,20 +8,13 @@ import (
 	"strings"
 )
 
-// hostProcNetDirs are candidate paths for the Docker host's /proc/net (bind-mounted).
-// Inside a bridge network, container interfaces only see 172.x; the host route table
-// still knows the real LAN (e.g. 10.5.0.0/21) when /proc/net is mounted from the host.
-var hostProcNetDirs = []string{
-	"/host/proc/net",
-	os.Getenv("REPLACEARR_HOST_PROC_NET"),
-}
-
 // hostLANNetworksFromProcRoute reads the host routing table and returns private
-// LAN networks that are not Docker/bridge ranges.
-func hostLANNetworksFromProcRoute() []lanNetwork {
+// LAN networks that are not Docker/bridge ranges. dirs are candidate paths for
+// the Docker host's /proc/net (bind-mounted); empty entries are skipped.
+func hostLANNetworksFromProcRoute(dirs ...string) []lanNetwork {
 	var out []lanNetwork
 	seen := map[string]struct{}{}
-	for _, dir := range hostProcNetDirs {
+	for _, dir := range dirs {
 		dir = strings.TrimSpace(dir)
 		if dir == "" {
 			continue

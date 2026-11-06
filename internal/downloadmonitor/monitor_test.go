@@ -1,12 +1,68 @@
 package downloadmonitor
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/replacearr/replacearr/internal/domain"
 )
+
+type fakeRemover struct {
+	calls []struct {
+		id          string
+		deleteFiles bool
+	}
+}
+
+func (f *fakeRemover) Remove(_ context.Context, id string, deleteFiles bool) error {
+	f.calls = append(f.calls, struct {
+		id          string
+		deleteFiles bool
+	}{id: id, deleteFiles: deleteFiles})
+	return nil
+}
+
+func TestMaybeRemoveFromClient(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("waits for seeding when configured", func(t *testing.T) {
+		rm := &fakeRemover{}
+		maybeRemoveFromClient(ctx, trackedDownload{
+			ID: "abc", Client: rm, SeedingComplete: false, RemoveDone: true,
+		}, true, true)
+		if len(rm.calls) != 0 {
+			t.Fatalf("expected no remove while seeding, got %#v", rm.calls)
+		}
+		maybeRemoveFromClient(ctx, trackedDownload{
+			ID: "abc", Client: rm, SeedingComplete: true,
+		}, true, true)
+		if len(rm.calls) != 1 || !rm.calls[0].deleteFiles {
+			t.Fatalf("expected delete-with-data after seeding, got %#v", rm.calls)
+		}
+	})
+
+	t.Run("deletes data immediately when not waiting", func(t *testing.T) {
+		rm := &fakeRemover{}
+		maybeRemoveFromClient(ctx, trackedDownload{
+			ID: "abc", Client: rm, SeedingComplete: false,
+		}, true, false)
+		if len(rm.calls) != 1 || !rm.calls[0].deleteFiles {
+			t.Fatalf("got %#v", rm.calls)
+		}
+	})
+
+	t.Run("per-client remove keeps data", func(t *testing.T) {
+		rm := &fakeRemover{}
+		maybeRemoveFromClient(ctx, trackedDownload{
+			ID: "abc", Client: rm, RemoveDone: true,
+		}, false, false)
+		if len(rm.calls) != 1 || rm.calls[0].deleteFiles {
+			t.Fatalf("got %#v", rm.calls)
+		}
+	})
+}
 
 func TestFindPrimaryVideoAndImport(t *testing.T) {
 	dir := t.TempDir()

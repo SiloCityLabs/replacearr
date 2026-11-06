@@ -125,14 +125,32 @@ export const SeriesTab: React.FC<SeriesTabProps> = ({
   };
 
   const handleDeleteSeries = async (s: Series) => {
-    const ok = await confirm({
-      title: 'Remove series',
-      message: `Remove "${s.title}" from the TV library?`,
-      confirmLabel: 'Remove',
+    const result = await confirm({
+      title: 'Delete series',
+      message: `Are you sure you want to delete "${s.title}" from the TV library?`,
+      confirmLabel: 'Delete',
+      checkboxes: [
+        {
+          id: 'addImportExclusion',
+          label: 'Add List Exclusion',
+          description: 'Prevent this series from being re-added by import lists.',
+          defaultChecked: false,
+        },
+        {
+          id: 'deleteFiles',
+          label: 'Delete Series Files',
+          description:
+            'Move the series folder to the recycle bin. Nightly cleanup permanently removes items after the configured retention; System → Tasks → Recycle Bin Cleanup empties the bin immediately.',
+          defaultChecked: false,
+        },
+      ],
     });
-    if (!ok) return;
+    if (!result) return;
     try {
-      await api.deleteSeries(s.id);
+      await api.deleteSeries(s.id, {
+        addImportExclusion: result.addImportExclusion === true,
+        deleteFiles: result.deleteFiles === true,
+      });
       onNotify(`Removed "${s.title}" from library`);
       if (activeSeries?.id === s.id) {
         setActiveSeries(null);

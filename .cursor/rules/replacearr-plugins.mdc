@@ -15,8 +15,8 @@ Replacearr has two extension mechanisms: out-of-process Go plugins and data-only
 - External plugin binaries call `pluginsdk.Serve` from `main`. Plugin code may depend on `pkg/pluginsdk` and the Go standard library, never the server's `internal/` packages.
 - `Manifest.ConfigSchema` drives the React plugin settings UI. Do not add per-plugin hard-coded settings forms.
 - Declare HTTP callbacks through `Manifest.InboundWebhooks` (secret setting and optional path aliases). The host exposes `POST /api/v1/webhooks/{pluginId}` and dispatches RPC `handle_webhook`; do not hard-code third-party callback routes into core.
-- Build plugin binaries with `CGO_ENABLED=0`. The host scans `REPLACEARR_PLUGIN_DIR` (`/config/plugins` in Docker). Marketplace installs verify SHA256 before writing executables into that directory.
-- The optional plugin marketplace reads `registry.json` from `replacearr/replacearr-plugins`; implementation lives in `internal/plugincatalog`. Override the catalog URL with `REPLACEARR_PLUGIN_CATALOG_URL`.
+- Build plugin binaries with `CGO_ENABLED=0`. The host scans `$REPLACEARR_CONFIG_DIR/plugins` (`/config/plugins` in Docker). Marketplace installs verify SHA256 before writing executables into that directory.
+- The optional plugin marketplace reads `registry.json` from `replacearr/replacearr-plugins`; implementation lives in `internal/plugincatalog`. Override the catalog URL in AppConfig / Plugins → Marketplace.
 
 ## In-process exceptions
 
@@ -25,6 +25,6 @@ Replacearr has two extension mechanisms: out-of-process Go plugins and data-only
 
 ## Cardigann definitions
 
-- Cardigann YAML is data, not a Go plugin. `internal/indexers/cardigann` loads definitions from `REPLACEARR_DEFINITIONS_DIR` (default `$REPLACEARR_CONFIG_DIR/definitions`). Mount or copy YAML into that directory. Built-in fallbacks apply when it is empty.
+- Cardigann YAML is data, not a Go plugin. `internal/indexers/cardigann` loads definitions from `$REPLACEARR_CONFIG_DIR/definitions`. Mount or copy YAML into that directory. Built-in fallbacks apply when it is empty.
 
 When extending these systems, preserve the existing manifest, RPC, on-disk, and HTTP compatibility contracts rather than creating a parallel mechanism.

@@ -13,6 +13,9 @@ func (s *Service) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/auth/login", s.handleLogin)
 	mux.HandleFunc("POST /api/v1/auth/logout", s.handleLogout)
 	mux.HandleFunc("GET /api/v1/auth/me", s.RequirePermission("", s.handleMe))
+	mux.HandleFunc("GET /api/v1/auth/sessions", s.RequirePermission("", s.handleListSessions))
+	mux.HandleFunc("DELETE /api/v1/auth/sessions/{id}", s.RequirePermission("", s.handleRevokeSession))
+	mux.HandleFunc("POST /api/v1/auth/sessions/revoke-others", s.RequirePermission("", s.handleRevokeOtherSessions))
 
 	mux.HandleFunc("GET /api/v1/users", s.RequirePermission(domain.PermUsersRead, s.handleListUsers))
 	mux.HandleFunc("POST /api/v1/users", s.RequirePermission(domain.PermUsersManage, s.handleCreateUser))
@@ -32,18 +35,29 @@ func (s *Service) RegisterRoutes(mux *http.ServeMux) {
 
 func (s *Service) handleLogin(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Username string `json:"username"`
-		Password string `json:"password"`
+		Username   string `json:"username"`
+		Password   string `json:"password"`
+		RememberMe bool   `json:"rememberMe"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 		return
 	}
 
-	user, token, err := s.Authenticate(req.Username, req.Password)
+	user, token, _, err := s.Authenticate(req.Username, req.Password, LoginOptions{
+		RememberMe: req.RememberMe,
+		UserAgent:  r.UserAgent(),
+		IPAddress:  clientIP(r),
+	})
 	if err != nil {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": err.Error()})
 		return
+	}
+
+	// Session cookies (MaxAge 0) die with the browser; remember-me lasts 30 days.
+	maxAge := 0
+	if req.RememberMe {
+		maxAge = int(RememberTokenTTL.Seconds())
 	}
 
 	http.SetCookie(w, &http.Cookie{
@@ -52,7 +66,7 @@ func (s *Service) handleLogin(w http.ResponseWriter, r *http.Request) {
 		Path:     "/",
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
-		MaxAge:   86400,
+		MaxAge:   maxAge,
 	})
 
 	masterKey := ""
@@ -64,10 +78,16 @@ func (s *Service) handleLogin(w http.ResponseWriter, r *http.Request) {
 		"token":        token,
 		"user":         user,
 		"masterApiKey": masterKey,
+		"rememberMe":   req.RememberMe,
 	})
 }
 
-func (s *Service) handleLogout(w http.ResponseWriter, _ *http.Request) {
+func (s *Service) handleLogout(w http.ResponseWriter, r *http.Request) {
+	if token := extractBearerOrCookieToken(r); token != "" {
+		if sid := s.SessionIDFromToken(token); sid != "" {
+			_ = s.RevokeSession(sid)
+		}
+	}
 	http.SetCookie(w, &http.Cookie{
 		Name:     "replacearr_token",
 		Value:    "",
@@ -77,6 +97,88 @@ func (s *Service) handleLogout(w http.ResponseWriter, _ *http.Request) {
 		MaxAge:   -1,
 	})
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (s *Service) handleListSessions(w http.ResponseWriter, r *http.Request) {
+	user := UserFromContext(r.Context())
+	if user == nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+	sessions, err := s.ListSessions(user.ID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	current := SessionFromContext(r.Context())
+	currentID := ""
+	if current != nil {
+		currentID = current.ID
+	}
+	for i := range sessions {
+		sessions[i].Current = sessions[i].ID == currentID
+	}
+	if sessions == nil {
+		sessions = []domain.AuthSession{}
+	}
+	writeJSON(w, http.StatusOK, sessions)
+}
+
+func (s *Service) handleRevokeSession(w http.ResponseWriter, r *http.Request) {
+	user := UserFromContext(r.Context())
+	if user == nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+	id := strings.TrimSpace(r.PathValue("id"))
+	if id == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid session id"})
+		return
+	}
+	sess, err := s.store.GetAuthSession(id)
+	if err != nil || sess.UserID != user.ID {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "session not found"})
+		return
+	}
+	if err := s.RevokeSession(id); err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "session not found"})
+		return
+	}
+	current := SessionFromContext(r.Context())
+	killedCurrent := current != nil && current.ID == id
+	if killedCurrent {
+		http.SetCookie(w, &http.Cookie{
+			Name:     "replacearr_token",
+			Value:    "",
+			Path:     "/",
+			HttpOnly: true,
+			SameSite: http.SameSiteLaxMode,
+			MaxAge:   -1,
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":         "revoked",
+		"id":             id,
+		"currentSession": killedCurrent,
+	})
+}
+
+func (s *Service) handleRevokeOtherSessions(w http.ResponseWriter, r *http.Request) {
+	user := UserFromContext(r.Context())
+	current := SessionFromContext(r.Context())
+	if user == nil || current == nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+	n, err := s.RevokeOtherSessions(user.ID, current.ID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":  "revoked",
+		"revoked": n,
+	})
 }
 
 func (s *Service) handleMe(w http.ResponseWriter, r *http.Request) {

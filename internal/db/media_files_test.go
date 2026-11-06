@@ -8,6 +8,61 @@ import (
 	"github.com/replacearr/replacearr/internal/domain"
 )
 
+func TestListMovieAndEpisodeFilePaths(t *testing.T) {
+	store := openTestStore(t)
+	dir := t.TempDir()
+	video := filepath.Join(dir, "Film (2020).mkv")
+	if err := os.WriteFile(video, []byte("fake-video"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mv, err := store.CreateMovie(domain.Movie{
+		Title: "Film", Year: 2020, QualityProfileID: 1, RootFolderPath: dir, Monitored: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpsertMovieFile(mv.ID, video, "Film.2020", "", 10); err != nil {
+		t.Fatal(err)
+	}
+	paths, err := store.ListMovieFilePaths(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(paths) != 1 || paths[0] != video {
+		t.Fatalf("movie paths: %+v", paths)
+	}
+
+	sr, err := store.CreateSeries(domain.Series{
+		Title: "Show", QualityProfileID: 1, RootFolderPath: dir, Path: dir, Monitored: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.ReplaceEpisodesForSeries(sr.ID, []domain.Episode{{
+		SeasonNumber: 1, EpisodeNumber: 1, Title: "Pilot", Monitored: true,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	eps, err := store.ListEpisodes(sr.ID)
+	if err != nil || len(eps) == 0 {
+		t.Fatalf("episodes: %v", err)
+	}
+	epVideo := filepath.Join(dir, "Show - S01E01.mkv")
+	if err := os.WriteFile(epVideo, []byte("ep"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpsertEpisodeFile(sr.ID, eps[0].ID, epVideo, "Show.S01E01", "", 2); err != nil {
+		t.Fatal(err)
+	}
+	epPaths, err := store.ListEpisodeFilePaths(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(epPaths) != 1 || epPaths[0] != epVideo {
+		t.Fatalf("episode paths: %+v", epPaths)
+	}
+}
+
 func TestUpsertMovieAndEpisodeFiles(t *testing.T) {
 	store := openTestStore(t)
 	dir := t.TempDir()
@@ -128,14 +183,15 @@ func TestUpdateAndDeleteMovieFile(t *testing.T) {
 	if err != nil || len(extras) == 0 {
 		t.Fatalf("extras: %v len=%d", err, len(extras))
 	}
-	if err := store.DeleteMovieExtraFile(mv.ID, "Film (2021).en.srt"); err != nil {
+	bin := filepath.Join(t.TempDir(), "RecycleBin")
+	if err := store.DeleteMovieExtraFile(mv.ID, "Film (2021).en.srt", bin); err != nil {
 		t.Fatalf("delete extra: %v", err)
 	}
 	if _, err := os.Stat(sidecar); !os.IsNotExist(err) {
 		t.Fatalf("sidecar still present: %v", err)
 	}
 
-	if err := store.DeleteMovieFile(mf.ID, true); err != nil {
+	if err := store.DeleteMovieFile(mf.ID, true, bin); err != nil {
 		t.Fatalf("delete media: %v", err)
 	}
 	if _, err := os.Stat(video); !os.IsNotExist(err) {

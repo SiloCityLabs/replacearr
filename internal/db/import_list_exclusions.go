@@ -3,13 +3,11 @@ package db
 import (
 	"database/sql"
 	"errors"
-	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/replacearr/replacearr/internal/domain"
+	"github.com/replacearr/replacearr/internal/mediafile"
 )
 
 func (s *Store) AddImportListExclusion(item domain.ImportListExclusion) (*domain.ImportListExclusion, error) {
@@ -80,8 +78,8 @@ func (s *Store) IsImportListExcluded(mediaType string, tmdbID, tvdbID int, imdbI
 	return true, nil
 }
 
-// DeleteMovieDiskFiles removes the movie folder from disk when it lives under the configured root.
-func (s *Store) DeleteMovieDiskFiles(mv *domain.Movie) error {
+// DeleteMovieDiskFiles moves the movie folder into the recycle bin when it lives under the configured root.
+func (s *Store) DeleteMovieDiskFiles(mv *domain.Movie, recycleBin string) error {
 	if mv == nil {
 		return nil
 	}
@@ -89,18 +87,47 @@ func (s *Store) DeleteMovieDiskFiles(mv *domain.Movie) error {
 	if path == "" {
 		return nil
 	}
-	root := strings.TrimSpace(mv.RootFolderPath)
-	if root == "" {
-		return fmt.Errorf("refusing to delete files without a root folder")
+	return mediafile.DeleteUnderRoot(path, mv.RootFolderPath, recycleBin)
+}
+
+// DeleteSeriesDiskFiles moves the series folder into the recycle bin when it lives under the configured root.
+func (s *Store) DeleteSeriesDiskFiles(sr *domain.Series, recycleBin string) error {
+	if sr == nil {
+		return nil
 	}
-	cleanPath := filepath.Clean(path)
-	cleanRoot := filepath.Clean(root)
-	sep := string(os.PathSeparator)
-	if cleanPath == cleanRoot || !strings.HasPrefix(cleanPath, cleanRoot+sep) {
-		return fmt.Errorf("movie path %q is outside root folder %q", cleanPath, cleanRoot)
+	path := strings.TrimSpace(sr.Path)
+	if path == "" {
+		return nil
 	}
-	if err := os.RemoveAll(cleanPath); err != nil && !os.IsNotExist(err) {
+	return mediafile.DeleteUnderRoot(path, sr.RootFolderPath, recycleBin)
+}
+
+// DeleteArtistDiskFiles moves the artist folder into the recycle bin when it lives under the configured root.
+func (s *Store) DeleteArtistDiskFiles(a *domain.Artist, recycleBin string) error {
+	if a == nil {
+		return nil
+	}
+	path := strings.TrimSpace(a.Path)
+	if path == "" {
+		return nil
+	}
+	return mediafile.DeleteUnderRoot(path, a.RootFolderPath, recycleBin)
+}
+
+// DeleteBookDiskFiles moves each edition path for the book into the recycle bin.
+func (s *Store) DeleteBookDiskFiles(bookID int64, recycleBin string) error {
+	editions, err := s.ListEditions(bookID, "")
+	if err != nil {
 		return err
+	}
+	for _, e := range editions {
+		path := strings.TrimSpace(e.Path)
+		if path == "" {
+			continue
+		}
+		if err := mediafile.DeleteUnderRoot(path, e.RootFolderPath, recycleBin); err != nil {
+			return err
+		}
 	}
 	return nil
 }

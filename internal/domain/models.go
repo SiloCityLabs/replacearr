@@ -88,6 +88,20 @@ type APIKey struct {
 	CreatedAt   time.Time  `json:"createdAt"`
 }
 
+// AuthSession is a server-tracked login so JWTs can be listed and revoked.
+type AuthSession struct {
+	ID         string     `json:"id"`
+	UserID     int64      `json:"userId"`
+	CreatedAt  time.Time  `json:"createdAt"`
+	LastSeenAt time.Time  `json:"lastSeenAt"`
+	ExpiresAt  time.Time  `json:"expiresAt"`
+	RevokedAt  *time.Time `json:"revokedAt,omitempty"`
+	RememberMe bool       `json:"rememberMe"`
+	UserAgent  string     `json:"userAgent"`
+	IPAddress  string     `json:"ipAddress"`
+	Current    bool       `json:"current,omitempty"`
+}
+
 // Shared *arr Core Models
 
 type Tag struct {

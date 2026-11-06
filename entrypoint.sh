@@ -5,10 +5,10 @@ set -euo pipefail
 
 WEB_DIR="${WEB_DIR:-web}"
 CONFIG_DIR="${REPLACEARR_CONFIG_DIR:-/config}"
-PLUGIN_DIR="${REPLACEARR_PLUGIN_DIR:-bin/plugins}"
-DEFINITIONS_DIR="${REPLACEARR_DEFINITIONS_DIR:-${CONFIG_DIR}/definitions}"
+PLUGIN_DIR="${CONFIG_DIR}/plugins"
+DEFINITIONS_DIR="${CONFIG_DIR}/definitions"
 # Bundled Replacearr-owned catalog (repo ./definitions, bind-mounted at /workspace).
-BUNDLED_DEFINITIONS="${REPLACEARR_BUNDLED_DEFINITIONS:-/workspace/definitions}"
+BUNDLED_DEFINITIONS="/workspace/definitions"
 
 mkdir -p /data/TV /data/Movies /data/Music /data/Books /data/Audiobooks /data/downloads \
 	"${CONFIG_DIR}" \
@@ -50,6 +50,24 @@ fi
 
 echo "==> Starting Replacearr with Air live reload (:8989) and Vite dev server (:5173)..."
 echo "==> Edit a .go file under the bind-mounted workspace to rebuild/restart the API process."
+
+# Clear any leftover API listener from a previous Air child before we start.
+# Without this, a deleted-inode process can hold :8989 across Air rebuild failures.
+PORT="${REPLACEARR_PORT:-8989}"
+if command -v fuser >/dev/null 2>&1; then
+	fuser -k "${PORT}/tcp" >/dev/null 2>&1 || true
+fi
+# Kill by /proc exe identity (safer than pkill -f, which can match wrappers).
+for proc in /proc/[0-9]*; do
+	pid="${proc#/proc/}"
+	exe="$(readlink "${proc}/exe" 2>/dev/null || true)"
+	case "${exe}" in
+		*'/tmp/replacearr'|*'/tmp/replacearr (deleted)')
+			kill -9 "${pid}" >/dev/null 2>&1 || true
+			;;
+	esac
+done
+
 trap 'kill 0' INT TERM
 air -c .air.toml &
 (cd "${WEB_DIR}" && npm run dev) &

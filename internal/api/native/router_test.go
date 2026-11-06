@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"testing"
 
 	"github.com/replacearr/replacearr/internal/auth"
@@ -19,13 +18,8 @@ func newTestStack(t *testing.T) (*Server, *auth.Service, *http.ServeMux) {
 	t.Helper()
 	dir := t.TempDir()
 	t.Setenv("REPLACEARR_CONFIG_DIR", dir)
-	t.Setenv("REPLACEARR_DB_PATH", filepath.Join(dir, "replacearr.db"))
-	t.Setenv("REPLACEARR_PLUGIN_DIR", filepath.Join(dir, "plugins"))
-	t.Setenv("REPLACEARR_DEFINITIONS_DIR", filepath.Join(dir, "definitions"))
 	t.Setenv("REPLACEARR_ADMIN_USER", "admin")
 	t.Setenv("REPLACEARR_ADMIN_PASS", "replacearr")
-	t.Setenv("REPLACEARR_JWT_SECRET", "test-jwt-secret-at-least-32-bytes-long")
-	t.Setenv("REPLACEARR_FLARESOLVERR_URL", "http://127.0.0.1:1/")
 
 	cfg := config.Load()
 	store, err := db.Open(cfg.DatabasePath)
@@ -112,9 +106,9 @@ func TestSeriesAndIndexerProxyFlow(t *testing.T) {
 	if err := json.Unmarshal(rr.Body.Bytes(), &overview); err != nil {
 		t.Fatal(err)
 	}
-	// FlareSolverr URL comes from config; proxies are no longer auto-seeded.
-	if overview.System.FlareSolverrURL == "" {
-		t.Fatalf("overview missing flaresolverr url from config: %+v", overview)
+	// FlareSolverr URL comes from an enabled indexer proxy; none are seeded by default.
+	if overview.System.FlareSolverrURL != "" {
+		t.Fatalf("overview should have empty flaresolverr url without proxies: %+v", overview)
 	}
 
 	rr = httptest.NewRecorder()

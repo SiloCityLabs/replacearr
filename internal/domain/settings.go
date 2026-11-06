@@ -9,7 +9,6 @@ type AppConfig struct {
 	Security              SecurityConfig        `json:"security"`
 	Proxy                 ProxyConfig           `json:"proxy"`
 	Logging               LoggingConfig         `json:"logging"`
-	Analytics             AnalyticsConfig       `json:"analytics"`
 	Updates               UpdateConfig          `json:"updates"`
 	Backup                BackupConfig          `json:"backup"`
 	UI                    UIConfig              `json:"ui"`
@@ -26,6 +25,12 @@ type AppConfig struct {
 	MetadataConsumers     []MetadataConsumer    `json:"metadataConsumers"`
 	RemotePathMappings    []RemotePathMapping   `json:"remotePathMappings"`
 	Subtitles             SubtitlesConfig       `json:"subtitles"`
+	Plugins               PluginsConfig         `json:"plugins"`
+}
+
+// PluginsConfig holds marketplace and plugin-host settings editable in the UI.
+type PluginsConfig struct {
+	CatalogURL string `json:"catalogUrl"`
 }
 
 // SubtitlesConfig holds native in-house subtitle settings (OpenSubtitles + defaults).
@@ -86,10 +91,6 @@ type LoggingConfig struct {
 	LogSizeLimit       int    `json:"logSizeLimit"`
 	HistoryCleanupDays int    `json:"historyCleanupDays"`
 	LogIndexerResponse bool   `json:"logIndexerResponse"`
-}
-
-type AnalyticsConfig struct {
-	Enabled bool `json:"enabled"`
 }
 
 type UpdateConfig struct {
@@ -174,7 +175,17 @@ type DownloadClientOptions struct {
 	EnableCompletedDownloadHandling           bool   `json:"enableCompletedDownloadHandling"`
 	AutoRedownloadFailed                      bool   `json:"autoRedownloadFailed"`
 	AutoRedownloadFailedFromInteractiveSearch bool   `json:"autoRedownloadFailedFromInteractiveSearch"`
-	DownloadClientWorkingFolders              string `json:"downloadClientWorkingFolders"`
+	// DeleteTorrentAndDataWhenComplete removes the torrent (and its data) from the
+	// download client after a successful import.
+	DeleteTorrentAndDataWhenComplete bool `json:"deleteTorrentAndDataWhenComplete"`
+	// DeleteWhenSeedingComplete delays that removal until the client reports seeding
+	// is finished (stopped after ratio/idle goals). Implies DeleteTorrentAndDataWhenComplete.
+	DeleteWhenSeedingComplete    bool   `json:"deleteWhenSeedingComplete"`
+	DownloadClientWorkingFolders string `json:"downloadClientWorkingFolders"`
+	// DiscoverSubnets is a comma-separated list of extra CIDRs for client discovery.
+	DiscoverSubnets string `json:"discoverSubnets"`
+	// HostProcNet is the path to a bind-mounted host /proc/net (LAN route discovery).
+	HostProcNet string `json:"hostProcNet"`
 }
 
 type QualityDefinition struct {
@@ -317,7 +328,6 @@ func DefaultAppConfig() AppConfig {
 			LogSizeLimit:       1,
 			HistoryCleanupDays: 30,
 		},
-		Analytics: AnalyticsConfig{Enabled: false},
 		Updates: UpdateConfig{
 			Branch:              "main",
 			UpdateAutomatically: false,
@@ -359,7 +369,7 @@ func DefaultAppConfig() AppConfig {
 			AnalyzeVideoFiles:             true,
 			RescanAfterRefresh:            "always",
 			FileDate:                      "none",
-			RecycleBinCleanupDays:         7,
+			RecycleBinCleanupDays:         30,
 			ChmodFolder:                   "755",
 			UnwantedFileExtensions:        ".exe",
 			DeleteUnwantedFiles:           true,
@@ -370,6 +380,10 @@ func DefaultAppConfig() AppConfig {
 			AutoRedownloadFailed:                      true,
 			AutoRedownloadFailedFromInteractiveSearch: true,
 			DownloadClientWorkingFolders:              "_UNPACK_|_FAILED_",
+			HostProcNet:                               "/host/proc/net",
+		},
+		Plugins: PluginsConfig{
+			CatalogURL: "https://raw.githubusercontent.com/replacearr/replacearr-plugins/main/registry.json",
 		},
 		QualityDefinitions: BuiltinQualityDefinitions(),
 		DelayProfiles:      []DelayProfile{},
@@ -498,6 +512,9 @@ func (c *AppConfig) Normalize() {
 	if strings.TrimSpace(c.MediaManagement.ExtraFileExtensions) == "" {
 		c.MediaManagement.ExtraFileExtensions = "srt,ass,ssa,vtt,sub"
 	}
+	if c.MediaManagement.RecycleBinCleanupDays <= 0 {
+		c.MediaManagement.RecycleBinCleanupDays = 30
+	}
 
 	c.Security.AuthenticationMethod = "forms"
 	if c.Updates.Mechanism == "" {
@@ -508,6 +525,12 @@ func (c *AppConfig) Normalize() {
 	}
 	if c.IndexerOptions.RssSyncInterval > 120 {
 		c.IndexerOptions.RssSyncInterval = 120
+	}
+	if strings.TrimSpace(c.Plugins.CatalogURL) == "" {
+		c.Plugins.CatalogURL = "https://raw.githubusercontent.com/replacearr/replacearr-plugins/main/registry.json"
+	}
+	if strings.TrimSpace(c.DownloadClientOptions.HostProcNet) == "" {
+		c.DownloadClientOptions.HostProcNet = "/host/proc/net"
 	}
 	c.Host.Port = normalizePort(c.Host.Port, 8989)
 	c.Host.SSLPort = normalizePort(c.Host.SSLPort, 9898)

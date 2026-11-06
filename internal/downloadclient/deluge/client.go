@@ -243,6 +243,14 @@ func IsCompleted(state string, progress float64) bool {
 	return progress >= 0.999
 }
 
+// IsSeedingComplete reports whether Deluge has paused after meeting seed goals.
+func IsSeedingComplete(state string, progress float64) bool {
+	if progress < 0.999 {
+		return false
+	}
+	return strings.EqualFold(state, "paused")
+}
+
 func (c *Client) ensureLogin(ctx context.Context) error {
 	c.mu.Lock()
 	logged := c.logged

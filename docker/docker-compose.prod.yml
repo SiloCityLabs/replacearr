@@ -26,13 +26,9 @@ services:
       - TZ=UTC
       - REPLACEARR_PORT=8989
       - REPLACEARR_CONFIG_DIR=/config
-      - REPLACEARR_PLUGIN_DIR=/config/plugins
       # Initial bootstrap admin credentials (used only on first database creation)
       - REPLACEARR_ADMIN_USER=admin
       - REPLACEARR_ADMIN_PASS=replacearr
-      - REPLACEARR_FLARESOLVERR_URL=http://flaresolverr:8191/
-      # Optional: set a deterministic system API key for automation
-      # - REPLACEARR_API_KEY=your-32-char-api-key
     ports:
       - "8989:8989"
     volumes:

@@ -13,6 +13,7 @@ import {
   Settings,
   Server,
   FolderCog,
+  Trash2,
   SlidersHorizontal,
   Gauge,
   ListPlus,
@@ -20,6 +21,7 @@ import {
   Captions,
   Tags,
   Palette,
+  MonitorSmartphone,
   Activity,
   ListTodo,
   Archive,
@@ -65,6 +67,7 @@ const MEDIA_CHILDREN = (prefix: MediaNavType): NavChild[] => [
 
 export const SETTINGS_CHILDREN: NavChild[] = [
   { id: 'settings.media', label: 'Media Management', icon: FolderCog },
+  { id: 'settings.recycleBin', label: 'Recycle Bin', icon: Trash2 },
   { id: 'settings.profiles', label: 'Profiles', icon: SlidersHorizontal },
   { id: 'settings.quality', label: 'Quality', icon: Gauge },
   { id: 'settings.importLists', label: 'Import Lists', icon: ListPlus },
@@ -73,6 +76,7 @@ export const SETTINGS_CHILDREN: NavChild[] = [
   { id: 'settings.tags', label: 'Tags', icon: Tags },
   { id: 'settings.general', label: 'General', icon: Settings },
   { id: 'settings.ui', label: 'UI', icon: Palette },
+  { id: 'settings.sessions', label: 'Sessions', icon: MonitorSmartphone },
 ];
 
 export const SYSTEM_CHILDREN: NavChild[] = [

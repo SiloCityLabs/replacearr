@@ -52,23 +52,28 @@ func TestImportListExclusionAndDiskDelete(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	bin := filepath.Join(t.TempDir(), "RecycleBin")
 	mv := &domain.Movie{
 		Title:          "Test Movie",
 		Path:           movieDir,
 		RootFolderPath: dir,
 	}
-	if err := store.DeleteMovieDiskFiles(mv); err != nil {
+	if err := store.DeleteMovieDiskFiles(mv, bin); err != nil {
 		t.Fatalf("delete disk files: %v", err)
 	}
 	if _, err := os.Stat(movieDir); !os.IsNotExist(err) {
-		t.Fatalf("expected movie folder removed, err=%v", err)
+		t.Fatalf("expected movie folder moved out, err=%v", err)
+	}
+	entries, err := os.ReadDir(bin)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("expected one recycle bin entry, err=%v entries=%v", err, entries)
 	}
 
 	outside := &domain.Movie{
 		Path:           filepath.Join(os.TempDir(), "not-under-root"),
 		RootFolderPath: dir,
 	}
-	if err := store.DeleteMovieDiskFiles(outside); err == nil {
+	if err := store.DeleteMovieDiskFiles(outside, bin); err == nil {
 		t.Fatal("expected refusal for path outside root")
 	}
 }

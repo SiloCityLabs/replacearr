@@ -9,7 +9,9 @@ import type {
 import { api } from '../../api';
 import { GeneralPage } from './GeneralPage';
 import { UiPage } from './UiPage';
+import { SessionsPage } from './SessionsPage';
 import { MediaManagementPage } from './MediaManagementPage';
+import { RecycleBinPage } from './RecycleBinPage';
 import { ProfilesPage } from './ProfilesPage';
 import { QualityPage } from './QualityPage';
 import { ImportListsPage } from './ImportListsPage';
@@ -17,9 +19,11 @@ import { MetadataPage } from './MetadataPage';
 import { SubtitlesPage } from './SubtitlesPage';
 import { TagsPage } from './TagsPage';
 import { errorText } from './fields';
+import type { NavView } from '../../nav';
 
 export type SettingsPageId =
   | 'media'
+  | 'recycleBin'
   | 'profiles'
   | 'quality'
   | 'importLists'
@@ -27,7 +31,8 @@ export type SettingsPageId =
   | 'subtitles'
   | 'tags'
   | 'general'
-  | 'ui';
+  | 'ui'
+  | 'sessions';
 
 export interface SettingsTabProps {
   page: SettingsPageId;
@@ -40,6 +45,8 @@ export interface SettingsTabProps {
   onNotify: (msg: string, isError?: boolean) => void;
   onConfigChange: (config: AppConfig) => void;
   onDirtyChange?: (dirty: boolean) => void;
+  onNavigate?: (view: NavView) => void;
+  onSignedOut?: () => void;
 }
 
 export const SettingsTab: React.FC<SettingsTabProps> = ({
@@ -52,6 +59,8 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
   onNotify,
   onConfigChange,
   onDirtyChange,
+  onNavigate,
+  onSignedOut,
 }) => {
   const [dirty, setDirty] = useState(false);
   const [localConfig, setLocalConfig] = useState<AppConfig | null>(config);
@@ -116,6 +125,15 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
           onNotify={onNotify}
         />
       );
+    case 'recycleBin':
+      return (
+        <RecycleBinPage
+          config={localConfig}
+          onSave={save}
+          onDirtyChange={handleDirty}
+          onNavigate={onNavigate ?? (() => undefined)}
+        />
+      );
     case 'profiles':
       return (
         <ProfilesPage
@@ -157,6 +175,13 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
       );
     case 'ui':
       return <UiPage config={localConfig} onSave={save} onDirtyChange={handleDirty} />;
+    case 'sessions':
+      return (
+        <SessionsPage
+          onNotify={onNotify}
+          onSignedOut={onSignedOut ?? (() => undefined)}
+        />
+      );
     default:
       return null;
   }

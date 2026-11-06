@@ -31,7 +31,6 @@ services:
       - TZ=Etc/UTC
       - REPLACEARR_ADMIN_USER=admin
       - REPLACEARR_ADMIN_PASS=change-me-now
-      - REPLACEARR_FLARESOLVERR_URL=http://flaresolverr:8191/
     volumes:
       - ./config:/config
       - /path/to/media:/data
@@ -83,10 +82,11 @@ Then open **http://\<your-host\>:8989** and sign in with the admin credentials y
 On the very first start (when the database contains no users), Replacearr:
 
 1. Creates the admin account from `REPLACEARR_ADMIN_USER` / `REPLACEARR_ADMIN_PASS`.
-2. Creates a master API key with full access and writes it to **`/config/api_key.txt`**. If `REPLACEARR_API_KEY` is set, that value is used instead.
-3. Generates a JWT signing secret and stores it at **`/config/jwt_secret.key`** (unless `REPLACEARR_JWT_SECRET` is set).
-4. Seeds a FlareSolverr indexer proxy pointing at `REPLACEARR_FLARESOLVERR_URL`.
-5. Copies any image-bundled plugins into `/config/plugins` (production images ship none by default; SDK examples stay in-repo under `examples/plugins/`).
+2. Creates a master API key with full access and writes it to **`/config/api_key.txt`**.
+3. Generates a JWT signing secret and stores it at **`/config/jwt_secret.key`**.
+4. Copies any image-bundled plugins into `/config/plugins` (production images ship none by default; SDK examples stay in-repo under `examples/plugins/`).
+
+Add FlareSolverr under **Indexers → FlareSolverr** (e.g. `http://flaresolverr:8191/` when using Compose).
 
 To read the generated master API key:
 
@@ -94,7 +94,7 @@ To read the generated master API key:
 docker exec replacearr cat /config/api_key.txt
 ```
 
-> **Important:** the admin credentials, API key, and FlareSolverr URL variables are only applied on first startup. After that, change them from the web UI. Updating the environment variables later has no effect on an existing database.
+> **Important:** admin credentials are only applied on first startup. After that, change users, API keys, FlareSolverr, discovery, and the plugin catalog from the web UI.
 
 ---
 
@@ -120,11 +120,7 @@ docker exec replacearr cat /config/api_key.txt
 
 | Variable | Default | Description |
 | :--- | :--- | :--- |
-| `REPLACEARR_CONFIG_DIR` | `/config` | Base directory for the database, secrets, plugins, and definitions. |
-| `REPLACEARR_DB_PATH` | `/config/replacearr.db` | SQLite database file. |
-| `REPLACEARR_PLUGIN_DIR` | `/config/plugins` | Directory scanned for executable Go plugins. |
-| `REPLACEARR_PLUGIN_CATALOG_URL` | replacearr-plugins `registry.json` | Marketplace registry URL used by Plugins → Marketplace. |
-| `REPLACEARR_DEFINITIONS_DIR` | `/config/definitions` | Directory scanned for Cardigann YAML indexer definitions. |
+| `REPLACEARR_CONFIG_DIR` | `/config` | Base directory for the database (`replacearr.db`), secrets, plugins (`plugins/`), and definitions (`definitions/`). |
 
 ### Authentication (first run only)
 
@@ -132,14 +128,8 @@ docker exec replacearr cat /config/api_key.txt
 | :--- | :--- | :--- |
 | `REPLACEARR_ADMIN_USER` | `admin` | Username of the initial admin account. |
 | `REPLACEARR_ADMIN_PASS` | `replacearr` | Password of the initial admin account. **Change this.** |
-| `REPLACEARR_API_KEY` | *(auto-generated)* | Fixed master API key, useful for automation. Generated as 32 hex characters if unset. |
-| `REPLACEARR_JWT_SECRET` | *(auto-generated)* | Secret used to sign login tokens. If unset, it is generated once and persisted to `/config/jwt_secret.key`. |
 
-### Integrations
-
-| Variable | Default | Description |
-| :--- | :--- | :--- |
-| `REPLACEARR_FLARESOLVERR_URL` | `http://localhost:8191/` | FlareSolverr endpoint seeded as the default indexer proxy on first run. Inside Compose, use the service name, e.g. `http://flaresolverr:8191/`. |
+FlareSolverr, download-client discovery subnets / host `/proc/net`, and the plugin marketplace registry URL are configured in the UI (not environment variables). The master API key and JWT secret are auto-generated into `/config`.
 
 ---
 

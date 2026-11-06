@@ -93,9 +93,10 @@ func TestLoginJWTAndHandlersFlow(t *testing.T) {
 	}
 
 	// 2. Valid login sets cookie and returns JWT + masterApiKey
-	loginBody, _ := json.Marshal(map[string]string{
-		"username": "admin",
-		"password": "supersecret",
+	loginBody, _ := json.Marshal(map[string]any{
+		"username":   "admin",
+		"password":   "supersecret",
+		"rememberMe": false,
 	})
 	req = httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", bytes.NewReader(loginBody))
 	rec = httptest.NewRecorder()
@@ -108,12 +109,16 @@ func TestLoginJWTAndHandlersFlow(t *testing.T) {
 		Token        string      `json:"token"`
 		User         domain.User `json:"user"`
 		MasterAPIKey string      `json:"masterApiKey"`
+		RememberMe   bool        `json:"rememberMe"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &loginResp); err != nil {
 		t.Fatalf("unmarshal login response: %v", err)
 	}
 	if loginResp.Token == "" || loginResp.User.Username != "admin" || loginResp.MasterAPIKey != svc.GetMasterAPIKey() {
 		t.Fatalf("unexpected login response: %+v", loginResp)
+	}
+	if loginResp.RememberMe {
+		t.Fatalf("expected rememberMe false in response")
 	}
 
 	var authCookie *http.Cookie
@@ -125,6 +130,33 @@ func TestLoginJWTAndHandlersFlow(t *testing.T) {
 	}
 	if authCookie == nil || authCookie.Value != loginResp.Token {
 		t.Fatalf("expected replacearr_token cookie to be set")
+	}
+	if authCookie.MaxAge != 0 {
+		t.Fatalf("expected session cookie MaxAge 0, got %d", authCookie.MaxAge)
+	}
+
+	// 2b. Remember-me login uses a persistent cookie
+	rememberBody, _ := json.Marshal(map[string]any{
+		"username":   "admin",
+		"password":   "supersecret",
+		"rememberMe": true,
+	})
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", bytes.NewReader(rememberBody))
+	rec = httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 on remember-me login, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var rememberCookie *http.Cookie
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == "replacearr_token" {
+			rememberCookie = c
+			break
+		}
+	}
+	wantMaxAge := int(RememberTokenTTL.Seconds())
+	if rememberCookie == nil || rememberCookie.MaxAge != wantMaxAge {
+		t.Fatalf("expected remember-me MaxAge %d, got %+v", wantMaxAge, rememberCookie)
 	}
 
 	// 3. Call /api/v1/auth/me using Bearer JWT
@@ -173,10 +205,111 @@ func TestLoginJWTAndHandlersFlow(t *testing.T) {
 	}
 
 	req = httptest.NewRequest(http.MethodPost, "/api/v1/auth/logout", nil)
+	req.Header.Set("Authorization", "Bearer "+loginResp.Token)
 	rec = httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200 on logout, got %d", rec.Code)
+	}
+
+	// Logout must revoke the server-side session so the JWT stops working.
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/auth/me", nil)
+	req.Header.Set("Authorization", "Bearer "+loginResp.Token)
+	rec = httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 after logout, got %d", rec.Code)
+	}
+}
+
+func TestSessionListAndRevoke(t *testing.T) {
+	svc, _, _ := setupTestService(t)
+	mux := http.NewServeMux()
+	svc.RegisterRoutes(mux)
+
+	login := func(remember bool) string {
+		t.Helper()
+		body, _ := json.Marshal(map[string]any{
+			"username":   "admin",
+			"password":   "supersecret",
+			"rememberMe": remember,
+		})
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", bytes.NewReader(body))
+		req.Header.Set("User-Agent", "ReplacearrTest/1.0")
+		req.RemoteAddr = "203.0.113.10:54321"
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("login status %d: %s", rec.Code, rec.Body.String())
+		}
+		var resp struct {
+			Token string `json:"token"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil || resp.Token == "" {
+			t.Fatalf("login token: %v body=%s", err, rec.Body.String())
+		}
+		return resp.Token
+	}
+
+	tokenA := login(true)
+	tokenB := login(false)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/sessions", nil)
+	req.Header.Set("Authorization", "Bearer "+tokenA)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list sessions status %d: %s", rec.Code, rec.Body.String())
+	}
+	var sessions []domain.AuthSession
+	if err := json.Unmarshal(rec.Body.Bytes(), &sessions); err != nil {
+		t.Fatalf("unmarshal sessions: %v", err)
+	}
+	if len(sessions) < 2 {
+		t.Fatalf("expected at least 2 sessions, got %d", len(sessions))
+	}
+	var currentID, otherID string
+	for _, sess := range sessions {
+		if sess.Current {
+			currentID = sess.ID
+		} else {
+			otherID = sess.ID
+		}
+	}
+	if currentID == "" || otherID == "" {
+		t.Fatalf("expected current and other session ids: %+v", sessions)
+	}
+
+	req = httptest.NewRequest(http.MethodDelete, "/api/v1/auth/sessions/"+otherID, nil)
+	req.Header.Set("Authorization", "Bearer "+tokenA)
+	rec = httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("revoke session status %d: %s", rec.Code, rec.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/auth/me", nil)
+	req.Header.Set("Authorization", "Bearer "+tokenB)
+	rec = httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected revoked session unauthorized, got %d", rec.Code)
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/auth/sessions/revoke-others", nil)
+	req.Header.Set("Authorization", "Bearer "+tokenA)
+	rec = httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("revoke others status %d: %s", rec.Code, rec.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/auth/me", nil)
+	req.Header.Set("Authorization", "Bearer "+tokenA)
+	rec = httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("current session should still work, got %d", rec.Code)
 	}
 }
 
@@ -279,7 +412,7 @@ func TestRBACPermissionRejection(t *testing.T) {
 	}
 
 	// Authenticate as viewer_user
-	viewerUser, viewerToken, err := svc.Authenticate("viewer_user", "viewerpass123")
+	viewerUser, viewerToken, _, err := svc.Authenticate("viewer_user", "viewerpass123", LoginOptions{})
 	if err != nil {
 		t.Fatalf("authenticate viewer_user: %v", err)
 	}

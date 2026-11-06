@@ -18,6 +18,8 @@ describe('viewHistory', () => {
     expect(pathToView('/movies/blocklist')).toBe('movies.blocklist');
     expect(pathToView('/settings')).toBe('settings.media');
     expect(pathToView('/settings/ui')).toBe('settings.ui');
+    expect(pathToView('/settings/recycleBin')).toBe('settings.recycleBin');
+    expect(pathToView('/settings/sessions')).toBe('settings.sessions');
     expect(pathToView('/system')).toBe('system.status');
     expect(pathToView('/nope')).toBeNull();
     expect(pathToView('/settings/nope')).toBeNull();
@@ -26,6 +28,8 @@ describe('viewHistory', () => {
   it('validates known views', () => {
     expect(isKnownView('queue')).toBe(true);
     expect(isKnownView('books.import')).toBe(true);
+    expect(isKnownView('settings.recycleBin')).toBe(true);
+    expect(isKnownView('settings.sessions')).toBe(true);
     expect(isKnownView('not.a.view')).toBe(false);
   });
 });

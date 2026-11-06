@@ -1,13 +1,15 @@
 import React, { useState } from 'react';
 import { Lock, User as UserIcon, AlertCircle } from 'lucide-react';
+import { getRememberMePreference } from '../api';
 
 interface LoginViewProps {
-  onLogin: (username: string, password: string) => Promise<void>;
+  onLogin: (username: string, password: string, rememberMe: boolean) => Promise<void>;
 }
 
 export const LoginView: React.FC<LoginViewProps> = ({ onLogin }) => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [rememberMe, setRememberMe] = useState(getRememberMePreference);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -16,7 +18,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLogin }) => {
     setError(null);
     setLoading(true);
     try {
-      await onLogin(username, password);
+      await onLogin(username, password, rememberMe);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Authentication failed');
     } finally {
@@ -74,6 +76,16 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLogin }) => {
               />
             </div>
           </div>
+
+          <label className="flex items-center gap-2.5 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={rememberMe}
+              onChange={(e) => setRememberMe(e.target.checked)}
+              className="w-4 h-4 rounded border-slate-700 bg-slate-950 text-indigo-600 focus:ring-indigo-500 focus:ring-offset-0 focus:ring-1"
+            />
+            <span className="text-xs text-slate-300">Keep me signed in</span>
+          </label>
 
           <button
             type="submit"

@@ -4,6 +4,7 @@ import type {
   AppConfig,
   Artist,
   AuthResponse,
+  AuthSession,
   Author,
   BackupFile,
   BlocklistItem,
@@ -26,6 +27,7 @@ import type {
   Indexer,
   IndexerProxy,
   FileDetails,
+  LibraryImportResult,
   LibraryImportScanResult,
   LogEntry,
   MediaFileInfo,
@@ -54,21 +56,48 @@ import type {
 } from './types';
 
 const TOKEN_STORAGE_KEY = 'replacearr_token';
+const REMEMBER_STORAGE_KEY = 'replacearr_remember_me';
+
+export function getRememberMePreference(): boolean {
+  try {
+    const v = localStorage.getItem(REMEMBER_STORAGE_KEY);
+    if (v === null) return true;
+    return v === '1' || v === 'true';
+  } catch {
+    return true;
+  }
+}
+
+export function setRememberMePreference(remember: boolean): void {
+  try {
+    localStorage.setItem(REMEMBER_STORAGE_KEY, remember ? '1' : '0');
+  } catch {
+    // Ignore storage errors
+  }
+}
 
 export function getStoredToken(): string | null {
   try {
-    return localStorage.getItem(TOKEN_STORAGE_KEY);
+    return localStorage.getItem(TOKEN_STORAGE_KEY) || sessionStorage.getItem(TOKEN_STORAGE_KEY);
   } catch {
     return null;
   }
 }
 
-export function setStoredToken(token: string | null): void {
+export function setStoredToken(token: string | null, rememberMe = true): void {
   try {
     if (token) {
-      localStorage.setItem(TOKEN_STORAGE_KEY, token);
+      if (rememberMe) {
+        localStorage.setItem(TOKEN_STORAGE_KEY, token);
+        sessionStorage.removeItem(TOKEN_STORAGE_KEY);
+      } else {
+        sessionStorage.setItem(TOKEN_STORAGE_KEY, token);
+        localStorage.removeItem(TOKEN_STORAGE_KEY);
+      }
+      setRememberMePreference(rememberMe);
     } else {
       localStorage.removeItem(TOKEN_STORAGE_KEY);
+      sessionStorage.removeItem(TOKEN_STORAGE_KEY);
     }
   } catch {
     // Ignore storage errors
@@ -140,13 +169,13 @@ function unwrapArray<T>(val: unknown, fallbackKey?: string): T[] {
 
 export const api = {
   // Auth
-  async login(username: string, password: string): Promise<AuthResponse> {
+  async login(username: string, password: string, rememberMe = true): Promise<AuthResponse> {
     const res = await request<AuthResponse>('/api/v1/auth/login', {
       method: 'POST',
-      body: JSON.stringify({ username, password }),
+      body: JSON.stringify({ username, password, rememberMe }),
     });
     if (res.token) {
-      setStoredToken(res.token);
+      setStoredToken(res.token, rememberMe);
     }
     return res;
   },
@@ -161,6 +190,18 @@ export const api = {
 
   async me(): Promise<AuthResponse> {
     return request<AuthResponse>('/api/v1/auth/me');
+  },
+
+  async getSessions(): Promise<AuthSession[]> {
+    return unwrapArray<AuthSession>(await request('/api/v1/auth/sessions'));
+  },
+
+  async revokeSession(id: string): Promise<{ status: string; id: string; currentSession?: boolean }> {
+    return request(`/api/v1/auth/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  },
+
+  async revokeOtherSessions(): Promise<{ status: string; revoked: number }> {
+    return request('/api/v1/auth/sessions/revoke-others', { method: 'POST' });
   },
 
   // Overview
@@ -186,8 +227,15 @@ export const api = {
     });
   },
 
-  async deleteSeries(id: number): Promise<void> {
-    await request(`/api/v1/series/${id}`, { method: 'DELETE' });
+  async deleteSeries(
+    id: number,
+    options?: { deleteFiles?: boolean; addImportExclusion?: boolean }
+  ): Promise<void> {
+    const params = new URLSearchParams();
+    if (options?.deleteFiles) params.set('deleteFiles', 'true');
+    if (options?.addImportExclusion) params.set('addImportExclusion', 'true');
+    const q = params.toString();
+    await request(`/api/v1/series/${id}${q ? `?${q}` : ''}`, { method: 'DELETE' });
   },
 
   async getEpisodes(seriesId: number): Promise<Episode[]> {
@@ -301,8 +349,11 @@ export const api = {
     });
   },
 
-  async deleteArtist(id: number): Promise<void> {
-    await request(`/api/v1/artists/${id}`, { method: 'DELETE' });
+  async deleteArtist(id: number, options?: { deleteFiles?: boolean }): Promise<void> {
+    const params = new URLSearchParams();
+    if (options?.deleteFiles) params.set('deleteFiles', 'true');
+    const q = params.toString();
+    await request(`/api/v1/artists/${id}${q ? `?${q}` : ''}`, { method: 'DELETE' });
   },
 
   async getAlbums(artistId?: number): Promise<Album[]> {
@@ -360,8 +411,11 @@ export const api = {
     });
   },
 
-  async deleteBook(id: number): Promise<void> {
-    await request(`/api/v1/books/${id}`, { method: 'DELETE' });
+  async deleteBook(id: number, options?: { deleteFiles?: boolean }): Promise<void> {
+    const params = new URLSearchParams();
+    if (options?.deleteFiles) params.set('deleteFiles', 'true');
+    const q = params.toString();
+    await request(`/api/v1/books/${id}${q ? `?${q}` : ''}`, { method: 'DELETE' });
   },
 
   async getEditions(opts?: { bookId?: number; format?: string }): Promise<Edition[]> {
@@ -938,6 +992,7 @@ export const api = {
     mediaType: string;
     path: string;
     rootFolderId?: number;
+    limit?: number;
   }): Promise<LibraryImportScanResult> {
     return request<LibraryImportScanResult>('/api/v1/libraryimport/scan', {
       method: 'POST',
@@ -945,10 +1000,24 @@ export const api = {
     });
   },
 
+  async getLibraryImportScanPage(
+    scanId: string,
+    params?: { offset?: number; limit?: number }
+  ): Promise<LibraryImportScanResult> {
+    const q = new URLSearchParams();
+    if (params?.offset != null) q.set('offset', String(params.offset));
+    if (params?.limit != null) q.set('limit', String(params.limit));
+    const qs = q.toString();
+    return request<LibraryImportScanResult>(
+      `/api/v1/libraryimport/scan/${encodeURIComponent(scanId)}${qs ? `?${qs}` : ''}`
+    );
+  },
+
   async runLibraryImport(payload: {
     mediaType: string;
     rootFolderPath?: string;
     qualityProfileId?: number;
+    scanId?: string;
     items: Array<{
       path: string;
       matchId?: number;
@@ -960,8 +1029,8 @@ export const api = {
       seasonNumber?: number;
       episodeNumber?: number;
     }>;
-  }): Promise<{ imported: number }> {
-    return request<{ imported: number }>('/api/v1/libraryimport', {
+  }): Promise<LibraryImportResult> {
+    return request<LibraryImportResult>('/api/v1/libraryimport', {
       method: 'POST',
       body: JSON.stringify(payload),
     });

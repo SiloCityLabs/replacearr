@@ -176,14 +176,14 @@ export const MovieDetailPanel: React.FC<MovieDetailPanelProps> = ({
   const handleDeleteMediaFile = async (file: MediaFileInfo) => {
     const result = await confirm({
       title: 'Delete media file',
-      message: `Delete "${file.relativePath || file.path}" from the library and from disk? This cannot be undone.`,
+      message: `Delete "${file.relativePath || file.path}" from the library and move it to the recycle bin? Nightly cleanup permanently removes items after retention; System → Tasks can empty the bin immediately.`,
       confirmLabel: 'Delete file',
       danger: true,
     });
     if (!result) return;
     try {
       await api.deleteMovieFile(movie.id, file.id, true);
-      onNotify?.('Media file deleted');
+      onNotify?.('Media file moved to recycle bin');
       await reloadFiles();
     } catch (err) {
       onNotify?.(err instanceof Error ? err.message : 'Failed to delete media file', true);
@@ -193,14 +193,14 @@ export const MovieDetailPanel: React.FC<MovieDetailPanelProps> = ({
   const handleDeleteExtraFile = async (file: MovieExtraFile) => {
     const result = await confirm({
       title: 'Delete file',
-      message: `Permanently delete "${file.relativePath}" from disk? This cannot be undone.`,
+      message: `Move "${file.relativePath}" to the recycle bin? Nightly cleanup permanently removes items after retention; System → Tasks can empty the bin immediately.`,
       confirmLabel: 'Delete file',
       danger: true,
     });
     if (!result) return;
     try {
       await api.deleteMovieExtraFile(movie.id, file.relativePath);
-      onNotify?.('File deleted');
+      onNotify?.('File moved to recycle bin');
       await reloadFiles();
     } catch (err) {
       onNotify?.(err instanceof Error ? err.message : 'Failed to delete file', true);

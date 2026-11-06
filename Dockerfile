@@ -19,7 +19,9 @@ RUN apk add --no-cache \
     make \
     ca-certificates \
     tzdata \
-    ffmpeg
+    ffmpeg \
+    procps
+# procps provides a fuller pkill; BusyBox fuser (from Alpine) still frees :REPLACEARR_PORT.
 
 # Install Air into the image PATH (/go/bin is already on PATH in the official Go image).
 RUN go install "github.com/air-verse/air@${AIR_VERSION}"
@@ -43,8 +45,6 @@ RUN make build-web build-plugins
 ENV REPLACEARR_HOST=0.0.0.0 \
     REPLACEARR_PORT=8989 \
     REPLACEARR_CONFIG_DIR=/config \
-    REPLACEARR_PLUGIN_DIR=/workspace/bin/plugins \
-    REPLACEARR_DEFINITIONS_DIR=/config/definitions \
     REPLACEARR_ENV=development
 
 EXPOSE 8989 5173

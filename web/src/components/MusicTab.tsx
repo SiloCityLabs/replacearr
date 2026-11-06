@@ -207,13 +207,24 @@ export const MusicTab: React.FC<MusicTabProps> = ({
                 type="button"
                 className="px-3 py-2 rounded-lg bg-rose-700/80 text-white text-sm"
                 onClick={async () => {
-                  const ok = await confirm({
-                    title: 'Remove artist',
-                    message: `Remove "${activeArtist.title}" from the Music library?`,
-                    confirmLabel: 'Remove',
+                  const result = await confirm({
+                    title: 'Delete artist',
+                    message: `Are you sure you want to delete "${activeArtist.title}" from the Music library?`,
+                    confirmLabel: 'Delete',
+                    checkboxes: [
+                      {
+                        id: 'deleteFiles',
+                        label: 'Delete Artist Files',
+                        description:
+                          'Move the artist folder to the recycle bin. Nightly cleanup permanently removes items after the configured retention; System → Tasks → Recycle Bin Cleanup empties the bin immediately.',
+                        defaultChecked: false,
+                      },
+                    ],
                   });
-                  if (!ok) return;
-                  await api.deleteArtist(activeArtist.id);
+                  if (!result) return;
+                  await api.deleteArtist(activeArtist.id, {
+                    deleteFiles: result.deleteFiles === true,
+                  });
                   onNotify(`Removed ${activeArtist.title}`);
                   setActiveArtist(null);
                   await onRefresh();

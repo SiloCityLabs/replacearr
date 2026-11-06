@@ -49,28 +49,13 @@ export function SaveBar({
   disabled,
   saving,
   onSave,
-  showAdvanced,
-  onToggleAdvanced,
 }: {
   disabled: boolean;
   saving: boolean;
   onSave: () => void;
-  showAdvanced?: boolean;
-  onToggleAdvanced?: () => void;
 }) {
   return (
-    <div className="sticky bottom-0 z-20 mt-4 flex items-center justify-between gap-3 py-3 bg-slate-950/90 backdrop-blur border-t border-slate-800">
-      <div>
-        {onToggleAdvanced ? (
-          <button
-            type="button"
-            onClick={onToggleAdvanced}
-            className="text-xs font-medium text-slate-300 hover:text-white"
-          >
-            {showAdvanced ? 'Hide advanced' : 'Show advanced'}
-          </button>
-        ) : null}
-      </div>
+    <div className="sticky bottom-0 z-20 mt-4 flex items-center justify-end gap-3 py-3 bg-slate-950/90 backdrop-blur border-t border-slate-800">
       <button
         type="button"
         disabled={disabled || saving}
@@ -342,7 +327,7 @@ export function useDraftState<T>(source: T, onDirtyChange: (dirty: boolean) => v
     setBaseline(next);
   };
 
-  return { draft, setDraft, setBaseline, isDirty, saving, setSaving, commit };
+  return { draft, setDraft, baseline, setBaseline, isDirty, saving, setSaving, commit };
 }
 
 export function errorText(err: unknown, fallback: string): string {

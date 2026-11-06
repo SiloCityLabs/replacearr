@@ -217,6 +217,16 @@ export const App: React.FC = () => {
             includeForced: true,
             openSubtitles: { apiKey: '', username: '', password: '' },
           },
+          downloadClientOptions: {
+            ...cfg.downloadClientOptions,
+            discoverSubnets: cfg.downloadClientOptions?.discoverSubnets ?? '',
+            hostProcNet: cfg.downloadClientOptions?.hostProcNet ?? '/host/proc/net',
+          },
+          plugins: {
+            catalogUrl:
+              cfg.plugins?.catalogUrl ??
+              'https://raw.githubusercontent.com/replacearr/replacearr-plugins/main/registry.json',
+          },
         };
         setAppConfig(normalized);
         applyUiPreferences(normalized.ui);
@@ -268,8 +278,8 @@ export const App: React.FC = () => {
     return subscribeBrowserNotificationStream(true);
   }, [user, browserPluginEnabled]);
 
-  const handleLogin = async (username: string, password: string) => {
-    const res = await api.login(username, password);
+  const handleLogin = async (username: string, password: string, rememberMe: boolean) => {
+    const res = await api.login(username, password, rememberMe);
     setUser(res.user);
     setMasterApiKey(res.masterApiKey || '');
     await loadAllData();
@@ -796,6 +806,8 @@ export const App: React.FC = () => {
             <PluginsTab
               plugins={plugins}
               masterApiKey={masterApiKey}
+              appConfig={appConfig}
+              onSaveConfig={saveAppConfig}
               onRefresh={loadAllData}
               onNotify={notify}
             />
@@ -823,6 +835,11 @@ export const App: React.FC = () => {
               onRefresh={loadAllData}
               onNotify={notify}
               onDirtyChange={setSettingsDirty}
+              onNavigate={navigateTo}
+              onSignedOut={() => {
+                setUser(null);
+                setMasterApiKey('');
+              }}
               onConfigChange={(next) => {
                 setAppConfig(next);
                 applyUiPreferences(next.ui);

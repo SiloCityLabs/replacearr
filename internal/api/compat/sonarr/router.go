@@ -17,6 +17,7 @@ import (
 	"github.com/replacearr/replacearr/internal/db"
 	"github.com/replacearr/replacearr/internal/domain"
 	"github.com/replacearr/replacearr/internal/mediacover"
+	"github.com/replacearr/replacearr/internal/mediafile"
 	"github.com/replacearr/replacearr/internal/metadata"
 )
 
@@ -425,12 +426,62 @@ func (h *Handler) handleUpdateSeriesBody(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, updated)
 }
 
-func (h *Handler) handleDeleteSeries(w http.ResponseWriter, _ *http.Request, id int64) {
+func (h *Handler) handleDeleteSeries(w http.ResponseWriter, r *http.Request, id int64) {
+	deleteFiles := queryFlag(r, "deleteFiles")
+	addExclusion := queryFlag(r, "addImportListExclusion") || queryFlag(r, "addImportExclusion")
+
+	sr, err := h.store.GetSeriesByID(id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "series not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	if addExclusion {
+		if _, err := h.store.AddImportListExclusion(domain.ImportListExclusion{
+			MediaType: "tv",
+			TvdbID:    sr.TvdbID,
+			ImdbID:    sr.ImdbID,
+			Title:     sr.Title,
+			Year:      sr.Year,
+		}); err != nil {
+			writeError(w, http.StatusInternalServerError, "add list exclusion: "+err.Error())
+			return
+		}
+	}
+
+	if deleteFiles {
+		if err := h.store.DeleteSeriesDiskFiles(sr, h.recycleBinPath()); err != nil {
+			writeError(w, http.StatusInternalServerError, "delete series files: "+err.Error())
+			return
+		}
+	}
+
 	if err := h.store.DeleteSeries(id); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{})
+}
+
+func (h *Handler) recycleBinPath() string {
+	configured := ""
+	if cfg, err := h.store.GetAppConfig(); err == nil {
+		configured = cfg.MediaManagement.RecycleBin
+	}
+	configDir := "./config"
+	if h.cfg != nil && h.cfg.ConfigDir != "" {
+		configDir = h.cfg.ConfigDir
+	}
+	return mediafile.ResolveRecycleBin(configured, configDir)
+}
+
+func queryFlag(r *http.Request, name string) bool {
+	v := strings.TrimSpace(strings.ToLower(r.URL.Query().Get(name)))
+	return v == "true" || v == "1" || v == "yes"
 }
 
 func (h *Handler) handleSeriesLookup(w http.ResponseWriter, r *http.Request) {

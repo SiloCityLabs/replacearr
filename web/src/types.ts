@@ -165,7 +165,23 @@ export interface LibraryImportScanItem {
 }
 
 export interface LibraryImportScanResult {
+  scanId?: string;
+  total: number;
+  offset: number;
+  limit: number;
+  pageSize: number;
   items: LibraryImportScanItem[];
+}
+
+export interface LibraryImportItemResult {
+  path: string;
+  ok: boolean;
+  error?: string;
+}
+
+export interface LibraryImportResult {
+  imported: number;
+  results?: LibraryImportItemResult[];
 }
 
 /** Interactive Search payload — must target a library entity. */
@@ -231,6 +247,19 @@ export interface AuthResponse {
   token?: string;
   user: User;
   masterApiKey: string;
+}
+
+export interface AuthSession {
+  id: string;
+  userId: number;
+  createdAt: string;
+  lastSeenAt: string;
+  expiresAt: string;
+  revokedAt?: string;
+  rememberMe: boolean;
+  userAgent: string;
+  ipAddress: string;
+  current?: boolean;
 }
 
 export interface MediaImage {
@@ -1055,7 +1084,15 @@ export interface DownloadClientOptions {
   enableCompletedDownloadHandling: boolean;
   autoRedownloadFailed: boolean;
   autoRedownloadFailedFromInteractiveSearch: boolean;
+  deleteTorrentAndDataWhenComplete: boolean;
+  deleteWhenSeedingComplete: boolean;
   downloadClientWorkingFolders: string;
+  discoverSubnets: string;
+  hostProcNet: string;
+}
+
+export interface PluginsConfig {
+  catalogUrl: string;
 }
 
 export interface DelayProfile {
@@ -1150,7 +1187,6 @@ export interface AppConfig {
   security: SecurityConfig;
   proxy: ProxyConfig;
   logging: LoggingConfig;
-  analytics: { enabled: boolean };
   updates: UpdatesConfig;
   backup: BackupConfig;
   ui: UiConfig;
@@ -1167,5 +1203,6 @@ export interface AppConfig {
   metadataConsumers: MetadataConsumer[];
   remotePathMappings: RemotePathMapping[];
   subtitles: SubtitlesConfig;
+  plugins: PluginsConfig;
 }
 

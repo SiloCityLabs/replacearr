@@ -23,7 +23,7 @@ Sonarr's `ApiKeyAuthenticationHandler.ParseApiKey()` resolves the API key in the
 2. **HTTP Header**: `X-Api-Key: <key>` (`Options.HeaderName = "X-Api-Key"`, case-insensitive in HTTP/1.1 & HTTP/2).
 3. **Bearer Token**: `Authorization: Bearer <key>`.
 
-If the key is missing or invalid, upstream returns `401 Unauthorized` (`Response.StatusCode = 401`). In Replacearr, any valid API key with `scope` in `("all", "sonarr")` and appropriate `tv:read` / `tv:write` permissions (or the configured `REPLACEARR_API_KEY`) satisfies authentication.
+If the key is missing or invalid, upstream returns `401 Unauthorized` (`Response.StatusCode = 401`). In Replacearr, any valid API key with `scope` in `("all", "sonarr")` and appropriate `tv:read` / `tv:write` permissions (including the auto-generated master key) satisfies authentication.
 
 ---
 
@@ -101,7 +101,7 @@ If the key is missing or invalid, upstream returns `401 Unauthorized` (`Response
 * **Query Parameters**:
   * `GET /api/v3/series?tvdbId={tvdbId}&includeSeasonImages={bool}`
   * `GET /api/v3/series/lookup?term={term}` (supports `tvdb:12345`, `imdb:tt…`, or free-text title query). Replacearr backs this with Sonarr’s SkyHook client (`https://skyhook.sonarr.tv/v2/tvdb/…`) via `internal/metadata` — not a curated stub catalog.
-  * `DELETE /api/v3/series/{id}?deleteFiles={bool}&addImportListExclusion={bool}`
+  * `DELETE /api/v3/series/{id}?deleteFiles={bool}&addImportListExclusion={bool}`. When `deleteFiles=true`, the series folder is moved into the configured recycle bin (default `{config}/RecycleBin`) rather than permanently deleted in place; nightly Recycle Bin Cleanup permanently removes aged entries (default 30 days), and a manual task run empties the bin. `addImportListExclusion` inserts into `import_list_exclusions`. Native UI uses the same flags on `DELETE /api/v1/series/{id}` (`addImportExclusion` accepted as an alias).
 * **POST Request / GET Response Shape (`SeriesResource`)**:
   * When Overseerr/Jellyseerr adds a series via `POST /api/v3/series`, it sends `title`, `tvdbId`, `qualityProfileId`, `languageProfileId`, `rootFolderPath`, `seasonFolder`, `monitored`, `seriesType` (`standard`, `daily`, `anime`), `seasons`, `tags`, and `addOptions`:
 ```json

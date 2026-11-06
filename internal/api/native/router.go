@@ -25,7 +25,9 @@ import (
 	"github.com/replacearr/replacearr/internal/flaresolverr"
 	"github.com/replacearr/replacearr/internal/httpclient"
 	"github.com/replacearr/replacearr/internal/indexers/cardigann"
+	"github.com/replacearr/replacearr/internal/libraryimport"
 	"github.com/replacearr/replacearr/internal/mediacover"
+	"github.com/replacearr/replacearr/internal/mediafile"
 	"github.com/replacearr/replacearr/internal/metadata"
 	"github.com/replacearr/replacearr/internal/plugincatalog"
 	"github.com/replacearr/replacearr/internal/pluginhost"
@@ -40,19 +42,20 @@ type QueueProgressSyncer interface {
 }
 
 type Server struct {
-	store         *db.Store
-	cfg           *config.Config
-	authSvc       *auth.Service
-	pluginMgr     *pluginhost.Manager
-	pluginCatalog *plugincatalog.Client
-	meta          *metadata.Service
-	flareClient   *flaresolverr.Client
-	covers        *mediacover.Store
-	subtitles     *subtitles.Service
-	scheduler     *tasks.Scheduler
-	queueSync     QueueProgressSyncer
-	version       string
-	startedAt     time.Time
+	store          *db.Store
+	cfg            *config.Config
+	authSvc        *auth.Service
+	pluginMgr      *pluginhost.Manager
+	pluginCatalog  *plugincatalog.Client
+	meta           *metadata.Service
+	flareClient    *flaresolverr.Client
+	covers         *mediacover.Store
+	subtitles      *subtitles.Service
+	scheduler      *tasks.Scheduler
+	queueSync      QueueProgressSyncer
+	importSessions *libraryimport.SessionStore
+	version        string
+	startedAt      time.Time
 }
 
 func NewServer(store *db.Store, cfg *config.Config, authSvc *auth.Service, pluginMgr *pluginhost.Manager, version string) *Server {
@@ -77,28 +80,29 @@ func NewServer(store *db.Store, cfg *config.Config, authSvc *auth.Service, plugi
 
 	configDir := "./config"
 	pluginDir := ""
-	catalogURL := plugincatalog.DefaultCatalogURL
 	if cfg != nil {
 		if cfg.ConfigDir != "" {
 			configDir = cfg.ConfigDir
 		}
 		pluginDir = cfg.PluginDir
-		if cfg.PluginCatalogURL != "" {
-			catalogURL = cfg.PluginCatalogURL
-		}
+	}
+	catalogURL := plugincatalog.DefaultCatalogURL
+	if u := strings.TrimSpace(appCfg.Plugins.CatalogURL); u != "" {
+		catalogURL = u
 	}
 	s := &Server{
-		store:         store,
-		cfg:           cfg,
-		authSvc:       authSvc,
-		pluginMgr:     pluginMgr,
-		pluginCatalog: plugincatalog.New(catalogURL, pluginDir),
-		meta:          metaSvc,
-		flareClient:   flare,
-		covers:        mediacover.NewStore(configDir, httpCli),
-		subtitles:     subtitles.NewService(store),
-		version:       version,
-		startedAt:     time.Now().UTC(),
+		store:          store,
+		cfg:            cfg,
+		authSvc:        authSvc,
+		pluginMgr:      pluginMgr,
+		pluginCatalog:  plugincatalog.New(catalogURL, pluginDir),
+		meta:           metaSvc,
+		flareClient:    flare,
+		covers:         mediacover.NewStore(configDir, httpCli),
+		subtitles:      subtitles.NewService(store),
+		importSessions: libraryimport.NewSessionStore(libraryimport.DefaultSessionTTL),
+		version:        version,
+		startedAt:      time.Now().UTC(),
 	}
 	s.seedInitialDemoData()
 	return s
@@ -146,10 +150,20 @@ func (s *Server) activeFlareSolverrHost() string {
 			}
 		}
 	}
-	if s.cfg != nil && s.cfg.FlareSolverrURL != "" {
-		return s.cfg.FlareSolverrURL
+	return ""
+}
+
+func (s *Server) syncPluginCatalogURL() {
+	if s.pluginCatalog == nil || s.store == nil {
+		return
 	}
-	return "http://localhost:8191/"
+	url := plugincatalog.DefaultCatalogURL
+	if cfg, err := s.store.GetAppConfig(); err == nil {
+		if u := strings.TrimSpace(cfg.Plugins.CatalogURL); u != "" {
+			url = u
+		}
+	}
+	s.pluginCatalog.SetCatalogURL(url)
 }
 
 func (s *Server) SearchReleases(query string, mediaType string, tvdbID int, tmdbID int, season int, episode int) ([]domain.ReleaseResult, error) {
@@ -571,6 +585,39 @@ func (s *Server) handleCreateSeries(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleDeleteSeries(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	deleteFiles := queryFlag(r, "deleteFiles")
+	addExclusion := queryFlag(r, "addImportExclusion") || queryFlag(r, "addImportListExclusion")
+
+	sr, err := s.store.GetSeriesByID(id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeErr(w, http.StatusNotFound, errors.New("series not found"))
+			return
+		}
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	if addExclusion {
+		if _, err := s.store.AddImportListExclusion(domain.ImportListExclusion{
+			MediaType: "tv",
+			TvdbID:    sr.TvdbID,
+			ImdbID:    sr.ImdbID,
+			Title:     sr.Title,
+			Year:      sr.Year,
+		}); err != nil {
+			writeErr(w, http.StatusInternalServerError, fmt.Errorf("add list exclusion: %w", err))
+			return
+		}
+	}
+
+	if deleteFiles {
+		if err := s.store.DeleteSeriesDiskFiles(sr, s.recycleBinPath()); err != nil {
+			writeErr(w, http.StatusInternalServerError, fmt.Errorf("delete series files: %w", err))
+			return
+		}
+	}
+
 	if err := s.store.DeleteSeries(id); err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
@@ -699,7 +746,7 @@ func (s *Server) handleDeleteMovie(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if deleteFiles {
-		if err := s.store.DeleteMovieDiskFiles(mv); err != nil {
+		if err := s.store.DeleteMovieDiskFiles(mv, s.recycleBinPath()); err != nil {
 			writeErr(w, http.StatusInternalServerError, fmt.Errorf("delete movie files: %w", err))
 			return
 		}
@@ -1154,14 +1201,14 @@ func decodeTorrentBase64(s string) ([]byte, error) {
 
 func (s *Server) handleManualRelease(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		MagnetURL      string `json:"magnetUrl"`
-		DownloadURL    string `json:"downloadUrl"`
-		TorrentBase64  string `json:"torrentBase64"`
-		Title          string `json:"title"`
-		SeriesID       int64  `json:"seriesId"`
-		MovieID        int64  `json:"movieId"`
-		EpisodeID      int64  `json:"episodeId"`
-		SeasonNumber   int    `json:"seasonNumber"`
+		MagnetURL     string `json:"magnetUrl"`
+		DownloadURL   string `json:"downloadUrl"`
+		TorrentBase64 string `json:"torrentBase64"`
+		Title         string `json:"title"`
+		SeriesID      int64  `json:"seriesId"`
+		MovieID       int64  `json:"movieId"`
+		EpisodeID     int64  `json:"episodeId"`
+		SeasonNumber  int    `json:"seasonNumber"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, http.StatusBadRequest, err)
@@ -1403,6 +1450,7 @@ func (s *Server) handlePluginCatalog(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusServiceUnavailable, fmt.Errorf("plugin catalog is not configured"))
 		return
 	}
+	s.syncPluginCatalogURL()
 	force := r.URL.Query().Get("refresh") == "1" || r.URL.Query().Get("refresh") == "true"
 	entries, err := s.pluginCatalog.List(r.Context(), s.installedCatalogInfos(), force)
 	if err != nil {
@@ -1420,6 +1468,7 @@ func (s *Server) handlePluginCatalogRefresh(w http.ResponseWriter, r *http.Reque
 		writeErr(w, http.StatusServiceUnavailable, fmt.Errorf("plugin catalog is not configured"))
 		return
 	}
+	s.syncPluginCatalogURL()
 	s.pluginCatalog.Invalidate()
 	entries, err := s.pluginCatalog.List(r.Context(), s.installedCatalogInfos(), true)
 	if err != nil {
@@ -1437,6 +1486,7 @@ func (s *Server) handlePluginCatalogResolve(w http.ResponseWriter, r *http.Reque
 		writeErr(w, http.StatusServiceUnavailable, fmt.Errorf("plugin catalog is not configured"))
 		return
 	}
+	s.syncPluginCatalogURL()
 	var req struct {
 		URL string `json:"url"`
 	}
@@ -1463,6 +1513,7 @@ func (s *Server) handlePluginCatalogInstall(w http.ResponseWriter, r *http.Reque
 		writeErr(w, http.StatusServiceUnavailable, fmt.Errorf("plugin catalog is not configured"))
 		return
 	}
+	s.syncPluginCatalogURL()
 	var req struct {
 		ID  string `json:"id"`
 		URL string `json:"url"`
@@ -1674,4 +1725,16 @@ func writeErr(w http.ResponseWriter, status int, err error) {
 func queryFlag(r *http.Request, name string) bool {
 	v := strings.TrimSpace(strings.ToLower(r.URL.Query().Get(name)))
 	return v == "true" || v == "1" || v == "yes"
+}
+
+func (s *Server) recycleBinPath() string {
+	configured := ""
+	if cfg, err := s.store.GetAppConfig(); err == nil {
+		configured = cfg.MediaManagement.RecycleBin
+	}
+	configDir := "./config"
+	if s.cfg != nil && s.cfg.ConfigDir != "" {
+		configDir = s.cfg.ConfigDir
+	}
+	return mediafile.ResolveRecycleBin(configured, configDir)
 }

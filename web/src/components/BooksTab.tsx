@@ -247,13 +247,24 @@ export const BooksTab: React.FC<BooksTabProps> = ({
               type="button"
               className="w-full sm:w-auto px-3 py-2 rounded-lg bg-rose-700/80 text-white text-sm"
               onClick={async () => {
-                const ok = await confirm({
-                  title: 'Remove book',
-                  message: `Remove "${activeBook.title}" from the Books library?`,
-                  confirmLabel: 'Remove',
+                const result = await confirm({
+                  title: 'Delete book',
+                  message: `Are you sure you want to delete "${activeBook.title}" from the Books library?`,
+                  confirmLabel: 'Delete',
+                  checkboxes: [
+                    {
+                      id: 'deleteFiles',
+                      label: 'Delete Book Files',
+                      description:
+                        'Move edition folders to the recycle bin. Nightly cleanup permanently removes items after the configured retention; System → Tasks → Recycle Bin Cleanup empties the bin immediately.',
+                      defaultChecked: false,
+                    },
+                  ],
                 });
-                if (!ok) return;
-                await api.deleteBook(activeBook.id);
+                if (!result) return;
+                await api.deleteBook(activeBook.id, {
+                  deleteFiles: result.deleteFiles === true,
+                });
                 onNotify(`Removed ${activeBook.title}`);
                 setActiveBook(null);
                 await onRefresh();

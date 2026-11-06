@@ -3,7 +3,6 @@ package discover
 import (
 	"context"
 	"net"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -107,7 +106,7 @@ func subnetHostHints(lanNets []lanNetwork, extraCIDRs []string) []HostHint {
 		}
 	}
 
-	// Optional manual override (REPLACEARR_DISCOVER_SUBNETS) for unusual setups.
+	// Optional manual CIDR overrides from AppConfig for unusual setups.
 	for _, cidr := range extraCIDRs {
 		for _, peer := range hostsInCIDR(cidr, maxLANSubnetHosts) {
 			addIP(peer, subnetVia, true)
@@ -232,9 +231,9 @@ func uint32ToIP(n uint32) net.IP {
 	return net.IPv4(byte(n>>24), byte(n>>16), byte(n>>8), byte(n)).To4()
 }
 
-// ExtraSubnetsFromEnv reads REPLACEARR_DISCOVER_SUBNETS (comma-separated CIDRs).
-func ExtraSubnetsFromEnv() []string {
-	raw := strings.TrimSpace(os.Getenv("REPLACEARR_DISCOVER_SUBNETS"))
+// ParseExtraSubnets splits a comma-separated CIDR list from AppConfig.
+func ParseExtraSubnets(raw string) []string {
+	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return nil
 	}

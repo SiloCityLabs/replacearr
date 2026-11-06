@@ -278,9 +278,7 @@ func DeleteUnwantedInDir(root string, unwanted []string, recycleBin string) (int
 		}
 		full := filepath.Join(dir, name)
 		if recycleBin != "" {
-			_ = os.MkdirAll(recycleBin, 0o755)
-			dest := filepath.Join(recycleBin, name)
-			if err := os.Rename(full, dest); err == nil {
+			if err := MoveToRecycleBin(full, recycleBin); err == nil {
 				removed++
 				continue
 			}

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/replacearr/replacearr/internal/domain"
 	"github.com/replacearr/replacearr/internal/downloadclient/discover"
+	"github.com/replacearr/replacearr/internal/mediafile"
 )
 
 var tagLabelPattern = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
@@ -43,6 +45,7 @@ func (s *Server) handlePutConfig(w http.ResponseWriter, r *http.Request) {
 	prevBind := cfg.Host.BindAddress
 	prevPort := cfg.Host.Port
 	prevURLBase := cfg.Host.URLBase
+	prevRecycleBin := cfg.MediaManagement.RecycleBin
 	if err := json.Unmarshal(body, &cfg); err != nil {
 		writeErr(w, http.StatusBadRequest, err)
 		return
@@ -56,12 +59,40 @@ func (s *Server) handlePutConfig(w http.ResponseWriter, r *http.Request) {
 	if os.Getenv("REPLACEARR_URL_BASE") != "" {
 		cfg.Host.URLBase = prevURLBase
 	}
+	if err := s.applyRecycleBinPathChange(prevRecycleBin, cfg.MediaManagement.RecycleBin); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
 	saved, err := s.store.SaveAppConfig(cfg)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, s.presentConfig(saved))
+}
+
+func (s *Server) applyRecycleBinPathChange(prevConfigured, nextConfigured string) error {
+	configDir := "./config"
+	if s.cfg != nil && s.cfg.ConfigDir != "" {
+		configDir = s.cfg.ConfigDir
+	}
+	oldBin := mediafile.ResolveRecycleBin(prevConfigured, configDir)
+	newBin := mediafile.ResolveRecycleBin(nextConfigured, configDir)
+	if oldBin == newBin {
+		return nil
+	}
+	protected := []string{configDir}
+	if folders, err := s.store.ListRootFolders(""); err == nil {
+		for _, f := range folders {
+			if p := strings.TrimSpace(f.Path); p != "" {
+				protected = append(protected, p)
+			}
+		}
+	}
+	if err := mediafile.ChangeRecycleBinPath(prevConfigured, nextConfigured, configDir, protected); err != nil {
+		return fmt.Errorf("recycle bin path change: %w", err)
+	}
+	return nil
 }
 
 func (s *Server) presentConfig(cfg domain.AppConfig) domain.AppConfig {
@@ -395,7 +426,12 @@ func (s *Server) handleDiscoverDownloadClients(w http.ResponseWriter, r *http.Re
 	ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
 	defer cancel()
 
-	found, err := discover.Discover(ctx, discover.Options{Existing: known})
+	opts := discover.Options{Existing: known}
+	if appCfg, cfgErr := s.store.GetAppConfig(); cfgErr == nil {
+		opts.ExtraSubnets = discover.ParseExtraSubnets(appCfg.DownloadClientOptions.DiscoverSubnets)
+		opts.HostProcNet = strings.TrimSpace(appCfg.DownloadClientOptions.HostProcNet)
+	}
+	found, err := discover.Discover(ctx, opts)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return

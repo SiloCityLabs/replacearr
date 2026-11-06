@@ -4,10 +4,10 @@ set -e
 PUID="${PUID:-1000}"
 PGID="${PGID:-1000}"
 CONFIG_DIR="${REPLACEARR_CONFIG_DIR:-/config}"
-PLUGIN_DIR="${REPLACEARR_PLUGIN_DIR:-${CONFIG_DIR}/plugins}"
-DEFINITIONS_DIR="${REPLACEARR_DEFINITIONS_DIR:-${CONFIG_DIR}/definitions}"
+PLUGIN_DIR="${CONFIG_DIR}/plugins"
+DEFINITIONS_DIR="${CONFIG_DIR}/definitions"
 BUNDLED_PLUGINS="/usr/local/share/replacearr/plugins"
-BUNDLED_DEFINITIONS="${REPLACEARR_BUNDLED_DEFINITIONS:-/usr/local/share/replacearr/definitions}"
+BUNDLED_DEFINITIONS="/usr/local/share/replacearr/definitions"
 
 echo "----------------------------------------------------------------"
 echo " Replacearr — Unified Sonarr, Radarr & Prowlarr Replacement"

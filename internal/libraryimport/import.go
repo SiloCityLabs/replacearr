@@ -18,18 +18,18 @@ import (
 )
 
 type MatchCandidate struct {
-	LibraryID     int64  `json:"libraryId,omitempty"`
-	TmdbID        int    `json:"tmdbId,omitempty"`
-	TvdbID        int    `json:"tvdbId,omitempty"`
-	ImdbID        string `json:"imdbId,omitempty"`
-	ForeignID     string `json:"foreignId,omitempty"` // MusicBrainz MBID or OpenLibrary work key
-	AuthorName    string `json:"authorName,omitempty"`
-	Format        string `json:"format,omitempty"` // ebook | audiobook
-	Title         string `json:"title"`
-	Year          int    `json:"year,omitempty"`
-	Overview      string `json:"overview,omitempty"`
+	LibraryID      int64  `json:"libraryId,omitempty"`
+	TmdbID         int    `json:"tmdbId,omitempty"`
+	TvdbID         int    `json:"tvdbId,omitempty"`
+	ImdbID         string `json:"imdbId,omitempty"`
+	ForeignID      string `json:"foreignId,omitempty"` // MusicBrainz MBID or OpenLibrary work key
+	AuthorName     string `json:"authorName,omitempty"`
+	Format         string `json:"format,omitempty"` // ebook | audiobook
+	Title          string `json:"title"`
+	Year           int    `json:"year,omitempty"`
+	Overview       string `json:"overview,omitempty"`
 	Disambiguation string `json:"disambiguation,omitempty"`
-	InLibrary     bool   `json:"inLibrary"`
+	InLibrary      bool   `json:"inLibrary"`
 }
 
 type ScanItem struct {
@@ -44,8 +44,16 @@ type ScanItem struct {
 	Match         *MatchCandidate  `json:"match,omitempty"`
 }
 
+// MaxImportItems is the soft cap for a single import POST.
+const MaxImportItems = 250
+
 type ScanResult struct {
-	Items []ScanItem `json:"items"`
+	ScanID   string     `json:"scanId,omitempty"`
+	Total    int        `json:"total"`
+	Offset   int        `json:"offset"`
+	Limit    int        `json:"limit"`
+	PageSize int        `json:"pageSize"`
+	Items    []ScanItem `json:"items"`
 }
 
 type ImportItem struct {
@@ -58,6 +66,17 @@ type ImportItem struct {
 	QualityProfileID int64  `json:"qualityProfileId,omitempty"`
 	SeasonNumber     int    `json:"seasonNumber,omitempty"`
 	EpisodeNumber    int    `json:"episodeNumber,omitempty"`
+}
+
+type ImportItemResult struct {
+	Path  string `json:"path"`
+	OK    bool   `json:"ok"`
+	Error string `json:"error,omitempty"`
+}
+
+type ImportResult struct {
+	Imported int                `json:"imported"`
+	Results  []ImportItemResult `json:"results"`
 }
 
 type ScanOptions struct {
@@ -84,7 +103,8 @@ type ImportOptions struct {
 
 var seasonEpRe = regexp.MustCompile(`(?i)[Ss](\d{1,2})[Ee](\d{1,3})`)
 
-func Scan(ctx context.Context, opts ScanOptions) (*ScanResult, error) {
+// Walk collects unmapped media files under opts.Root without metadata matching.
+func Walk(opts ScanOptions) ([]ScanItem, error) {
 	if opts.Store == nil {
 		return nil, fmt.Errorf("store is required")
 	}
@@ -92,14 +112,6 @@ func Scan(ctx context.Context, opts ScanOptions) (*ScanResult, error) {
 	root := opts.Root
 	match := mediafile.MatcherForMediaType(mediaType)
 	known := knownPaths(opts.Store, mediaType)
-	maxMatches := opts.MaxMatches
-	if maxMatches <= 0 {
-		maxMatches = 8
-	}
-	workers := opts.MatchConcurrency
-	if workers <= 0 {
-		workers = 4
-	}
 
 	info, err := os.Stat(root)
 	if err != nil {
@@ -119,39 +131,69 @@ func Scan(ctx context.Context, opts ScanOptions) (*ScanResult, error) {
 
 	if !info.IsDir() {
 		if !match(root) {
-			return &ScanResult{Items: []ScanItem{}}, nil
+			return []ScanItem{}, nil
 		}
 		fi, _ := os.Stat(root)
 		appendFile(root, fi.Size())
-	} else {
-		_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-			if err != nil || d.IsDir() {
-				return nil
-			}
-			if !match(path) {
-				return nil
-			}
-			fi, err := d.Info()
-			if err != nil {
-				return nil
-			}
-			appendFile(path, fi.Size())
+		return raw, nil
+	}
+
+	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
 			return nil
-		})
-	}
-
-	if opts.Meta != nil {
-		switch mediaType {
-		case "movies", "movie", "tv", "series", "music", "books", "ebook", "audiobook":
-			if mediaType == "music" && workers > 1 {
-				// MusicBrainz is rate-limited (~1 req/s).
-				workers = 1
-			}
-			enrichMatches(ctx, opts, mediaType, raw, maxMatches, workers)
 		}
-	}
+		if !match(path) {
+			return nil
+		}
+		fi, err := d.Info()
+		if err != nil {
+			return nil
+		}
+		appendFile(path, fi.Size())
+		return nil
+	})
+	return raw, nil
+}
 
-	return &ScanResult{Items: raw}, nil
+// MatchItems enriches scan items with metadata candidates in place and returns them.
+func MatchItems(ctx context.Context, opts ScanOptions, items []ScanItem) []ScanItem {
+	if opts.Meta == nil || len(items) == 0 {
+		return items
+	}
+	mediaType := strings.ToLower(strings.TrimSpace(opts.MediaType))
+	maxMatches := opts.MaxMatches
+	if maxMatches <= 0 {
+		maxMatches = 8
+	}
+	workers := opts.MatchConcurrency
+	if workers <= 0 {
+		workers = 4
+	}
+	switch mediaType {
+	case "movies", "movie", "tv", "series", "music", "books", "ebook", "audiobook":
+		if mediaType == "music" && workers > 1 {
+			// MusicBrainz is rate-limited (~1 req/s).
+			workers = 1
+		}
+		enrichMatches(ctx, opts, mediaType, items, maxMatches, workers)
+	}
+	return items
+}
+
+// Scan walks the tree and matches every file (legacy full-scan helper for tests).
+func Scan(ctx context.Context, opts ScanOptions) (*ScanResult, error) {
+	raw, err := Walk(opts)
+	if err != nil {
+		return nil, err
+	}
+	MatchItems(ctx, opts, raw)
+	return &ScanResult{
+		Total:    len(raw),
+		Offset:   0,
+		Limit:    len(raw),
+		PageSize: DefaultPageSize,
+		Items:    raw,
+	}, nil
 }
 
 func scanItemFromPath(scanRoot, path, rel string, size int64) ScanItem {
@@ -432,21 +474,17 @@ func knownPaths(store *db.Store, mediaType string) map[string]bool {
 	out := map[string]bool{}
 	switch mediaType {
 	case "tv", "series":
-		files, err := store.ListEpisodeFiles(0)
+		paths, err := store.ListEpisodeFilePaths(0)
 		if err == nil {
-			for _, f := range files {
-				if f.Path != "" {
-					out[filepath.Clean(f.Path)] = true
-				}
+			for _, p := range paths {
+				out[filepath.Clean(p)] = true
 			}
 		}
 	case "movies", "movie":
-		files, err := store.ListMovieFiles(0)
+		paths, err := store.ListMovieFilePaths(0)
 		if err == nil {
-			for _, f := range files {
-				if f.Path != "" {
-					out[filepath.Clean(f.Path)] = true
-				}
+			for _, p := range paths {
+				out[filepath.Clean(p)] = true
 			}
 		}
 	}
@@ -455,19 +493,24 @@ func knownPaths(store *db.Store, mediaType string) map[string]bool {
 
 // ImportSelected adds missing library rows from metadata when needed, then
 // registers existing on-disk files in place (no copy/move for library import).
-func ImportSelected(ctx context.Context, opts ImportOptions, items []ImportItem) (int, error) {
+func ImportSelected(ctx context.Context, opts ImportOptions, items []ImportItem) (*ImportResult, error) {
 	if opts.Store == nil {
-		return 0, fmt.Errorf("store is required")
+		return nil, fmt.Errorf("store is required")
+	}
+	if len(items) > MaxImportItems {
+		return nil, fmt.Errorf("too many items: max %d per request (got %d)", MaxImportItems, len(items))
 	}
 	mediaType := strings.ToLower(strings.TrimSpace(opts.MediaType))
-	imported := 0
+	result := &ImportResult{Results: make([]ImportItemResult, 0, len(items))}
 	for _, it := range items {
 		if strings.TrimSpace(it.Path) == "" {
+			result.Results = append(result.Results, ImportItemResult{Path: it.Path, OK: false, Error: "path is required"})
 			continue
 		}
 		src := it.Path
 		fi, err := os.Stat(src)
 		if err != nil {
+			result.Results = append(result.Results, ImportItemResult{Path: src, OK: false, Error: err.Error()})
 			continue
 		}
 		profileID := it.QualityProfileID
@@ -478,85 +521,106 @@ func ImportSelected(ctx context.Context, opts ImportOptions, items []ImportItem)
 			profileID = 1
 		}
 
+		var itemErr error
 		switch mediaType {
 		case "movies", "movie":
 			mv, err := resolveMovie(ctx, opts, it, profileID, src)
 			if err != nil || mv == nil {
-				continue
+				itemErr = err
+				if itemErr == nil {
+					itemErr = fmt.Errorf("movie resolve failed")
+				}
+			} else if _, err := opts.Store.UpsertMovieFile(mv.ID, src, filepath.Base(src), "", fi.Size()); err != nil {
+				itemErr = err
+			} else {
+				_ = opts.Store.CreateHistory(domain.HistoryRecord{
+					MediaType: "movie", MovieID: mv.ID,
+					SourceTitle: filepath.Base(src), EventType: "downloadFolderImported",
+					Quality: map[string]any{"quality": map[string]any{"name": "Unknown"}},
+					Data:    map[string]any{"sourcePath": src, "destPath": src, "inPlace": true},
+				})
 			}
-			if _, err := opts.Store.UpsertMovieFile(mv.ID, src, filepath.Base(src), "", fi.Size()); err != nil {
-				continue
-			}
-			_ = opts.Store.CreateHistory(domain.HistoryRecord{
-				MediaType: "movie", MovieID: mv.ID,
-				SourceTitle: filepath.Base(src), EventType: "downloadFolderImported",
-				Quality: map[string]any{"quality": map[string]any{"name": "Unknown"}},
-				Data:    map[string]any{"sourcePath": src, "destPath": src, "inPlace": true},
-			})
-			imported++
 		case "tv", "series":
 			sr, err := resolveSeries(ctx, opts, it, profileID, src)
 			if err != nil || sr == nil {
-				continue
-			}
-			season, ep := it.SeasonNumber, it.EpisodeNumber
-			if season == 0 || ep == 0 {
-				base := filepath.Base(src)
-				if m := seasonEpRe.FindStringSubmatch(base); len(m) == 3 {
-					fmt.Sscanf(m[1], "%d", &season)
-					fmt.Sscanf(m[2], "%d", &ep)
+				itemErr = err
+				if itemErr == nil {
+					itemErr = fmt.Errorf("series resolve failed")
 				}
-			}
-			var episodeID int64
-			if season > 0 && ep > 0 {
-				if eps, err := opts.Store.ListEpisodes(sr.ID); err == nil {
-					for _, e := range eps {
-						if e.SeasonNumber == season && e.EpisodeNumber == ep {
-							episodeID = e.ID
-							break
+			} else {
+				season, ep := it.SeasonNumber, it.EpisodeNumber
+				if season == 0 || ep == 0 {
+					base := filepath.Base(src)
+					if m := seasonEpRe.FindStringSubmatch(base); len(m) == 3 {
+						fmt.Sscanf(m[1], "%d", &season)
+						fmt.Sscanf(m[2], "%d", &ep)
+					}
+				}
+				var episodeID int64
+				if season > 0 && ep > 0 {
+					if eps, err := opts.Store.ListEpisodes(sr.ID); err == nil {
+						for _, e := range eps {
+							if e.SeasonNumber == season && e.EpisodeNumber == ep {
+								episodeID = e.ID
+								break
+							}
 						}
 					}
 				}
+				if episodeID > 0 {
+					_, _ = opts.Store.UpsertEpisodeFile(sr.ID, episodeID, src, filepath.Base(src), "", fi.Size())
+				} else if season > 0 && ep > 0 {
+					_ = opts.Store.MarkEpisodeHasFileByNumbers(sr.ID, season, ep, true)
+				}
+				_ = opts.Store.CreateHistory(domain.HistoryRecord{
+					MediaType: "tv", SeriesID: sr.ID, EpisodeID: episodeID,
+					SourceTitle: filepath.Base(src), EventType: "downloadFolderImported",
+					Quality: map[string]any{"quality": map[string]any{"name": "Unknown"}},
+					Data:    map[string]any{"sourcePath": src, "destPath": src, "inPlace": true},
+				})
 			}
-			if episodeID > 0 {
-				_, _ = opts.Store.UpsertEpisodeFile(sr.ID, episodeID, src, filepath.Base(src), "", fi.Size())
-			} else if season > 0 && ep > 0 {
-				_ = opts.Store.MarkEpisodeHasFileByNumbers(sr.ID, season, ep, true)
-			}
-			_ = opts.Store.CreateHistory(domain.HistoryRecord{
-				MediaType: "tv", SeriesID: sr.ID, EpisodeID: episodeID,
-				SourceTitle: filepath.Base(src), EventType: "downloadFolderImported",
-				Quality: map[string]any{"quality": map[string]any{"name": "Unknown"}},
-				Data:    map[string]any{"sourcePath": src, "destPath": src, "inPlace": true},
-			})
-			imported++
 		case "music":
 			ar, err := resolveArtist(ctx, opts, it, profileID, src)
 			if err != nil || ar == nil {
-				continue
+				itemErr = err
+				if itemErr == nil {
+					itemErr = fmt.Errorf("artist resolve failed")
+				}
+			} else {
+				_ = opts.Store.CreateHistory(domain.HistoryRecord{
+					MediaType: "music", ArtistID: ar.ID,
+					SourceTitle: filepath.Base(src), EventType: "downloadFolderImported",
+					Quality: map[string]any{"quality": map[string]any{"name": "Unknown"}},
+					Data:    map[string]any{"sourcePath": src, "destPath": src, "inPlace": true},
+				})
 			}
-			_ = opts.Store.CreateHistory(domain.HistoryRecord{
-				MediaType: "music", ArtistID: ar.ID,
-				SourceTitle: filepath.Base(src), EventType: "downloadFolderImported",
-				Quality: map[string]any{"quality": map[string]any{"name": "Unknown"}},
-				Data:    map[string]any{"sourcePath": src, "destPath": src, "inPlace": true},
-			})
-			imported++
 		case "books", "ebook", "audiobook":
 			bk, err := resolveBook(ctx, opts, it, profileID, src, mediaType)
 			if err != nil || bk == nil {
-				continue
+				itemErr = err
+				if itemErr == nil {
+					itemErr = fmt.Errorf("book resolve failed")
+				}
+			} else {
+				_ = opts.Store.CreateHistory(domain.HistoryRecord{
+					MediaType: "ebook", BookID: bk.ID,
+					SourceTitle: filepath.Base(src), EventType: "downloadFolderImported",
+					Quality: map[string]any{"quality": map[string]any{"name": "Unknown"}},
+					Data:    map[string]any{"sourcePath": src, "destPath": src, "inPlace": true},
+				})
 			}
-			_ = opts.Store.CreateHistory(domain.HistoryRecord{
-				MediaType: "ebook", BookID: bk.ID,
-				SourceTitle: filepath.Base(src), EventType: "downloadFolderImported",
-				Quality: map[string]any{"quality": map[string]any{"name": "Unknown"}},
-				Data:    map[string]any{"sourcePath": src, "destPath": src, "inPlace": true},
-			})
-			imported++
+		default:
+			itemErr = fmt.Errorf("unsupported media type %q", mediaType)
 		}
+
+		if itemErr != nil {
+			result.Results = append(result.Results, ImportItemResult{Path: src, OK: false, Error: itemErr.Error()})
+			continue
+		}
+		result.Imported++
+		result.Results = append(result.Results, ImportItemResult{Path: src, OK: true})
 	}
-	return imported, nil
+	return result, nil
 }
 
 func resolveMovie(ctx context.Context, opts ImportOptions, it ImportItem, profileID int64, src string) (*domain.Movie, error) {

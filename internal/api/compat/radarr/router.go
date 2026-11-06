@@ -17,6 +17,7 @@ import (
 	"github.com/replacearr/replacearr/internal/db"
 	"github.com/replacearr/replacearr/internal/domain"
 	"github.com/replacearr/replacearr/internal/mediacover"
+	"github.com/replacearr/replacearr/internal/mediafile"
 	"github.com/replacearr/replacearr/internal/metadata"
 )
 
@@ -447,7 +448,7 @@ func (h *Handler) handleDeleteMovie(w http.ResponseWriter, r *http.Request, id i
 	}
 
 	if deleteFiles {
-		if err := h.store.DeleteMovieDiskFiles(mv); err != nil {
+		if err := h.store.DeleteMovieDiskFiles(mv, h.recycleBinPath()); err != nil {
 			writeError(w, http.StatusInternalServerError, "delete movie files: "+err.Error())
 			return
 		}
@@ -458,6 +459,18 @@ func (h *Handler) handleDeleteMovie(w http.ResponseWriter, r *http.Request, id i
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{})
+}
+
+func (h *Handler) recycleBinPath() string {
+	configured := ""
+	if cfg, err := h.store.GetAppConfig(); err == nil {
+		configured = cfg.MediaManagement.RecycleBin
+	}
+	configDir := "./config"
+	if h.cfg != nil && h.cfg.ConfigDir != "" {
+		configDir = h.cfg.ConfigDir
+	}
+	return mediafile.ResolveRecycleBin(configured, configDir)
 }
 
 func (h *Handler) handleMovieLookup(w http.ResponseWriter, r *http.Request) {

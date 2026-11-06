@@ -29,6 +29,7 @@ func (s *Server) registerExpandedRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/history", s.authSvc.RequirePermission(domain.PermSystemRead, s.handleHistoryPage))
 
 	mux.HandleFunc("POST /api/v1/libraryimport/scan", s.authSvc.RequirePermission(domain.PermSystemManage, s.handleLibraryImportScan))
+	mux.HandleFunc("GET /api/v1/libraryimport/scan/{scanId}", s.authSvc.RequirePermission(domain.PermSystemManage, s.handleLibraryImportScanPage))
 	mux.HandleFunc("POST /api/v1/libraryimport", s.authSvc.RequirePermission(domain.PermSystemManage, s.handleLibraryImport))
 	mux.HandleFunc("POST /api/v1/libraryimport/rescan", s.authSvc.RequirePermission(domain.PermSystemManage, s.handleLibraryRescan))
 
@@ -334,6 +335,7 @@ func (s *Server) handleLibraryImportScan(w http.ResponseWriter, r *http.Request)
 		MediaType    string `json:"mediaType"`
 		Path         string `json:"path"`
 		RootFolderID int64  `json:"rootFolderId"`
+		Limit        int    `json:"limit"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, http.StatusBadRequest, err)
@@ -353,18 +355,84 @@ func (s *Server) handleLibraryImportScan(w http.ResponseWriter, r *http.Request)
 		writeErr(w, http.StatusBadRequest, fmt.Errorf("path is required"))
 		return
 	}
-	result, err := libraryimport.Scan(r.Context(), libraryimport.ScanOptions{
+	pageSize := req.Limit
+	if pageSize <= 0 {
+		pageSize = libraryimport.DefaultPageSize
+	}
+	opts := libraryimport.ScanOptions{
 		Store:     s.store,
 		Meta:      s.meta,
 		MediaType: req.MediaType,
 		Root:      path,
 		Language:  s.preferredMetadataLanguage(),
-	})
+	}
+	raw, err := libraryimport.Walk(opts)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, result)
+	scanID := ""
+	if s.importSessions != nil {
+		scanID = s.importSessions.Create(req.MediaType, path, raw)
+	}
+	total := len(raw)
+	limit := pageSize
+	if limit > total {
+		limit = total
+	}
+	page := []libraryimport.ScanItem{}
+	if limit > 0 {
+		page = make([]libraryimport.ScanItem, limit)
+		copy(page, raw[:limit])
+		libraryimport.MatchItems(r.Context(), opts, page)
+	}
+	writeJSON(w, http.StatusOK, libraryimport.ScanResult{
+		ScanID:   scanID,
+		Total:    total,
+		Offset:   0,
+		Limit:    limit,
+		PageSize: pageSize,
+		Items:    page,
+	})
+}
+
+func (s *Server) handleLibraryImportScanPage(w http.ResponseWriter, r *http.Request) {
+	scanID := strings.TrimSpace(r.PathValue("scanId"))
+	if scanID == "" || s.importSessions == nil {
+		writeErr(w, http.StatusNotFound, fmt.Errorf("scan session not found or expired"))
+		return
+	}
+	sess, ok := s.importSessions.Get(scanID)
+	if !ok {
+		writeErr(w, http.StatusNotFound, fmt.Errorf("scan session not found or expired"))
+		return
+	}
+	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	if limit <= 0 {
+		limit = libraryimport.DefaultPageSize
+	}
+	page, total, err := s.importSessions.Page(scanID, offset, limit)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, err)
+		return
+	}
+	opts := libraryimport.ScanOptions{
+		Store:     s.store,
+		Meta:      s.meta,
+		MediaType: sess.MediaType,
+		Root:      sess.Root,
+		Language:  s.preferredMetadataLanguage(),
+	}
+	libraryimport.MatchItems(r.Context(), opts, page)
+	writeJSON(w, http.StatusOK, libraryimport.ScanResult{
+		ScanID:   scanID,
+		Total:    total,
+		Offset:   offset,
+		Limit:    len(page),
+		PageSize: limit,
+		Items:    page,
+	})
 }
 
 func (s *Server) handleLibraryImport(w http.ResponseWriter, r *http.Request) {
@@ -372,10 +440,15 @@ func (s *Server) handleLibraryImport(w http.ResponseWriter, r *http.Request) {
 		MediaType        string                     `json:"mediaType"`
 		RootFolderPath   string                     `json:"rootFolderPath"`
 		QualityProfileID int64                      `json:"qualityProfileId"`
+		ScanID           string                     `json:"scanId"`
 		Items            []libraryimport.ImportItem `json:"items"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	if len(req.Items) > libraryimport.MaxImportItems {
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("too many items: max %d per request (got %d)", libraryimport.MaxImportItems, len(req.Items)))
 		return
 	}
 	cfg, err := s.store.GetAppConfig()
@@ -383,7 +456,7 @@ func (s *Server) handleLibraryImport(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
-	n, err := libraryimport.ImportSelected(r.Context(), libraryimport.ImportOptions{
+	result, err := libraryimport.ImportSelected(r.Context(), libraryimport.ImportOptions{
 		Store:            s.store,
 		Meta:             s.meta,
 		AppCfg:           cfg,
@@ -406,10 +479,25 @@ func (s *Server) handleLibraryImport(w http.ResponseWriter, r *http.Request) {
 		},
 	}, req.Items)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err)
+		status := http.StatusInternalServerError
+		if strings.Contains(err.Error(), "too many items") {
+			status = http.StatusBadRequest
+		}
+		writeErr(w, status, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"imported": n})
+	if req.ScanID != "" && s.importSessions != nil && result != nil {
+		okPaths := make([]string, 0, result.Imported)
+		for _, ir := range result.Results {
+			if ir.OK {
+				okPaths = append(okPaths, ir.Path)
+			}
+		}
+		if len(okPaths) > 0 {
+			_, _ = s.importSessions.RemovePaths(req.ScanID, okPaths)
+		}
+	}
+	writeJSON(w, http.StatusOK, result)
 }
 
 func (s *Server) handleLibraryRescan(w http.ResponseWriter, r *http.Request) {

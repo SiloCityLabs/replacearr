@@ -32,7 +32,7 @@ This is a highly experimental AI created repo. I still have to deslop it. feel f
   - Extend Replacearr with custom indexers, download clients, or notification hooks written in standard Go.
   - Out-of-process JSON-RPC 2.0 over stdio isolation — plugins run as independent binaries in `/config/plugins` without requiring CGO or dynamic library version lock-in.
 - **Cardigann YAML Definition Loader**:
-  - Ships ~580 Cardigann YAML indexer definitions in repo `definitions/` (seeded into `REPLACEARR_DEFINITIONS_DIR`, default `/config/definitions`; built-in fallbacks when empty). Refresh with `make sync-definitions`.
+  - Ships ~580 Cardigann YAML indexer definitions in repo `definitions/` (seeded into `$REPLACEARR_CONFIG_DIR/definitions`; built-in fallbacks when empty). Refresh with `make sync-definitions`.
 - **Single Static Binary & LinuxServer-Style Docker Image**:
   - Pure-Go SQLite (`modernc.org/sqlite`), embedded React SPA (`internal/webui`), `CGO_ENABLED=0` static compilation, and a production multi-stage container supporting `PUID`/`PGID` and `TZ`.
 
@@ -195,10 +195,10 @@ func main() {
 
 **Marketplace:** optional community/first-party plugins are listed from
 [`replacearr/replacearr-plugins`](https://github.com/replacearr/replacearr-plugins)
-`registry.json` (override with `REPLACEARR_PLUGIN_CATALOG_URL`). Use **Plugins → Marketplace**
-to install checksummed release binaries into `REPLACEARR_PLUGIN_DIR`.
+`registry.json` (override the URL under **Plugins → Marketplace**). Use that tab
+to install checksummed release binaries into `$REPLACEARR_CONFIG_DIR/plugins`.
 
-Or build a plugin yourself and place it in `/config/plugins` (or `bin/plugins` in development):
+Or build a plugin yourself and place it in `/config/plugins`:
 
 ```bash
 CGO_ENABLED=0 go build -ldflags="-s -w" -o /config/plugins/my-indexer ./cmd/my-indexer
@@ -255,15 +255,13 @@ services:
 | `TZ` | `UTC` | Container timezone |
 | `REPLACEARR_HOST` | `0.0.0.0` | HTTP bind address |
 | `REPLACEARR_PORT` | `8989` | HTTP listen port |
-| `REPLACEARR_CONFIG_DIR` | `/config` | Directory for SQLite database, JWT secret, and plugins |
-| `REPLACEARR_DB_PATH` | `/config/replacearr.db` | Custom path to SQLite database file |
-| `REPLACEARR_PLUGIN_DIR` | `/config/plugins` | Directory scanned for executable Go plugins |
-| `REPLACEARR_PLUGIN_CATALOG_URL` | replacearr-plugins `registry.json` | Marketplace registry URL (HTTPS) |
-| `REPLACEARR_DEFINITIONS_DIR` | `/config/definitions` | Directory scanned for Cardigann YAML definitions (seeded from bundled `definitions/`) |
+| `REPLACEARR_URL_BASE` | *(empty)* | Optional URL base path |
+| `REPLACEARR_ENV` | `development` | Runtime environment label |
+| `REPLACEARR_CONFIG_DIR` | `/config` | Directory for SQLite database, JWT secret, plugins, and definitions |
 | `REPLACEARR_ADMIN_USER` | `admin` | Initial admin username seeded on first startup |
 | `REPLACEARR_ADMIN_PASS` | `replacearr` | Initial admin password seeded on first startup |
-| `REPLACEARR_API_KEY` | *(auto-generated)* | Optional fixed default system API key |
-| `REPLACEARR_JWT_SECRET` | *(auto-generated)* | Secret key used for signing JWT tokens |
+
+SQLite lives at `$REPLACEARR_CONFIG_DIR/replacearr.db`, plugins at `$REPLACEARR_CONFIG_DIR/plugins`, Cardigann definitions at `$REPLACEARR_CONFIG_DIR/definitions`, the master API key at `$REPLACEARR_CONFIG_DIR/api_key.txt`, and the JWT secret at `$REPLACEARR_CONFIG_DIR/jwt_secret.key` (all auto-managed). FlareSolverr, discovery subnets, host `/proc/net`, and the plugin catalog URL are configured in the UI.
 
 ---
 

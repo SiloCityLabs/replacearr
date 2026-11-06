@@ -178,10 +178,7 @@ func (s *Server) handleDeleteMovieFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	deleteFromDisk := queryFlag(r, "deleteFiles")
-	if !r.URL.Query().Has("deleteFiles") {
-		deleteFromDisk = true
-	}
-	if err := s.store.DeleteMovieFile(fileID, deleteFromDisk); err != nil {
+	if err := s.store.DeleteMovieFile(fileID, deleteFromDisk, s.recycleBinPath()); err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
@@ -245,7 +242,7 @@ func (s *Server) handleDeleteMovieExtraFile(w http.ResponseWriter, r *http.Reque
 		writeErr(w, http.StatusBadRequest, errors.New("relativePath is required"))
 		return
 	}
-	if err := s.store.DeleteMovieExtraFile(movieID, rel); err != nil {
+	if err := s.store.DeleteMovieExtraFile(movieID, rel, s.recycleBinPath()); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			writeErr(w, http.StatusNotFound, errors.New("movie not found"))
 			return

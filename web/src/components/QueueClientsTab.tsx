@@ -600,6 +600,48 @@ export const QueueClientsTab: React.FC<QueueClientsTabProps> = ({
                 {label}
               </label>
             ))}
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={Boolean(opts.deleteTorrentAndDataWhenComplete)}
+                onChange={(e) => {
+                  const checked = e.target.checked;
+                  setOpts({
+                    ...opts,
+                    deleteTorrentAndDataWhenComplete: checked,
+                    // Turning off delete-with-data also clears the seeding-complete option.
+                    deleteWhenSeedingComplete: checked ? opts.deleteWhenSeedingComplete : false,
+                  });
+                }}
+              />
+              Delete torrent and data when complete
+            </label>
+            <label className="flex items-start gap-2">
+              <input
+                type="checkbox"
+                className="mt-0.5"
+                checked={Boolean(opts.deleteWhenSeedingComplete)}
+                onChange={(e) => {
+                  const checked = e.target.checked;
+                  setOpts({
+                    ...opts,
+                    deleteWhenSeedingComplete: checked,
+                    // Seeding-complete delete implies delete torrent and data.
+                    deleteTorrentAndDataWhenComplete: checked
+                      ? true
+                      : opts.deleteTorrentAndDataWhenComplete,
+                  });
+                }}
+              />
+              <span>
+                Delete when seeding complete
+                <span className="block text-[11px] text-slate-500 leading-relaxed mt-0.5">
+                  Waits until the client reports seeding finished (stopped after ratio/idle goals),
+                  then removes the torrent and data. Transmission, qBittorrent, and Deluge expose
+                  this complete state.
+                </span>
+              </span>
+            </label>
             <label className="block space-y-1">
               <span className="text-slate-400">Working folders</span>
               <input

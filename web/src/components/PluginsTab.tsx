@@ -22,7 +22,7 @@ import {
   Store,
   ExternalLink,
 } from 'lucide-react';
-import type { CatalogPlugin, DiscoveredPlugin } from '../types';
+import type { AppConfig, CatalogPlugin, DiscoveredPlugin } from '../types';
 import { api } from '../api';
 import { isBrowserNotificationPlugin, notifyBrowser, requestPermission } from '../notifications';
 import {
@@ -37,6 +37,8 @@ import { useConfirm } from './modals/ConfirmModal';
 interface PluginsTabProps {
   plugins: DiscoveredPlugin[];
   masterApiKey?: string;
+  appConfig?: AppConfig | null;
+  onSaveConfig?: (next: AppConfig) => Promise<AppConfig>;
   onRefresh: () => Promise<void>;
   onNotify: (msg: string, isError?: boolean) => void;
 }
@@ -102,6 +104,8 @@ func main() {
 export const PluginsTab: React.FC<PluginsTabProps> = ({
   plugins,
   masterApiKey = '',
+  appConfig = null,
+  onSaveConfig,
   onRefresh,
   onNotify,
 }) => {
@@ -118,6 +122,8 @@ export const PluginsTab: React.FC<PluginsTabProps> = ({
   const [sdkExpanded, setSdkExpanded] = useState(false);
   const [catalog, setCatalog] = useState<CatalogPlugin[]>([]);
   const [catalogUrl, setCatalogUrl] = useState('');
+  const [catalogUrlDraft, setCatalogUrlDraft] = useState('');
+  const [catalogUrlSaving, setCatalogUrlSaving] = useState(false);
   const [catalogLoading, setCatalogLoading] = useState(false);
   const [catalogBusyId, setCatalogBusyId] = useState<string | null>(null);
   const [githubURL, setGithubURL] = useState('');
@@ -140,7 +146,9 @@ export const PluginsTab: React.FC<PluginsTabProps> = ({
     try {
       const res = refresh ? await api.refreshPluginCatalog() : await api.getPluginCatalog();
       setCatalog(res.plugins || []);
-      setCatalogUrl(res.catalogUrl || '');
+      const url = res.catalogUrl || '';
+      setCatalogUrl(url);
+      setCatalogUrlDraft(url);
     } catch (err) {
       onNotify(err instanceof Error ? err.message : 'Failed to load plugin marketplace', true);
     } finally {
@@ -149,9 +157,37 @@ export const PluginsTab: React.FC<PluginsTabProps> = ({
   };
 
   useEffect(() => {
+    if (appConfig?.plugins?.catalogUrl) {
+      setCatalogUrlDraft(appConfig.plugins.catalogUrl);
+    }
+  }, [appConfig?.plugins?.catalogUrl]);
+
+  useEffect(() => {
     void loadCatalog(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- load once on mount
   }, []);
+
+  const handleSaveCatalogURL = async () => {
+    if (!appConfig || !onSaveConfig) return;
+    const nextURL = catalogUrlDraft.trim();
+    if (!nextURL) {
+      onNotify('Catalog URL is required', true);
+      return;
+    }
+    setCatalogUrlSaving(true);
+    try {
+      await onSaveConfig({
+        ...appConfig,
+        plugins: { ...appConfig.plugins, catalogUrl: nextURL },
+      });
+      onNotify('Marketplace catalog URL saved');
+      await loadCatalog(true);
+    } catch (err) {
+      onNotify(err instanceof Error ? err.message : 'Failed to save catalog URL', true);
+    } finally {
+      setCatalogUrlSaving(false);
+    }
+  };
 
   const handleInstallCatalog = async (entry: CatalogPlugin) => {
     setCatalogBusyId(entry.id);
@@ -624,10 +660,38 @@ export const PluginsTab: React.FC<PluginsTabProps> = ({
             Refresh catalog
           </button>
         </div>
-        {catalogUrl ? (
-          <p className="text-[11px] font-mono text-slate-500 truncate">
-            Registry: {catalogUrl}
-          </p>
+        {onSaveConfig ? (
+          <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4 space-y-3">
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+              Marketplace registry
+            </h3>
+            <div className="flex flex-col sm:flex-row gap-2">
+              <input
+                type="url"
+                value={catalogUrlDraft}
+                onChange={(e) => setCatalogUrlDraft(e.target.value)}
+                placeholder="https://…/registry.json"
+                className="flex-1 min-w-0 px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 text-xs font-mono text-slate-200 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              />
+              <button
+                type="button"
+                onClick={() => void handleSaveCatalogURL()}
+                disabled={
+                  catalogUrlSaving ||
+                  !catalogUrlDraft.trim() ||
+                  catalogUrlDraft.trim() === (appConfig?.plugins?.catalogUrl || catalogUrl)
+                }
+                className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-xs text-white font-medium transition disabled:opacity-50"
+              >
+                {catalogUrlSaving ? 'Saving…' : 'Save URL'}
+              </button>
+            </div>
+            {catalogUrl ? (
+              <p className="text-[11px] font-mono text-slate-500 truncate">Active: {catalogUrl}</p>
+            ) : null}
+          </div>
+        ) : catalogUrl ? (
+          <p className="text-[11px] font-mono text-slate-500 truncate">Registry: {catalogUrl}</p>
         ) : null}
 
         <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4 space-y-3">

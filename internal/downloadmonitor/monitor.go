@@ -105,7 +105,10 @@ func (m *Monitor) syncFromClients(ctx context.Context, doImport bool) {
 	if err != nil {
 		return
 	}
-	cdh := appCfg.DownloadClientOptions.EnableCompletedDownloadHandling
+	opts := appCfg.DownloadClientOptions
+	cdh := opts.EnableCompletedDownloadHandling
+	deleteData := opts.DeleteTorrentAndDataWhenComplete || opts.DeleteWhenSeedingComplete
+	waitSeed := opts.DeleteWhenSeedingComplete
 
 	queue, err := m.store.ListQueueItems("")
 	if err != nil {
@@ -113,11 +116,14 @@ func (m *Monitor) syncFromClients(ctx context.Context, doImport bool) {
 	}
 	active := make([]domain.QueueItem, 0, len(queue))
 	for _, q := range queue {
-		if q.TrackedDownloadState == "imported" || q.Status == "completed" && q.TrackedDownloadState == "imported" {
-			continue
-		}
 		if q.DownloadID == "" {
 			continue
+		}
+		if q.TrackedDownloadState == "imported" {
+			// Keep imported items only while we still need to delete after seeding.
+			if !waitSeed || !deleteData {
+				continue
+			}
 		}
 		active = append(active, q)
 	}
@@ -141,19 +147,20 @@ func (m *Monitor) syncFromClients(ctx context.Context, doImport bool) {
 			}
 			for _, it := range items {
 				byID[it.Hash] = trackedDownload{
-					ID:          it.Hash,
-					Title:       it.Name,
-					Completed:   qbittorrent.IsCompleted(it.State, it.Progress),
-					Progress:    it.Progress,
-					Size:        it.Size,
-					SizeLeft:    it.AmountLeft,
-					Timeleft:    formatTimeleft(it.EtaSeconds, it.AmountLeft),
-					EtaSeconds:  it.EtaSeconds,
-					OutputPath:  firstNonEmpty(it.ContentPath, it.SavePath),
-					ContentPath: it.ContentPath,
-					Client:      cli,
-					RemoveDone:  dc.RemoveCompletedDownloads,
-					ClientName:  dc.Name,
+					ID:              it.Hash,
+					Title:           it.Name,
+					Completed:       qbittorrent.IsCompleted(it.State, it.Progress),
+					SeedingComplete: qbittorrent.IsSeedingComplete(it.State, it.Progress),
+					Progress:        it.Progress,
+					Size:            it.Size,
+					SizeLeft:        it.AmountLeft,
+					Timeleft:        formatTimeleft(it.EtaSeconds, it.AmountLeft),
+					EtaSeconds:      it.EtaSeconds,
+					OutputPath:      firstNonEmpty(it.ContentPath, it.SavePath),
+					ContentPath:     it.ContentPath,
+					Client:          cli,
+					RemoveDone:      dc.RemoveCompletedDownloads,
+					ClientName:      dc.Name,
 				}
 			}
 		case strings.EqualFold(dc.Implementation, "Transmission"):
@@ -166,19 +173,20 @@ func (m *Monitor) syncFromClients(ctx context.Context, doImport bool) {
 			for _, it := range items {
 				content := firstNonEmpty(it.ContentPath, it.DownloadDir)
 				byID[it.Hash] = trackedDownload{
-					ID:          it.Hash,
-					Title:       it.Name,
-					Completed:   transmission.IsCompleted(it.Status, it.Progress, it.AmountLeft),
-					Progress:    it.Progress,
-					Size:        it.Size,
-					SizeLeft:    it.AmountLeft,
-					Timeleft:    formatTimeleft(it.EtaSeconds, it.AmountLeft),
-					EtaSeconds:  it.EtaSeconds,
-					OutputPath:  content,
-					ContentPath: content,
-					Client:      cli,
-					RemoveDone:  dc.RemoveCompletedDownloads,
-					ClientName:  dc.Name,
+					ID:              it.Hash,
+					Title:           it.Name,
+					Completed:       transmission.IsCompleted(it.Status, it.Progress, it.AmountLeft),
+					SeedingComplete: transmission.IsSeedingComplete(it.Status, it.Progress, it.AmountLeft, it.IsFinished),
+					Progress:        it.Progress,
+					Size:            it.Size,
+					SizeLeft:        it.AmountLeft,
+					Timeleft:        formatTimeleft(it.EtaSeconds, it.AmountLeft),
+					EtaSeconds:      it.EtaSeconds,
+					OutputPath:      content,
+					ContentPath:     content,
+					Client:          cli,
+					RemoveDone:      dc.RemoveCompletedDownloads,
+					ClientName:      dc.Name,
 				}
 			}
 		case strings.EqualFold(dc.Implementation, "Deluge"):
@@ -190,19 +198,20 @@ func (m *Monitor) syncFromClients(ctx context.Context, doImport bool) {
 			}
 			for _, it := range items {
 				byID[it.Hash] = trackedDownload{
-					ID:          it.Hash,
-					Title:       it.Name,
-					Completed:   deluge.IsCompleted(it.State, it.Progress),
-					Progress:    it.Progress,
-					Size:        it.Size,
-					SizeLeft:    it.AmountLeft,
-					Timeleft:    formatTimeleft(it.EtaSeconds, it.AmountLeft),
-					EtaSeconds:  it.EtaSeconds,
-					OutputPath:  firstNonEmpty(it.ContentPath, it.SavePath),
-					ContentPath: it.ContentPath,
-					Client:      cli,
-					RemoveDone:  dc.RemoveCompletedDownloads,
-					ClientName:  dc.Name,
+					ID:              it.Hash,
+					Title:           it.Name,
+					Completed:       deluge.IsCompleted(it.State, it.Progress),
+					SeedingComplete: deluge.IsSeedingComplete(it.State, it.Progress),
+					Progress:        it.Progress,
+					Size:            it.Size,
+					SizeLeft:        it.AmountLeft,
+					Timeleft:        formatTimeleft(it.EtaSeconds, it.AmountLeft),
+					EtaSeconds:      it.EtaSeconds,
+					OutputPath:      firstNonEmpty(it.ContentPath, it.SavePath),
+					ContentPath:     it.ContentPath,
+					Client:          cli,
+					RemoveDone:      dc.RemoveCompletedDownloads,
+					ClientName:      dc.Name,
 				}
 			}
 		case strings.EqualFold(dc.Implementation, "SABnzbd"):
@@ -214,18 +223,19 @@ func (m *Monitor) syncFromClients(ctx context.Context, doImport bool) {
 			}
 			for _, it := range items {
 				byID[it.ID] = trackedDownload{
-					ID:          it.ID,
-					Title:       it.Title,
-					Completed:   it.Completed,
-					Progress:    it.Progress,
-					Size:        it.Size,
-					SizeLeft:    it.SizeLeft,
-					Timeleft:    it.Timeleft,
-					OutputPath:  it.OutputPath,
-					ContentPath: it.OutputPath,
-					Client:      cli,
-					RemoveDone:  dc.RemoveCompletedDownloads,
-					ClientName:  dc.Name,
+					ID:              it.ID,
+					Title:           it.Title,
+					Completed:       it.Completed,
+					SeedingComplete: it.Completed, // usenet has no seeding phase
+					Progress:        it.Progress,
+					Size:            it.Size,
+					SizeLeft:        it.SizeLeft,
+					Timeleft:        it.Timeleft,
+					OutputPath:      it.OutputPath,
+					ContentPath:     it.OutputPath,
+					Client:          cli,
+					RemoveDone:      dc.RemoveCompletedDownloads,
+					ClientName:      dc.Name,
 				}
 			}
 		case strings.EqualFold(dc.Implementation, "NZBGet"):
@@ -237,17 +247,18 @@ func (m *Monitor) syncFromClients(ctx context.Context, doImport bool) {
 			}
 			for _, it := range items {
 				byID[it.ID] = trackedDownload{
-					ID:          it.ID,
-					Title:       it.Title,
-					Completed:   it.Completed,
-					Progress:    it.Progress,
-					Size:        it.Size,
-					SizeLeft:    it.SizeLeft,
-					OutputPath:  it.OutputPath,
-					ContentPath: it.OutputPath,
-					Client:      cli,
-					RemoveDone:  dc.RemoveCompletedDownloads,
-					ClientName:  dc.Name,
+					ID:              it.ID,
+					Title:           it.Title,
+					Completed:       it.Completed,
+					SeedingComplete: it.Completed, // usenet has no seeding phase
+					Progress:        it.Progress,
+					Size:            it.Size,
+					SizeLeft:        it.SizeLeft,
+					OutputPath:      it.OutputPath,
+					ContentPath:     it.OutputPath,
+					Client:          cli,
+					RemoveDone:      dc.RemoveCompletedDownloads,
+					ClientName:      dc.Name,
 				}
 			}
 		}
@@ -275,6 +286,15 @@ func (m *Monitor) syncFromClients(ctx context.Context, doImport bool) {
 			// pending hash or client not ready
 			continue
 		}
+
+		// Deferred cleanup: already imported, waiting for seeding complete.
+		if q.TrackedDownloadState == "imported" {
+			if doImport {
+				maybeRemoveFromClient(ctx, td, deleteData, waitSeed)
+			}
+			continue
+		}
+
 		q.Size = td.Size
 		q.Sizeleft = td.SizeLeft
 		q.Timeleft = td.Timeleft
@@ -322,26 +342,47 @@ func (m *Monitor) syncFromClients(ctx context.Context, doImport bool) {
 		q.TrackedDownloadState = "imported"
 		q.Status = "completed"
 		_ = m.store.UpdateQueueItem(q)
-		if td.RemoveDone && td.Client != nil {
-			_ = td.Client.Remove(ctx, td.ID, false)
-		}
+		maybeRemoveFromClient(ctx, td, deleteData, waitSeed)
 	}
 }
 
 type trackedDownload struct {
-	ID          string
-	Title       string
-	Completed   bool
-	Progress    float64
-	Size        int64
-	SizeLeft    int64
-	Timeleft    string
-	EtaSeconds  int64
-	OutputPath  string
-	ContentPath string
-	Client      downloadRemover
-	RemoveDone  bool
-	ClientName  string
+	ID              string
+	Title           string
+	Completed       bool
+	SeedingComplete bool
+	Progress        float64
+	Size            int64
+	SizeLeft        int64
+	Timeleft        string
+	EtaSeconds      int64
+	OutputPath      string
+	ContentPath     string
+	Client          downloadRemover
+	RemoveDone      bool
+	ClientName      string
+}
+
+// maybeRemoveFromClient deletes the torrent from its download client after import
+// when global delete options or per-client RemoveCompletedDownloads say so.
+func maybeRemoveFromClient(ctx context.Context, td trackedDownload, deleteData, waitSeed bool) {
+	if td.Client == nil {
+		return
+	}
+	if deleteData {
+		if waitSeed && !td.SeedingComplete {
+			return
+		}
+		if err := td.Client.Remove(ctx, td.ID, true); err != nil {
+			log.Printf("downloadmonitor: remove with data failed (%s / %s): %v", td.ClientName, td.ID, err)
+		}
+		return
+	}
+	if td.RemoveDone {
+		if err := td.Client.Remove(ctx, td.ID, false); err != nil {
+			log.Printf("downloadmonitor: remove failed (%s / %s): %v", td.ClientName, td.ID, err)
+		}
+	}
 }
 
 // formatTimeleft turns client ETA seconds into a Sonarr-style timeleft string.

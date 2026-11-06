@@ -119,6 +119,9 @@ func TestAddListRemove(t *testing.T) {
 	if IsCompleted(0, 0, 0) || IsCompleted(4, 0, 0) {
 		t.Fatalf("metadata-only torrent must not be completed")
 	}
+	if IsSeedingComplete(6, 1, 0, false) || !IsSeedingComplete(0, 1, 0, true) {
+		t.Fatalf("IsSeedingComplete logic")
+	}
 	if err := cli.Remove(context.Background(), id, false); err != nil {
 		t.Fatalf("Remove: %v", err)
 	}

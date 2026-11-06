@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -487,5 +488,56 @@ func TestProwlarrV1AndTorznabCompat(t *testing.T) {
 	_ = resp.Body.Close()
 	if createdProxy.Host != "http://flaresolverr:8191/" || createdProxy.RequestTimeout != 90 {
 		t.Fatalf("unexpected created FlareSolverr proxy: %+v", createdProxy)
+	}
+}
+
+func TestSonarrDeleteSeriesMovesFilesToRecycleBin(t *testing.T) {
+	store, cfg, searchFn := setupTestEnv(t)
+	h := sonarr.NewHandler(store, cfg, searchFn)
+	ts := httptest.NewServer(h)
+	defer ts.Close()
+
+	root := t.TempDir()
+	seriesDir := filepath.Join(root, "Show")
+	if err := os.MkdirAll(seriesDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(seriesDir, "ep.mkv"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sr, err := store.CreateSeries(domain.Series{
+		Title:            "Show",
+		TvdbID:           12345,
+		QualityProfileID: 1,
+		RootFolderPath:   root,
+		Path:             seriesDir,
+		Monitored:        true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req, err := http.NewRequest(http.MethodDelete, fmt.Sprintf("%s/api/v3/series/%d?deleteFiles=true", ts.URL, sr.ID), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+	if _, err := os.Stat(seriesDir); !os.IsNotExist(err) {
+		t.Fatal("series folder should be moved to recycle bin")
+	}
+	bin := filepath.Join(cfg.ConfigDir, "RecycleBin")
+	entries, err := os.ReadDir(bin)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("recycle bin entries: err=%v len=%d", err, len(entries))
+	}
+	if _, err := store.GetSeriesByID(sr.ID); err == nil {
+		t.Fatal("series should be removed from db")
 	}
 }

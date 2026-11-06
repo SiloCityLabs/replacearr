@@ -6,6 +6,7 @@ import type {
   Author,
   Book,
   LibraryImportMatch,
+  LibraryImportScanItem,
   Movie,
   QualityProfile,
   RootFolder,
@@ -320,12 +321,40 @@ export const LibraryImportPage: React.FC<LibraryImportPageProps> = ({
   const [customPath, setCustomPath] = useState('');
   const [profileId, setProfileId] = useState<number>(mediaProfiles[0]?.id ?? 1);
   const [rows, setRows] = useState<ScanRow[]>([]);
+  const [scanId, setScanId] = useState<string | null>(null);
+  const [total, setTotal] = useState(0);
+  const [offset, setOffset] = useState(0);
+  const [pageSize, setPageSize] = useState(100);
   const [scanning, setScanning] = useState(false);
+  const [matchingPage, setMatchingPage] = useState(false);
   const [importing, setImporting] = useState(false);
   const [activeSearchIdx, setActiveSearchIdx] = useState<number | null>(null);
   const [searchResults, setSearchResults] = useState<LibraryImportMatch[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const searchTimer = useRef<number | null>(null);
+
+  const pageFrom = total === 0 ? 0 : offset + 1;
+  const pageTo = Math.min(offset + rows.length, total);
+  const canPrev = offset > 0 && Boolean(scanId);
+  const canNext = offset + pageSize < total && Boolean(scanId);
+
+  const mapScanItems = (items: LibraryImportScanItem[] | undefined): ScanRow[] =>
+    (items ?? []).map((item) => {
+      const match = item.match ?? item.matches?.[0] ?? null;
+      return {
+        path: item.path,
+        relativePath: item.relativePath,
+        size: item.size,
+        guessedTitle: item.guessedTitle,
+        guessedYear: item.guessedYear,
+        seasonNumber: item.seasonNumber,
+        episodeNumber: item.episodeNumber,
+        selected: Boolean(match),
+        match,
+        matches: item.matches ?? [],
+        query: matchLabel(match) || item.guessedTitle || '',
+      };
+    });
 
   useEffect(() => {
     if (mediaProfiles[0]?.id && !mediaProfiles.some((p) => p.id === profileId)) {
@@ -385,6 +414,40 @@ export const LibraryImportPage: React.FC<LibraryImportPageProps> = ({
     }, 280);
   };
 
+  const applyScanPage = (result: {
+    scanId?: string;
+    total: number;
+    offset: number;
+    pageSize: number;
+    items: LibraryImportScanItem[];
+  }) => {
+    if (result.scanId) setScanId(result.scanId);
+    setTotal(result.total ?? 0);
+    setOffset(result.offset ?? 0);
+    if (result.pageSize > 0) setPageSize(result.pageSize);
+    setRows(mapScanItems(result.items));
+    setActiveSearchIdx(null);
+    setSearchResults([]);
+  };
+
+  const loadPage = async (nextOffset: number, size = pageSize) => {
+    if (!scanId) return;
+    setMatchingPage(true);
+    setActiveSearchIdx(null);
+    setSearchResults([]);
+    try {
+      const result = await api.getLibraryImportScanPage(scanId, {
+        offset: nextOffset,
+        limit: size,
+      });
+      applyScanPage(result);
+    } catch (err) {
+      onNotify(err instanceof Error ? err.message : 'Failed to load page', true);
+    } finally {
+      setMatchingPage(false);
+    }
+  };
+
   const scan = async () => {
     setScanning(true);
     setActiveSearchIdx(null);
@@ -400,26 +463,10 @@ export const LibraryImportPage: React.FC<LibraryImportPageProps> = ({
         mediaType: apiMedia,
         path,
         rootFolderId: folderId || undefined,
+        limit: pageSize,
       });
-      setRows(
-        (result.items ?? []).map((item) => {
-          const match = item.match ?? item.matches?.[0] ?? null;
-          return {
-            path: item.path,
-            relativePath: item.relativePath,
-            size: item.size,
-            guessedTitle: item.guessedTitle,
-            guessedYear: item.guessedYear,
-            seasonNumber: item.seasonNumber,
-            episodeNumber: item.episodeNumber,
-            selected: Boolean(match),
-            match,
-            matches: item.matches ?? [],
-            query: matchLabel(match) || item.guessedTitle || '',
-          };
-        })
-      );
-      onNotify(`Found ${result.items?.length ?? 0} unmapped file(s)`);
+      applyScanPage(result);
+      onNotify(`Found ${result.total ?? 0} unmapped file(s)`);
     } catch (err) {
       onNotify(err instanceof Error ? err.message : 'Scan failed', true);
     } finally {
@@ -445,6 +492,7 @@ export const LibraryImportPage: React.FC<LibraryImportPageProps> = ({
         mediaType: apiMedia,
         rootFolderPath: customPath.trim() || folder?.path || undefined,
         qualityProfileId: profileId,
+        scanId: scanId || undefined,
         items: selected.map((r) => ({
           path: r.path,
           matchId: r.match?.libraryId || undefined,
@@ -457,9 +505,44 @@ export const LibraryImportPage: React.FC<LibraryImportPageProps> = ({
           episodeNumber: r.episodeNumber,
         })),
       });
-      onNotify(`Imported ${result.imported ?? 0} file(s)`);
-      setRows((prev) => prev.filter((r) => !r.selected));
+      const failed = (result.results ?? []).filter((r) => !r.ok);
+      if (failed.length) {
+        onNotify(
+          `Imported ${result.imported ?? 0}; ${failed.length} failed` +
+            (failed[0]?.error ? ` (${failed[0].error})` : ''),
+          true
+        );
+      } else {
+        onNotify(`Imported ${result.imported ?? 0} file(s)`);
+      }
       await onRefresh();
+      if (scanId) {
+        setMatchingPage(true);
+        try {
+          let page = await api.getLibraryImportScanPage(scanId, {
+            offset,
+            limit: pageSize,
+          });
+          if ((page.items?.length ?? 0) === 0 && (page.total ?? 0) > 0 && offset > 0) {
+            const last = Math.max(0, Math.floor((page.total - 1) / pageSize) * pageSize);
+            page = await api.getLibraryImportScanPage(scanId, {
+              offset: last,
+              limit: pageSize,
+            });
+          }
+          applyScanPage(page);
+        } catch (err) {
+          onNotify(err instanceof Error ? err.message : 'Failed to refresh page', true);
+        } finally {
+          setMatchingPage(false);
+        }
+      } else {
+        const okPaths = new Set(
+          (result.results ?? []).filter((r) => r.ok).map((r) => r.path)
+        );
+        setRows((prev) => prev.filter((r) => !okPaths.has(r.path)));
+        setTotal((t) => Math.max(0, t - (result.imported ?? 0)));
+      }
     } catch (err) {
       onNotify(err instanceof Error ? err.message : 'Import failed', true);
     } finally {
@@ -564,119 +647,172 @@ export const LibraryImportPage: React.FC<LibraryImportPageProps> = ({
             </select>
           </label>
         </div>
-        <button
-          type="button"
-          disabled={scanning}
-          onClick={() => void scan()}
-          className="inline-flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium bg-indigo-600 hover:bg-indigo-500 text-white disabled:opacity-60"
-        >
-          <FolderSearch className={`w-3.5 h-3.5 ${scanning ? 'animate-pulse' : ''}`} />
-          {scanning ? 'Scanning & matching…' : 'Scan for unmapped files'}
-        </button>
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            disabled={scanning}
+            onClick={() => void scan()}
+            className="inline-flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium bg-indigo-600 hover:bg-indigo-500 text-white disabled:opacity-60"
+          >
+            <FolderSearch className={`w-3.5 h-3.5 ${scanning ? 'animate-pulse' : ''}`} />
+            {scanning ? 'Scanning…' : 'Scan for unmapped files'}
+          </button>
+          <label className="inline-flex items-center gap-2 text-xs text-slate-400">
+            Page size
+            <select
+              value={pageSize}
+              disabled={scanning || matchingPage}
+              onChange={(e) => {
+                const next = Number(e.target.value) || 100;
+                setPageSize(next);
+                if (scanId) void loadPage(0, next);
+              }}
+              className="bg-slate-950 border border-slate-800 rounded-lg px-2 py-1.5 text-xs text-white"
+            >
+              <option value={50}>50</option>
+              <option value={100}>100</option>
+              <option value={200}>200</option>
+            </select>
+          </label>
+        </div>
       </div>
 
-      {rows.length > 0 ? (
+      {total > 0 || rows.length > 0 ? (
         <div className="bg-slate-900/90 border border-slate-800 rounded-xl">
-          <div className="overflow-x-auto rounded-xl">
-            <table className="w-full text-xs">
-              <thead className="bg-slate-950/80 text-slate-400 text-left">
-                <tr>
-                  <th className="px-3 py-2 w-8">
-                    <input
-                      type="checkbox"
-                      checked={rows.length > 0 && rows.every((r) => r.selected)}
-                      onChange={(e) =>
-                        setRows((prev) => prev.map((r) => ({ ...r, selected: e.target.checked })))
-                      }
-                    />
-                  </th>
-                  <th className="px-3 py-2">File</th>
-                  <th className="px-3 py-2">Size</th>
-                  <th className="px-3 py-2">Guess</th>
-                  <th className="px-3 py-2 min-w-[16rem]">Match</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((row, idx) => (
-                  <tr key={row.path} className="border-t border-slate-800/80 align-top">
-                    <td className="px-3 py-2">
+          <div className="px-3 py-2 border-b border-slate-800 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-400">
+            <span>
+              {matchingPage
+                ? 'Matching page…'
+                : total > 0
+                  ? `Showing ${pageFrom}–${pageTo} of ${total}`
+                  : 'No remaining files'}
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                disabled={!canPrev || matchingPage || importing}
+                onClick={() => void loadPage(Math.max(0, offset - pageSize))}
+                className="px-2.5 py-1 rounded-md border border-slate-700 text-slate-300 hover:bg-slate-800 disabled:opacity-40"
+              >
+                Prev
+              </button>
+              <button
+                type="button"
+                disabled={!canNext || matchingPage || importing}
+                onClick={() => void loadPage(offset + pageSize)}
+                className="px-2.5 py-1 rounded-md border border-slate-700 text-slate-300 hover:bg-slate-800 disabled:opacity-40"
+              >
+                Next
+              </button>
+            </div>
+          </div>
+          {rows.length > 0 ? (
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead className="bg-slate-950/80 text-slate-400 text-left">
+                  <tr>
+                    <th className="px-3 py-2 w-8">
                       <input
                         type="checkbox"
-                        checked={row.selected}
+                        title="Select all on this page"
+                        checked={rows.length > 0 && rows.every((r) => r.selected)}
                         onChange={(e) =>
-                          setRows((prev) =>
-                            prev.map((r, i) => (i === idx ? { ...r, selected: e.target.checked } : r))
-                          )
+                          setRows((prev) => prev.map((r) => ({ ...r, selected: e.target.checked })))
                         }
                       />
-                    </td>
-                    <td className="px-3 py-2 text-slate-200 font-mono max-w-xs truncate" title={row.path}>
-                      {row.relativePath || row.path}
-                    </td>
-                    <td className="px-3 py-2 text-slate-400">{formatBytes(row.size)}</td>
-                    <td className="px-3 py-2 text-slate-300">
-                      {row.guessedTitle || '—'}
-                      {row.guessedYear ? ` (${row.guessedYear})` : ''}
-                      {row.seasonNumber != null && row.episodeNumber != null
-                        ? ` S${row.seasonNumber}E${row.episodeNumber}`
-                        : ''}
-                    </td>
-                    <td className="px-3 py-2">
-                      <MatchSearchField
-                        query={row.query}
-                        match={row.match}
-                        open={activeSearchIdx === idx}
-                        loading={searchLoading && activeSearchIdx === idx}
-                        placeholder={matchSourceHint(media)}
-                        results={
-                          activeSearchIdx === idx
-                            ? searchResults.length > 0
-                              ? searchResults
-                              : row.matches
-                            : []
-                        }
-                        onQueryChange={(value) => {
-                          setRows((prev) =>
-                            prev.map((r, i) => (i === idx ? { ...r, query: value, match: null } : r))
-                          );
-                          setActiveSearchIdx(idx);
-                          scheduleSearch(idx, value);
-                        }}
-                        onFocus={() => {
-                          setActiveSearchIdx(idx);
-                          if (row.matches.length) {
-                            setSearchResults(row.matches);
-                          } else if (row.query.trim()) {
-                            scheduleSearch(idx, row.query);
-                          }
-                        }}
-                        onClear={() => {
-                          setRows((prev) =>
-                            prev.map((r, i) => (i === idx ? { ...r, query: '', match: null } : r))
-                          );
-                          setSearchResults([]);
-                          setActiveSearchIdx(idx);
-                        }}
-                        onSelect={(hit) => applyMatch(idx, hit)}
-                        onClose={() => {
-                          if (activeSearchIdx === idx) setActiveSearchIdx(null);
-                        }}
-                      />
-                    </td>
+                    </th>
+                    <th className="px-3 py-2">File</th>
+                    <th className="px-3 py-2">Size</th>
+                    <th className="px-3 py-2">Guess</th>
+                    <th className="px-3 py-2 min-w-[16rem]">Match</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {rows.map((row, idx) => (
+                    <tr key={row.path} className="border-t border-slate-800/80 align-top">
+                      <td className="px-3 py-2">
+                        <input
+                          type="checkbox"
+                          checked={row.selected}
+                          onChange={(e) =>
+                            setRows((prev) =>
+                              prev.map((r, i) => (i === idx ? { ...r, selected: e.target.checked } : r))
+                            )
+                          }
+                        />
+                      </td>
+                      <td className="px-3 py-2 text-slate-200 font-mono max-w-xs truncate" title={row.path}>
+                        {row.relativePath || row.path}
+                      </td>
+                      <td className="px-3 py-2 text-slate-400">{formatBytes(row.size)}</td>
+                      <td className="px-3 py-2 text-slate-300">
+                        {row.guessedTitle || '—'}
+                        {row.guessedYear ? ` (${row.guessedYear})` : ''}
+                        {row.seasonNumber != null && row.episodeNumber != null
+                          ? ` S${row.seasonNumber}E${row.episodeNumber}`
+                          : ''}
+                      </td>
+                      <td className="px-3 py-2">
+                        <MatchSearchField
+                          query={row.query}
+                          match={row.match}
+                          open={activeSearchIdx === idx}
+                          loading={searchLoading && activeSearchIdx === idx}
+                          placeholder={matchSourceHint(media)}
+                          results={
+                            activeSearchIdx === idx
+                              ? searchResults.length > 0
+                                ? searchResults
+                                : row.matches
+                              : []
+                          }
+                          onQueryChange={(value) => {
+                            setRows((prev) =>
+                              prev.map((r, i) => (i === idx ? { ...r, query: value, match: null } : r))
+                            );
+                            setActiveSearchIdx(idx);
+                            scheduleSearch(idx, value);
+                          }}
+                          onFocus={() => {
+                            setActiveSearchIdx(idx);
+                            if (row.matches.length) {
+                              setSearchResults(row.matches);
+                            } else if (row.query.trim()) {
+                              scheduleSearch(idx, row.query);
+                            }
+                          }}
+                          onClear={() => {
+                            setRows((prev) =>
+                              prev.map((r, i) => (i === idx ? { ...r, query: '', match: null } : r))
+                            );
+                            setSearchResults([]);
+                            setActiveSearchIdx(idx);
+                          }}
+                          onSelect={(hit) => applyMatch(idx, hit)}
+                          onClose={() => {
+                            if (activeSearchIdx === idx) setActiveSearchIdx(null);
+                          }}
+                        />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="px-3 py-6 text-xs text-slate-500 text-center">
+              {matchingPage ? 'Matching…' : 'No files on this page.'}
+            </div>
+          )}
           <div className="p-3 border-t border-slate-800 flex justify-end">
             <button
               type="button"
-              disabled={importing}
+              disabled={importing || matchingPage || rows.length === 0}
               onClick={() => void doImport()}
               className="inline-flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-60"
             >
               <Upload className="w-3.5 h-3.5" />
-              {importing ? 'Importing…' : 'Import selected'}
+              {importing ? 'Importing…' : 'Import selected (this page)'}
             </button>
           </div>
         </div>

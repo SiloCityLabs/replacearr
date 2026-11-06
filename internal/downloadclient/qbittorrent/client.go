@@ -275,6 +275,19 @@ func IsCompleted(state string, progress float64) bool {
 	return progress >= 0.999
 }
 
+// IsSeedingComplete reports whether qBittorrent has stopped/paused after seeding goals.
+func IsSeedingComplete(state string, progress float64) bool {
+	if !IsCompleted(state, progress) {
+		return false
+	}
+	switch strings.ToLower(state) {
+	case "pausedup", "stoppedup":
+		return true
+	default:
+		return false
+	}
+}
+
 func (c *Client) ensureLogin(ctx context.Context) error {
 	c.mu.Lock()
 	logged := c.logged

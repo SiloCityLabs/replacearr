@@ -1,5 +1,5 @@
 // Package plugincatalog fetches the Replacearr plugin marketplace registry and
-// installs checksummed release binaries into REPLACEARR_PLUGIN_DIR.
+// installs checksummed release binaries into the configured plugin directory.
 package plugincatalog
 
 import (
@@ -124,7 +124,30 @@ func (c *Client) CatalogURL() string {
 	if c == nil {
 		return DefaultCatalogURL
 	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	return c.catalogURL
+}
+
+// SetCatalogURL updates the marketplace registry URL and clears the cache when it changes.
+func (c *Client) SetCatalogURL(catalogURL string) {
+	if c == nil {
+		return
+	}
+	u := strings.TrimSpace(catalogURL)
+	if u == "" {
+		u = DefaultCatalogURL
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.catalogURL == u {
+		return
+	}
+	c.catalogURL = u
+	c.cached = nil
+	c.cachedAt = time.Time{}
+	c.cacheErr = nil
+	c.manifestURLs = nil
 }
 
 // PluginDir returns the install directory.
@@ -471,11 +494,18 @@ func (c *Client) installPlugin(ctx context.Context, plugin Plugin, origin Origin
 	return nil
 }
 
+func (c *Client) catalogURLLocked() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.catalogURL
+}
+
 func (c *Client) downloadCatalog(ctx context.Context) (*Index, error) {
-	if err := requireHTTPS(c.catalogURL); err != nil {
+	catalogURL := c.catalogURLLocked()
+	if err := requireHTTPS(catalogURL); err != nil {
 		return nil, err
 	}
-	body, err := c.getBytes(ctx, c.catalogURL)
+	body, err := c.getBytes(ctx, catalogURL)
 	if err != nil {
 		return nil, fmt.Errorf("fetch catalog: %w", err)
 	}
@@ -511,6 +541,7 @@ func (c *Client) downloadCatalog(ctx context.Context) (*Index, error) {
 }
 
 func (c *Client) assembleRegistry(ctx context.Context, reg Registry) (*Index, error) {
+	catalogURL := c.catalogURLLocked()
 	idx := &Index{
 		SchemaVersion: SchemaVersion,
 		UpdatedAt:     time.Now().UTC().Format(time.RFC3339),
@@ -536,7 +567,7 @@ func (c *Client) assembleRegistry(ctx context.Context, reg Registry) (*Index, er
 				ch <- result{id: entry.ID, err: err}
 				return
 			}
-			manifestURL, err := resolveManifestRef(c.catalogURL, entry.Manifest)
+			manifestURL, err := resolveManifestRef(catalogURL, entry.Manifest)
 			if err != nil {
 				ch <- result{id: entry.ID, err: err}
 				return
