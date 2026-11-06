@@ -1,0 +1,128 @@
+###############################################################################
+# Announce published GitHub releases in Discord (e.g. #announcements thread).
+#
+# Fires when a GitHub Release is published (including the one created by
+# release.yml on a v* tag). Skips drafts/prereleases and missing secrets.
+#
+# One-time setup:
+# 1. Discord channel (or parent of the thread) → Edit Channel → Integrations →
+#    Webhooks → New Webhook → copy URL.
+# 2. Enable Developer Mode → right-click the announcements thread → Copy Thread ID.
+# 3. GitHub repo → Settings → Secrets and variables → Actions:
+#    - Secret  DISCORD_WEBHOOK_URL  = webhook URL
+#    - Variable DISCORD_THREAD_ID   = thread ID (optional; omit to post in the
+#      webhook's channel root instead of a thread)
+###############################################################################
+name: Discord release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to announce (e.g. v0.3.0)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  announce:
+    name: Announce in Discord
+    if: github.event_name == 'workflow_dispatch' || (!github.event.release.draft && !github.event.release.prerelease)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require webhook secret
+        id: check
+        env:
+          WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          if [[ -z "$WEBHOOK" ]]; then
+            echo "DISCORD_WEBHOOK_URL is not set; skipping Discord announce."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Resolve release payload
+        if: steps.check.outputs.skip != 'true'
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          RELEASE_NAME: ${{ github.event.release.name }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_URL: ${{ github.event.release.html_url }}
+          RELEASE_BODY: ${{ github.event.release.body }}
+          DISPATCH_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            json=$(gh api "repos/${{ github.repository }}/releases/tags/${DISPATCH_TAG}")
+            NAME=$(jq -r '.name // .tag_name' <<<"$json")
+            TAG=$(jq -r '.tag_name' <<<"$json")
+            URL=$(jq -r '.html_url' <<<"$json")
+            BODY=$(jq -r '.body // ""' <<<"$json")
+          else
+            NAME="${RELEASE_NAME:-$RELEASE_TAG}"
+            TAG="$RELEASE_TAG"
+            URL="$RELEASE_URL"
+            BODY="$RELEASE_BODY"
+          fi
+
+          # Discord embed description max is 4096; leave room for a footer link.
+          BODY_TRIMMED=$(printf '%s' "$BODY" | head -c 3900)
+          if [[ ${#BODY} -gt 3900 ]]; then
+            BODY_TRIMMED="${BODY_TRIMMED%"${BODY_TRIMMED##*[![:space:]]}"}…"
+            BODY_TRIMMED+=$'\n\n'"[Full release notes](${URL})"
+          fi
+
+          {
+            echo "name=${NAME}"
+            echo "tag=${TAG}"
+            echo "url=${URL}"
+            echo "body<<EOF"
+            printf '%s\n' "$BODY_TRIMMED"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Post to Discord
+        if: steps.check.outputs.skip != 'true'
+        env:
+          WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          THREAD_ID: ${{ vars.DISCORD_THREAD_ID }}
+          EMBED_TITLE: ${{ steps.release.outputs.name }}
+          EMBED_URL: ${{ steps.release.outputs.url }}
+          EMBED_BODY: ${{ steps.release.outputs.body }}
+          EMBED_FOOTER: ${{ steps.release.outputs.tag }} · github.com/replacearr/replacearr
+        run: |
+          set -euo pipefail
+          url="${WEBHOOK}?wait=true"
+          if [[ -n "${THREAD_ID}" ]]; then
+            url+="&thread_id=${THREAD_ID}"
+          fi
+
+          payload=$(jq -n \
+            --arg username "Replacearr Releases" \
+            --arg avatar "https://raw.githubusercontent.com/replacearr/replacearr/main/images/logos/replacearr-icon-512.png" \
+            --arg title "$EMBED_TITLE" \
+            --arg url "$EMBED_URL" \
+            --arg description "$EMBED_BODY" \
+            --arg footer "$EMBED_FOOTER" \
+            '{
+              username: $username,
+              avatar_url: $avatar,
+              embeds: [{
+                title: $title,
+                url: $url,
+                description: $description,
+                color: 890504,
+                footer: { text: $footer }
+              }]
+            }')
+
+          curl -fsS -X POST "$url" \
+            -H 'Content-Type: application/json' \
+            -d "$payload"
