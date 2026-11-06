@@ -264,7 +264,7 @@ Build arguments:
 
 | Argument | Default | Description |
 | :--- | :--- | :--- |
-| `VERSION` | `0.1.0` | Version string embedded in the binary. |
+| `VERSION` | contents of root `VERSION` | Version string embedded in the binary (`make build-docker` passes this explicitly). |
 | `COMMIT` | `prod` | Git commit embedded in the binary. |
 
 Or use the bundled Compose stack, which builds locally and starts FlareSolverr:

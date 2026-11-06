@@ -22,7 +22,8 @@ RUN npm run build
 # ------------------------------------------------------------------------------
 FROM golang:1.27-alpine AS go-builder
 
-ARG VERSION=0.1.0
+# Optional overrides; when empty, the root VERSION file is used.
+ARG VERSION=
 ARG COMMIT=prod
 
 WORKDIR /src
@@ -39,10 +40,13 @@ COPY --from=web-builder /app/web/dist/ ./internal/webui/dist/
 # Compile main Replacearr static binary.
 # Example plugins (including the Torznab demo indexer) stay under examples/
 # and are not bundled into the production image.
+# Product version comes from the root VERSION file unless --build-arg VERSION= is set.
 RUN mkdir -p /out/plugins && \
-    BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ") && \
+    APP_VERSION="${VERSION}" && \
+    if [ -z "$$APP_VERSION" ]; then APP_VERSION=$$(tr -d '[:space:]' < VERSION); fi && \
+    BUILD_TIME=$$(date -u +"%Y-%m-%dT%H:%M:%SZ") && \
     CGO_ENABLED=0 go build \
-      -ldflags="-s -w -X main.Version=${VERSION} -X main.Commit=${COMMIT} -X main.BuildTime=${BUILD_TIME}" \
+      -ldflags="-s -w -X main.Version=$$APP_VERSION -X main.Commit=${COMMIT} -X main.BuildTime=$$BUILD_TIME" \
       -o /out/replacearr ./cmd/replacearr
 
 # ------------------------------------------------------------------------------

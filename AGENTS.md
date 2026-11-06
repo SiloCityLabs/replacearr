@@ -10,6 +10,7 @@ Replacearr is a single-binary Go replacement for Sonarr, Radarr, and Prowlarr. O
 
 | Path | Role |
 | :--- | :--- |
+| `VERSION` | Product version source of truth (build-time inject into `main.Version`) |
 | `cmd/replacearr` | Server main |
 | `internal/api/native` | Unified `/api/v1` used by the web UI |
 | `internal/api/compat/{sonarr,radarr,prowlarr}` | Wire-compatible upstream APIs |
@@ -27,6 +28,7 @@ Replacearr is a single-binary Go replacement for Sonarr, Radarr, and Prowlarr. O
 | Rule | When |
 | :--- | :--- |
 | `.cursor/rules/project-core.mdc` | Every task |
+| `.cursor/rules/versioning.mdc` | Every task — ask before bumps; show current `VERSION` |
 | `.cursor/rules/go-backend.mdc` | `**/*.go` |
 | `.cursor/rules/compat-api.mdc` | `internal/api/compat/**` |
 | `.cursor/rules/web-ui.mdc` | `web/**` |
@@ -35,6 +37,7 @@ Replacearr is a single-binary Go replacement for Sonarr, Radarr, and Prowlarr. O
 ## Working agreement
 
 - Prefer `make` targets over ad-hoc commands: `make start`, `make test`, `make build`.
+- Product version is root `VERSION` only. Before any bump, tell the user the current version and ask; never assume.
 - Local UI/API checks use `make start` (root `docker-compose.yml`) so media paths match production (`/data/TV`, `/data/Movies`). The dev container runs [Air](https://github.com/air-verse/air) (`.air.toml`) so Go edits rebuild/restart the API process in-place; Vite HMR covers `web/` edits. Restart the compose service only after Dockerfile/entrypoint/Air config changes. Stop with `make stop`.
 - Run `go test -race ./...` for Go changes and `npm run typecheck` in `web/` for UI changes.
 - Do not hand-edit `internal/webui/dist` or `web/dist`. Rebuild with `make build-web`.

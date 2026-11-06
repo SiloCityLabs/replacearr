@@ -29,7 +29,9 @@ import (
 )
 
 var (
-	Version   = "0.1.0"
+	// Version is injected at build time from the root VERSION file via -ldflags.
+	// Fallback "dev" means the binary was built without injection.
+	Version   = "dev"
 	Commit    = "dev"
 	BuildTime = "unknown"
 )

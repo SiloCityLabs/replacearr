@@ -16,10 +16,12 @@ Single static Go binary that replaces Sonarr, Radarr, and Prowlarr. One process,
 - `definitions/` — Replacearr-owned Cardigann YAML indexer catalog (seeded into `$REPLACEARR_CONFIG_DIR/definitions`); refresh with `make sync-definitions`
 - `internal/webui/dist` — build output embedded by `go:embed`; regenerate with `make build-web`, do not hand-edit
 - `docs/discovery/` — living notes for the shared core, Sonarr v3, Radarr v3, Prowlarr v1, and future media modules. Read them before changing those areas, and update the matching note when behavior changes.
+- `VERSION` — single product version source (injected at build time); see `.cursor/rules/versioning.mdc`
 
 ## Invariants
 
 - Keep `CGO_ENABLED=0` and `modernc.org/sqlite` in WAL mode. Do not add CGO, a second database, or a separate Sonarr, Radarr, or Prowlarr process. TV and movie search calls the indexer engine in-process.
+- Product version lives only in root `VERSION`. Never hardcode it elsewhere; ask before bumping (see versioning rule).
 - Native UI API is `/api/v1/*`. Compat prefixes stay wire-compatible: `/sonarr/api/v3`, `/radarr/api/v3`, `/prowlarr/api/v1` (including Torznab `?t=caps|search|tvsearch|movie`), plus root `/api/v3` and `/api/v1`.
 - New media types (music, books, subtitles) extend the media-module model in `docs/discovery/04-future-arr-roadmap.md`. They do not get their own database or binary.
 - Schema changes are new numbered files in `internal/db/migrations/` (`003_….sql`). Do not rewrite applied migrations.

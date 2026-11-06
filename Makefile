@@ -2,7 +2,8 @@ SHELL := /bin/bash
 .DEFAULT_GOAL := help
 
 APP_NAME := replacearr
-VERSION ?= 0.2.0
+# Single source of truth: root VERSION (override with make VERSION=x.y.z …).
+VERSION := $(shell tr -d '[:space:]' < VERSION)
 COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo "dev")
 BUILD_TIME := $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 LDFLAGS := -s -w -X main.Version=$(VERSION) -X main.Commit=$(COMMIT) -X main.BuildTime=$(BUILD_TIME)
@@ -59,7 +60,12 @@ sync-definitions: ## Refresh bundled Cardigann YAML definitions from Prowlarr/In
 	  echo "==> Synced $$(ls definitions/*.yml 2>/dev/null | wc -l) YAML definitions into definitions/"
 
 build-docker: ## Build public production Docker image from docker/Dockerfile
-	docker build -f docker/Dockerfile -t ldrrp/replacearr:latest -t ldrrp/replacearr:$(VERSION) .
+	docker build -f docker/Dockerfile \
+		--build-arg VERSION=$(VERSION) \
+		--build-arg COMMIT=$(COMMIT) \
+		-t ldrrp/replacearr:latest \
+		-t ldrrp/replacearr:$(VERSION) \
+		.
 
 build-web: ## Build static React frontend and copy into Go embed directory
 	@echo "==> Building static React frontend..."

@@ -1,0 +1,24 @@
+---
+description: Product version lives in root VERSION; agents must ask before bumping and never assume
+alwaysApply: true
+---
+
+# Product versioning
+
+## Source of truth
+
+- The product version is the single line in the root `VERSION` file (no `v` prefix), e.g. `0.2.0`.
+- Builds inject it into `main.Version` via `-ldflags` (Makefile, `.air.toml`, `docker/Dockerfile`, `.github/workflows/release.yml`).
+- Do not hardcode product versions in Go defaults, Docker `ARG` defaults, docs tables, or CI. The Go fallback is `dev` only when injection was skipped.
+- `CHANGELOG.md` is release-note history, not the version source. Git tags are `v` + `VERSION` (e.g. `v0.2.0`).
+- Out of scope for product version: `web/package.json`, compat *arr spoof versions, plugin manifest versions.
+
+## Agent rule — ask every time
+
+Before changing `VERSION`, tagging a release, or editing a changelog section that implies a new product version:
+
+1. Read the root `VERSION` file and tell the user the **current version** (exact string).
+2. Ask whether they want to bump it for this work. Do **not** bump, invent a next version, or "match" changelog/tags on your own.
+3. Only edit `VERSION` / add a matching `CHANGELOG.md` section / mention a tag after the user explicitly chooses a new version string.
+
+Never assume a bump is wanted because the change "feels" like a release. Feature and fix work usually stays on the current version until the user says otherwise.

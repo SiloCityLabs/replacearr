@@ -2,7 +2,7 @@
 
 All notable changes to Replacearr are documented in this file.
 
-## [0.2.0] - 2026-11-04
+## [0.2.0] - 2026-11-04 - 9e7b778
 
 ### Added
 - Accordion left navigation for TV, Movies, Music, Books, Settings, and System
@@ -17,7 +17,7 @@ All notable changes to Replacearr are documented in this file.
 - Download client options and indexer options live on Queue & Clients and Indexers tabs
 - Backup and update configuration moved under System
 
-## [0.1.0] - 2026-01-01
+## [0.1.0] - 2026-01-01 - 2573d08
 
 ### Added
 - Unified Sonarr / Radarr / Prowlarr replacement in a single Go binary
