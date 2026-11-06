@@ -261,7 +261,7 @@ export const InteractiveSearchModal: React.FC<InteractiveSearchModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/70 p-0 sm:p-4">
-      <div className="w-full sm:max-w-5xl max-h-[92vh] flex flex-col bg-slate-900 border border-slate-800 rounded-t-2xl sm:rounded-2xl overflow-hidden shadow-2xl">
+      <div className="w-full max-w-[min(90rem,calc(100vw-2rem))] max-h-[92vh] flex flex-col bg-slate-900 border border-slate-800 rounded-t-2xl sm:rounded-2xl overflow-hidden shadow-2xl">
         <div className="p-4 border-b border-slate-800 flex items-start justify-between gap-3 shrink-0">
           <div className="flex items-center gap-3 min-w-0">
             <div className="p-2.5 rounded-xl bg-sky-500/15 text-sky-400 border border-sky-500/30 shrink-0">
@@ -429,7 +429,7 @@ export const InteractiveSearchModal: React.FC<InteractiveSearchModalProps> = ({
                           {rel.protocol || 'torrent'}
                         </span>
                       </td>
-                      <td className="py-3 px-4 font-medium text-slate-100 max-w-md truncate">
+                      <td className="py-3 px-4 font-medium text-slate-100 max-w-md truncate" title={rel.title}>
                         {rel.title}
                       </td>
                       <td className="py-3 px-4 whitespace-nowrap">
