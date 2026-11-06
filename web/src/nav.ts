@@ -61,22 +61,22 @@ export interface NavGroup {
 const MEDIA_CHILDREN = (prefix: MediaNavType): NavChild[] => [
   { id: `${prefix}.library`, label: 'Library', icon: Library },
   { id: `${prefix}.import`, label: 'Library Import', icon: Upload },
-  { id: `${prefix}.statistics`, label: 'Statistics', icon: BarChart3 },
   { id: `${prefix}.blocklist`, label: 'Blocklist', icon: Ban },
+  { id: `${prefix}.statistics`, label: 'Statistics', icon: BarChart3 },
 ];
 
 export const SETTINGS_CHILDREN: NavChild[] = [
+  { id: 'settings.general', label: 'General', icon: Settings },
+  { id: 'settings.ui', label: 'UI', icon: Palette },
   { id: 'settings.media', label: 'Media Management', icon: FolderCog },
-  { id: 'settings.recycleBin', label: 'Recycle Bin', icon: Trash2 },
   { id: 'settings.profiles', label: 'Profiles', icon: SlidersHorizontal },
   { id: 'settings.quality', label: 'Quality', icon: Gauge },
   { id: 'settings.importLists', label: 'Import Lists', icon: ListPlus },
   { id: 'settings.metadata', label: 'Metadata', icon: Clapperboard },
   { id: 'settings.subtitles', label: 'Subtitles', icon: Captions },
   { id: 'settings.tags', label: 'Tags', icon: Tags },
-  { id: 'settings.general', label: 'General', icon: Settings },
-  { id: 'settings.ui', label: 'UI', icon: Palette },
   { id: 'settings.sessions', label: 'Sessions', icon: MonitorSmartphone },
+  { id: 'settings.recycleBin', label: 'Recycle Bin', icon: Trash2 },
 ];
 
 export const SYSTEM_CHILDREN: NavChild[] = [
@@ -115,15 +115,6 @@ export function buildNavGroups(badges: {
       view: 'calendar',
     },
     {
-      id: 'series',
-      label: 'TV Series',
-      icon: Tv,
-      accent: 'text-indigo-400',
-      badge: badges.series,
-      children: MEDIA_CHILDREN('series'),
-      defaultChild: 'series.library',
-    },
-    {
       id: 'movies',
       label: 'Movies',
       icon: Film,
@@ -131,6 +122,15 @@ export function buildNavGroups(badges: {
       badge: badges.movies,
       children: MEDIA_CHILDREN('movies'),
       defaultChild: 'movies.library',
+    },
+    {
+      id: 'series',
+      label: 'TV Series',
+      icon: Tv,
+      accent: 'text-indigo-400',
+      badge: badges.series,
+      children: MEDIA_CHILDREN('series'),
+      defaultChild: 'series.library',
     },
     {
       id: 'music',
@@ -168,7 +168,7 @@ export function buildNavGroups(badges: {
     },
     {
       id: 'plugins',
-      label: 'Go Plugins',
+      label: 'Plugins',
       icon: Puzzle,
       accent: 'text-purple-400',
       badge: badges.plugins,
@@ -176,7 +176,7 @@ export function buildNavGroups(badges: {
     },
     {
       id: 'users',
-      label: 'Users & RBAC',
+      label: 'Users & Roles',
       icon: Users,
       accent: 'text-emerald-400',
       badge: badges.users,
