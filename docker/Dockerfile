@@ -41,10 +41,12 @@ COPY --from=web-builder /app/web/dist/ ./internal/webui/dist/
 # Example plugins (including the Torznab demo indexer) stay under examples/
 # and are not bundled into the production image.
 # Product version comes from the root VERSION file unless --build-arg VERSION= is set.
+# Dockerfile rules: $(cmd) stays single-dollar for the shell; shell vars use $$NAME;
+# ${VERSION}/${COMMIT} are ARG substitutions.
 RUN mkdir -p /out/plugins && \
     APP_VERSION="${VERSION}" && \
-    if [ -z "$$APP_VERSION" ]; then APP_VERSION=$$(tr -d '[:space:]' < VERSION); fi && \
-    BUILD_TIME=$$(date -u +"%Y-%m-%dT%H:%M:%SZ") && \
+    if [ -z "$$APP_VERSION" ]; then APP_VERSION=$(tr -d '[:space:]' < VERSION); fi && \
+    BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ") && \
     CGO_ENABLED=0 go build \
       -ldflags="-s -w -X main.Version=$$APP_VERSION -X main.Commit=${COMMIT} -X main.BuildTime=$$BUILD_TIME" \
       -o /out/replacearr ./cmd/replacearr

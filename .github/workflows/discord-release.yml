@@ -1,8 +1,8 @@
 ###############################################################################
 # Announce published GitHub releases in Discord (e.g. #announcements thread).
 #
-# Fires when a GitHub Release is published (including the one created by
-# release.yml on a v* tag). Skips drafts/prereleases and missing secrets.
+# Posts a short blurb + links (not the full release body). Discord embeds are
+# capped; long markdown release notes reliably 400.
 #
 # One-time setup:
 # 1. Discord channel (or parent of the thread) → Edit Channel → Integrations →
@@ -72,19 +72,30 @@ jobs:
             BODY="$RELEASE_BODY"
           fi
 
-          # Discord embed description max is 4096; leave room for a footer link.
-          BODY_TRIMMED=$(printf '%s' "$BODY" | head -c 3900)
-          if [[ ${#BODY} -gt 3900 ]]; then
-            BODY_TRIMMED="${BODY_TRIMMED%"${BODY_TRIMMED##*[![:space:]]}"}…"
-            BODY_TRIMMED+=$'\n\n'"[Full release notes](${URL})"
+          # Short blurb only: first non-empty, non-heading paragraph (max 280 chars).
+          BLURB=$(printf '%s\n' "$BODY" \
+            | tr -d '\r' \
+            | sed '/^[[:space:]]*$/d' \
+            | grep -vE '^#{1,6}[[:space:]]' \
+            | head -n 1 \
+            | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+          if [[ ${#BLURB} -gt 280 ]]; then
+            BLURB="${BLURB:0:277}…"
           fi
+          if [[ -z "$BLURB" ]]; then
+            BLURB="Replacearr ${TAG} is out."
+          fi
+
+          CHANGELOG_URL="https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md"
+          DESCRIPTION=$(printf '%s\n\n[Release notes](%s) · [Changelog](%s) · [Docker Hub](https://hub.docker.com/r/ldrrp/replacearr)' \
+            "$BLURB" "$URL" "$CHANGELOG_URL")
 
           {
             echo "name=${NAME}"
             echo "tag=${TAG}"
             echo "url=${URL}"
-            echo "body<<EOF"
-            printf '%s\n' "$BODY_TRIMMED"
+            echo "description<<EOF"
+            printf '%s\n' "$DESCRIPTION"
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
@@ -95,7 +106,7 @@ jobs:
           THREAD_ID: ${{ vars.DISCORD_THREAD_ID }}
           EMBED_TITLE: ${{ steps.release.outputs.name }}
           EMBED_URL: ${{ steps.release.outputs.url }}
-          EMBED_BODY: ${{ steps.release.outputs.body }}
+          EMBED_DESCRIPTION: ${{ steps.release.outputs.description }}
           EMBED_FOOTER: ${{ steps.release.outputs.tag }} · github.com/replacearr/replacearr
         run: |
           set -euo pipefail
@@ -109,7 +120,7 @@ jobs:
             --arg avatar "https://raw.githubusercontent.com/replacearr/replacearr/main/images/logos/replacearr-icon-512.png" \
             --arg title "$EMBED_TITLE" \
             --arg url "$EMBED_URL" \
-            --arg description "$EMBED_BODY" \
+            --arg description "$EMBED_DESCRIPTION" \
             --arg footer "$EMBED_FOOTER" \
             '{
               username: $username,
@@ -123,6 +134,13 @@ jobs:
               }]
             }')
 
-          curl -fsS -X POST "$url" \
+          # Surface Discord's JSON error body on failure (curl -f hides it).
+          resp_file=$(mktemp)
+          http_code=$(curl -sS -o "$resp_file" -w '%{http_code}' -X POST "$url" \
             -H 'Content-Type: application/json' \
-            -d "$payload"
+            -d "$payload")
+          if [[ "$http_code" -lt 200 || "$http_code" -ge 300 ]]; then
+            echo "Discord webhook returned HTTP ${http_code}:" >&2
+            cat "$resp_file" >&2 || true
+            exit 1
+          fi
