@@ -5,13 +5,13 @@
 # capped; long markdown release notes reliably 400.
 #
 # One-time setup:
-# 1. Discord channel (or parent of the thread) → Edit Channel → Integrations →
-#    Webhooks → New Webhook → copy URL.
-# 2. Enable Developer Mode → right-click the announcements thread → Copy Thread ID.
-# 3. GitHub repo → Settings → Secrets and variables → Actions:
-#    - Secret  DISCORD_WEBHOOK_URL  = webhook URL
-#    - Variable DISCORD_THREAD_ID   = thread ID (optional; omit to post in the
-#      webhook's channel root instead of a thread)
+# 1. Discord #announcements (or whatever channel) → Edit Channel → Integrations →
+#    Webhooks → New Webhook → copy URL into secret DISCORD_WEBHOOK_URL.
+# 2. Leave variable DISCORD_THREAD_ID empty for a normal channel. The webhook
+#    already targets that channel; do NOT put the channel ID in thread_id
+#    (Discord returns 10003 Unknown Channel).
+# 3. Only set DISCORD_THREAD_ID when posting into an existing thread/forum post
+#    (right-click the thread → Copy Thread ID — not the parent channel ID).
 ###############################################################################
 name: Discord release
 
@@ -111,8 +111,13 @@ jobs:
         run: |
           set -euo pipefail
           url="${WEBHOOK}?wait=true"
+          # thread_id is only for a real Discord thread/forum post ID.
+          # A channel ID here yields HTTP 400 code 10003 Unknown Channel.
           if [[ -n "${THREAD_ID}" ]]; then
+            echo "Posting into thread_id=${THREAD_ID}"
             url+="&thread_id=${THREAD_ID}"
+          else
+            echo "Posting to webhook channel root (no thread_id)"
           fi
 
           payload=$(jq -n \
