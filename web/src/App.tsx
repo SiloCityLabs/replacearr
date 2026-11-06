@@ -32,7 +32,15 @@ import type {
 import { api, getStoredToken, setStoredToken } from './api';
 import { applyUiPreferences } from './uiPrefs';
 import { BROWSER_PLUGIN_ID, subscribeBrowserNotificationStream } from './notifications';
-import { buildNavGroups, flattenVisibleNavItems, groupForView, mediaTypeFromView, viewLabel } from './nav';
+import {
+  buildNavGroups,
+  canAccessView,
+  firstAccessibleView,
+  flattenVisibleNavItems,
+  groupForView,
+  mediaTypeFromView,
+  viewLabel,
+} from './nav';
 import type { NavView } from './nav';
 import { isKnownView, readViewFromLocation, syncViewToHistory } from './viewHistory';
 import { SideNav } from './components/nav/SideNav';
@@ -83,6 +91,7 @@ export const App: React.FC = () => {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const settingsDirtyRef = useRef(false);
   const activeViewRef = useRef<NavView>(activeView);
+  const userPermissionsRef = useRef<string[]>([]);
 
   const [overview, setOverview] = useState<OverviewResponse | null>(null);
   const [series, setSeries] = useState<Series[]>([]);
@@ -308,6 +317,10 @@ export const App: React.FC = () => {
     activeViewRef.current = activeView;
   }, [activeView]);
 
+  useEffect(() => {
+    userPermissionsRef.current = user?.permissions ?? [];
+  }, [user?.permissions]);
+
   // Normalize the landing URL and attach history state so the first in-app
   // navigation creates a real Back entry instead of leaving the tab.
   useEffect(() => {
@@ -315,6 +328,9 @@ export const App: React.FC = () => {
   }, []);
 
   const applyView = useCallback((view: NavView) => {
+    if (!canAccessView(view, userPermissionsRef.current)) {
+      return;
+    }
     const group = groupForView(view);
     // Accordion: only the destination section stays open.
     setExpandedNav({ [group]: true });
@@ -324,6 +340,9 @@ export const App: React.FC = () => {
 
   const navigateTo = useCallback(
     (view: NavView) => {
+      if (!canAccessView(view, userPermissionsRef.current)) {
+        return;
+      }
       if (view === activeViewRef.current) {
         setMobileNavOpen(false);
         return;
@@ -356,6 +375,10 @@ export const App: React.FC = () => {
         (typeof stateView === 'string' && isKnownView(stateView) && stateView) ||
         readViewFromLocation();
       void (async () => {
+        if (!canAccessView(view, userPermissionsRef.current)) {
+          syncViewToHistory(activeViewRef.current, 'replace');
+          return;
+        }
         if (
           settingsDirtyRef.current &&
           activeViewRef.current.startsWith('settings.') &&
@@ -393,20 +416,44 @@ export const App: React.FC = () => {
     return saved;
   }, []);
 
+  const userPermissions = user?.permissions;
+
   const navGroups = useMemo(
     () =>
-      buildNavGroups({
-        series: series.length,
-        movies: movies.length,
-        artists: artists.length,
-        books: books.length,
-        indexers: indexers.length,
-        queue: queue.length,
-        plugins: plugins.length,
-        users: users.length,
-      }),
-    [series.length, movies.length, artists.length, books.length, indexers.length, queue.length, plugins.length, users.length]
+      buildNavGroups(
+        {
+          series: series.length,
+          movies: movies.length,
+          artists: artists.length,
+          books: books.length,
+          indexers: indexers.length,
+          queue: queue.length,
+          plugins: plugins.length,
+          users: users.length,
+        },
+        userPermissions
+      ),
+    [
+      series.length,
+      movies.length,
+      artists.length,
+      books.length,
+      indexers.length,
+      queue.length,
+      plugins.length,
+      users.length,
+      userPermissions,
+    ]
   );
+
+  // Deep links / stale history: bounce to the first allowed view.
+  useEffect(() => {
+    if (!user) return;
+    if (canAccessView(activeView, user.permissions)) return;
+    const fallback = firstAccessibleView(navGroups);
+    applyView(fallback);
+    syncViewToHistory(fallback, 'replace');
+  }, [user, activeView, navGroups, applyView]);
 
   const visibleNav = useMemo(
     () => flattenVisibleNavItems(navGroups, expandedNav),
