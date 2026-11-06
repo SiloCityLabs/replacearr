@@ -160,14 +160,35 @@ export const QueueClientsTab: React.FC<QueueClientsTabProps> = ({
   const [newFolderType, setNewFolderType] = useState('all');
 
   const handleRemoveQueueItem = async (item: QueueItem) => {
-    const ok = await confirm({
+    const supportsClientRemove = Boolean(item.downloadId && item.downloadClient);
+    const result = await confirm({
       title: 'Remove from queue',
       message: `Remove "${item.title}" from the download queue?`,
       confirmLabel: 'Remove',
+      checkboxes: supportsClientRemove
+        ? [
+            {
+              id: 'removeFromClient',
+              label: 'Remove from download client',
+              description: `Also remove this download from ${item.downloadClient}.`,
+              defaultChecked: true,
+            },
+            {
+              id: 'deleteData',
+              label: 'Delete downloaded data',
+              description:
+                'Erase torrent/usenet payload files in the client (supported by Transmission, qBittorrent, Deluge, SABnzbd, NZBGet).',
+              defaultChecked: true,
+            },
+          ]
+        : undefined,
     });
-    if (!ok) return;
+    if (!result) return;
     try {
-      await api.removeQueueItem(item.id);
+      const deleteData = supportsClientRemove && result.deleteData === true;
+      const removeFromClient =
+        supportsClientRemove && (result.removeFromClient === true || deleteData);
+      await api.removeQueueItem(item.id, { removeFromClient, deleteData });
       onNotify(`Removed "${item.title}" from download queue`);
       await onRefresh();
     } catch (err) {
@@ -307,7 +328,24 @@ export const QueueClientsTab: React.FC<QueueClientsTabProps> = ({
                         Indexer: <strong className="text-slate-200">{item.indexer || '—'}</strong>
                       </span>
                       <span>
-                        Status: <strong className="text-emerald-400">{item.status}</strong>
+                        Status:{' '}
+                        <strong
+                          className={
+                            item.trackedDownloadState === 'awaitingRemoval'
+                              ? 'text-amber-300'
+                              : item.trackedDownloadState === 'importBlocked'
+                                ? 'text-rose-300'
+                                : 'text-emerald-400'
+                          }
+                        >
+                          {item.trackedDownloadState === 'awaitingRemoval'
+                            ? 'waiting for seeding complete'
+                            : item.trackedDownloadState === 'importBlocked'
+                              ? `import blocked (${item.trackedDownloadStatus || 'error'})`
+                              : item.trackedDownloadState === 'imported'
+                                ? 'imported'
+                                : item.status}
+                        </strong>
                       </span>
                       <span className="font-mono">
                         {item.size > 0
@@ -637,8 +675,11 @@ export const QueueClientsTab: React.FC<QueueClientsTabProps> = ({
                 Delete when seeding complete
                 <span className="block text-[11px] text-slate-500 leading-relaxed mt-0.5">
                   Waits until the client reports seeding finished (stopped after ratio/idle goals),
-                  then removes the torrent and data. Transmission, qBittorrent, and Deluge expose
-                  this complete state.
+                  then removes the torrent and data. The client must pause/stop when goals are met
+                  (Transmission <span className="font-mono">isFinished</span> + stopped;
+                  qBittorrent <span className="font-mono">stoppedUP</span>/
+                  <span className="font-mono">pausedUP</span>). Checked every ~15s by Completed
+                  Download Handling (System → Tasks).
                 </span>
               </span>
             </label>

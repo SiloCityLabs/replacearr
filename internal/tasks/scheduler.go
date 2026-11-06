@@ -72,14 +72,18 @@ func New(store *db.Store, configDir, dbPath string) *Scheduler {
 }
 
 func (s *Scheduler) register(name, label string, interval time.Duration, fn func(context.Context, bool) error) {
+	s.registerLocked(name, label, interval, fn)
+}
+
+func (s *Scheduler) registerLocked(name, label string, interval time.Duration, fn func(context.Context, bool) error) {
 	now := time.Now().UTC()
 	next := now.Add(interval)
 	s.tasks[name] = &taskState{
 		info: TaskInfo{
-			Name:     name,
-			Label:    label,
-			Interval: interval.String(),
-			Status:   "idle",
+			Name:      name,
+			Label:     label,
+			Interval:  interval.String(),
+			Status:    "idle",
 			NextRunAt: &next,
 		},
 		interval: interval,
@@ -87,8 +91,16 @@ func (s *Scheduler) register(name, label string, interval time.Duration, fn func
 	}
 }
 
+// Register adds or replaces a named background task (e.g. completed download handling).
+func (s *Scheduler) Register(name, label string, interval time.Duration, fn func(context.Context, bool) error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.registerLocked(name, label, interval, fn)
+}
+
 func (s *Scheduler) Run(ctx context.Context) {
-	t := time.NewTicker(30 * time.Second)
+	// 5s wake-ups keep short-interval tasks (e.g. 15s CDH) reasonably on time.
+	t := time.NewTicker(5 * time.Second)
 	defer t.Stop()
 	for {
 		select {

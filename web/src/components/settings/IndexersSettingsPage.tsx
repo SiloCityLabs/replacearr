@@ -183,7 +183,8 @@ export const IndexersSettingsPage: React.FC<IndexersSettingsPageProps> = ({
                     <div className="min-w-0">
                       <p className="text-sm text-white truncate">{indexer.name}</p>
                       <p className="text-xs text-slate-400 truncate">
-                        {indexer.implementation} · {indexer.enable ? 'Enabled' : 'Disabled'} · priority {indexer.priority}
+                        {indexer.implementation} · {indexer.enable ? 'Enabled' : 'Disabled'}
+                        {indexer.useFlareSolverr ? ' · FlareSolverr' : ''} · priority {indexer.priority}
                       </p>
                       <p className="text-[11px] font-mono text-slate-500 truncate">{indexer.baseUrl}</p>
                     </div>

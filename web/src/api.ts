@@ -599,8 +599,15 @@ export const api = {
     return unwrapArray<QueueItem>(res, 'records');
   },
 
-  async removeQueueItem(id: number): Promise<void> {
-    await request(`/api/v1/queue/${id}`, { method: 'DELETE' });
+  async removeQueueItem(
+    id: number,
+    options?: { removeFromClient?: boolean; deleteData?: boolean }
+  ): Promise<void> {
+    const params = new URLSearchParams();
+    if (options?.removeFromClient) params.set('removeFromClient', 'true');
+    if (options?.deleteData) params.set('deleteData', 'true');
+    const q = params.toString();
+    await request(`/api/v1/queue/${id}${q ? `?${q}` : ''}`, { method: 'DELETE' });
   },
 
   async getDownloadClients(): Promise<DownloadClient[]> {
@@ -929,7 +936,11 @@ export const api = {
   },
 
   async testDownloadClient(payload: {
+    id?: number | null;
+    implementation: string;
     baseUrl: string;
+    username?: string;
+    password?: string;
   }): Promise<{ ok: boolean; message: string; latencyMs: number }> {
     return request<{ ok: boolean; message: string; latencyMs: number }>('/api/v1/downloadclients/test', {
       method: 'POST',

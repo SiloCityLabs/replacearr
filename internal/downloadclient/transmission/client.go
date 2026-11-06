@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -253,6 +254,11 @@ func IsSeedingComplete(status int, progress float64, left int64, isFinished bool
 	return isFinished && status == 0
 }
 
+// Test authenticates and fetches session metadata (same auth path as Add/List).
+func (c *Client) Test(ctx context.Context) error {
+	return c.call(ctx, "session-get", nil, nil)
+}
+
 func (c *Client) call(ctx context.Context, method string, arguments any, out any) error {
 	body, err := json.Marshal(rpcRequest{Method: method, Arguments: arguments})
 	if err != nil {
@@ -319,9 +325,9 @@ func (c *Client) call(ctx context.Context, method string, arguments any, out any
 }
 
 func parseInt64(s string) (int64, error) {
-	var n int64
-	_, err := fmt.Sscan(s, &n)
-	return n, err
+	// strconv requires the whole string; fmt.Sscan would accept a leading
+	// numeric prefix of an infohash (e.g. "56eb33…" → 56) and break remove-by-hash.
+	return strconv.ParseInt(strings.TrimSpace(s), 10, 64)
 }
 
 func extractHashFromMagnet(u string) string {

@@ -16,6 +16,7 @@ import (
 	"github.com/replacearr/replacearr/internal/config"
 	"github.com/replacearr/replacearr/internal/db"
 	"github.com/replacearr/replacearr/internal/domain"
+	"github.com/replacearr/replacearr/internal/downloadmonitor"
 	"github.com/replacearr/replacearr/internal/mediacover"
 	"github.com/replacearr/replacearr/internal/mediafile"
 	"github.com/replacearr/replacearr/internal/metadata"
@@ -130,10 +131,20 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	case strings.HasPrefix(path, "/queue/") && r.Method == http.MethodDelete:
 		idStr := strings.TrimPrefix(path, "/queue/")
+		if slash := strings.IndexByte(idStr, '/'); slash >= 0 {
+			idStr = idStr[:slash]
+		}
 		id, err := strconv.ParseInt(idStr, 10, 64)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "invalid queue id")
 			return
+		}
+		removeFromClient := queryFlag(r, "removeFromClient")
+		deleteData := queryFlag(r, "deleteData")
+		if removeFromClient {
+			if item, err := h.store.GetQueueItem(id); err == nil && item.DownloadID != "" {
+				_ = downloadmonitor.RemoveFromClient(r.Context(), h.store, item.DownloadClient, item.DownloadID, deleteData)
+			}
 		}
 		if err := h.store.DeleteQueueItem(id); err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())

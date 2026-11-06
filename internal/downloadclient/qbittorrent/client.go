@@ -288,6 +288,14 @@ func IsSeedingComplete(state string, progress float64) bool {
 	}
 }
 
+// Test authenticates against the WebUI (same path used by Add/List).
+func (c *Client) Test(ctx context.Context) error {
+	c.mu.Lock()
+	c.logged = false
+	c.mu.Unlock()
+	return c.ensureLogin(ctx)
+}
+
 func (c *Client) ensureLogin(ctx context.Context) error {
 	c.mu.Lock()
 	logged := c.logged
@@ -303,19 +311,42 @@ func (c *Client) ensureLogin(ctx context.Context) error {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	// Newer WebUI builds enforce same-origin checks via Referer.
+	req.Header.Set("Referer", strings.TrimRight(c.baseURL, "/")+"/")
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return fmt.Errorf("qBittorrent login: %w", err)
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 || !strings.Contains(strings.ToLower(string(body)), "ok") {
+	if !loginSucceeded(resp, body) {
 		return fmt.Errorf("qBittorrent login failed: %s (%s)", resp.Status, strings.TrimSpace(string(body)))
 	}
 	c.mu.Lock()
 	c.logged = true
 	c.mu.Unlock()
 	return nil
+}
+
+// loginSucceeded accepts classic "Ok." bodies and newer WebUI 204/empty responses
+// that only set the SID cookie.
+func loginSucceeded(resp *http.Response, body []byte) bool {
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return false
+	}
+	if strings.Contains(strings.ToLower(string(body)), "ok") {
+		return true
+	}
+	// qBittorrent 5.x often returns 204 No Content with Set-Cookie: SID=...
+	if resp.StatusCode == http.StatusNoContent {
+		return true
+	}
+	for _, c := range resp.Cookies() {
+		if strings.EqualFold(c.Name, "SID") && c.Value != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func extractHashFromMagnet(u string) string {

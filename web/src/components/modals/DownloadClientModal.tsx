@@ -144,7 +144,8 @@ export const DownloadClientModal: React.FC<DownloadClientModalProps> = ({
       enable: form.enable,
       priority: form.priority,
       baseUrl: form.baseUrl,
-      username: form.username,
+      username:
+        form.implementation === 'SABnzbd' || form.implementation === 'Deluge' ? '' : form.username,
       password: form.password,
       category: form.category,
       removeCompletedDownloads: form.removeCompletedDownloads,
@@ -172,7 +173,13 @@ export const DownloadClientModal: React.FC<DownloadClientModalProps> = ({
     setTestResult(null);
     setTesting(true);
     try {
-      const result = await api.testDownloadClient({ baseUrl: form.baseUrl });
+      const result = await api.testDownloadClient({
+        id: form.id,
+        implementation: form.implementation,
+        baseUrl: form.baseUrl,
+        username: form.username,
+        password: form.password,
+      });
       setTestResult({
         ok: result.ok,
         message: `${result.ok ? 'OK' : 'Failed'} — ${result.message} (${result.latencyMs} ms)`,
@@ -207,6 +214,7 @@ export const DownloadClientModal: React.FC<DownloadClientModalProps> = ({
                 ...form,
                 implementation: value,
                 protocol: protocolForImplementation(value, form.protocol),
+                username: value === 'SABnzbd' || value === 'Deluge' ? '' : form.username,
               })
             }
             options={[
@@ -259,7 +267,7 @@ export const DownloadClientModal: React.FC<DownloadClientModalProps> = ({
             placeholder="http://localhost:8080"
           />
         </FieldRow>
-        {form.implementation === 'SABnzbd' ? null : (
+        {form.implementation === 'SABnzbd' || form.implementation === 'Deluge' ? null : (
           <FieldRow label="Username">
             <TextInput value={form.username} onChange={(value) => setForm({ ...form, username: value })} />
           </FieldRow>
@@ -270,7 +278,7 @@ export const DownloadClientModal: React.FC<DownloadClientModalProps> = ({
             form.implementation === 'SABnzbd'
               ? 'SABnzbd Config → General → API Key'
               : form.implementation === 'Deluge'
-                ? 'Deluge WebUI password (default often “deluge”)'
+                ? 'Deluge WebUI password'
                 : undefined
           }
         >

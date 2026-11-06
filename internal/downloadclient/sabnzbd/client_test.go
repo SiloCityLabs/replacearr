@@ -23,6 +23,8 @@ func TestAddListRemove(t *testing.T) {
 			return
 		}
 		switch q.Get("mode") {
+		case "version":
+			_ = json.NewEncoder(w).Encode(map[string]any{"version": "4.0.0"})
 		case "addurl":
 			id := "SABnzbd_nzo_1"
 			queue = append(queue, map[string]any{
@@ -50,6 +52,17 @@ func TestAddListRemove(t *testing.T) {
 		BaseURL: ts.URL, Password: "secret-key", Category: "tv",
 	})
 	cli.http = ts.Client()
+
+	if err := cli.Test(context.Background()); err != nil {
+		t.Fatalf("Test: %v", err)
+	}
+	bad := NewFromDownloadClient(domain.DownloadClient{
+		BaseURL: ts.URL, Password: "wrong-key",
+	})
+	bad.http = ts.Client()
+	if err := bad.Test(context.Background()); err == nil {
+		t.Fatal("expected API key failure")
+	}
 
 	id, err := cli.Add(context.Background(), "Show.S01E01", "http://example.invalid/a.nzb", "usenet")
 	if err != nil {

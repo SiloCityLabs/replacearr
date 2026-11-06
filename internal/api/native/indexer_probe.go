@@ -77,6 +77,10 @@ func (s *Server) resolveIndexerForTest(req domain.Indexer) (domain.Indexer, erro
 		if len(req.Fields) > 0 {
 			merged.Fields = req.Fields
 		}
+		// Draft test payloads include name/implementation; id-only tests keep the stored flag.
+		if strings.TrimSpace(req.Name) != "" || strings.TrimSpace(req.Implementation) != "" {
+			merged.UseFlareSolverr = req.UseFlareSolverr
+		}
 		return merged, nil
 	}
 
@@ -116,7 +120,7 @@ func (s *Server) probeTorznabNewznab(ctx context.Context, idx domain.Indexer) in
 		return indexerTestResult{OK: false, Message: err.Error()}
 	}
 
-	client := s.indexerHTTPClient(60 * time.Second)
+	client := s.indexerHTTPClient(60*time.Second, idx.UseFlareSolverr)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, capsURL, nil)
 	if err != nil {
 		return indexerTestResult{OK: false, Message: err.Error()}
@@ -189,7 +193,7 @@ func (s *Server) probeCardigann(ctx context.Context, idx domain.Indexer) indexer
 	if s.pluginMgr != nil {
 		proxyURL = s.pluginMgr.ActiveProxyURL()
 	}
-	client := s.indexerHTTPClient(60 * time.Second)
+	client := s.indexerHTTPClient(60*time.Second, idx.UseFlareSolverr)
 	rels, err := cardigann.Search(ctx, cardigann.SearchRequest{
 		DefinitionsDir: defsDir,
 		DefinitionFile: defFile,
@@ -206,7 +210,7 @@ func (s *Server) probeCardigann(ctx context.Context, idx domain.Indexer) indexer
 	if err != nil {
 		msg := err.Error()
 		if strings.Contains(msg, "403") || strings.Contains(strings.ToLower(msg), "cloudflare") {
-			msg += " — site blocked the request; add an enabled FlareSolverr indexer proxy under Indexers"
+			msg += " — site blocked the request; enable Use FlareSolverr on this indexer and add an enabled FlareSolverr proxy under Indexers"
 		}
 		return indexerTestResult{OK: false, Message: msg}
 	}
@@ -226,11 +230,15 @@ func (s *Server) probePluginIndexer(ctx context.Context, idx domain.Indexer) ind
 		return indexerTestResult{OK: false, Message: "pluginId is required for Plugin indexers"}
 	}
 	proxyURL := s.pluginMgr.ActiveProxyURL()
+	flareURL := ""
+	if idx.UseFlareSolverr {
+		flareURL = s.activeFlareSolverrHost()
+	}
 	rels, err := s.pluginMgr.SearchIndexer(ctx, pluginID, pluginsdk.SearchRequest{
 		Query:           "",
 		Type:            "search",
 		Limit:           25,
-		FlareSolverrURL: s.activeFlareSolverrHost(),
+		FlareSolverrURL: flareURL,
 		ProxyURL:        proxyURL,
 	})
 	if err != nil {
@@ -243,7 +251,7 @@ func (s *Server) probePluginIndexer(ctx context.Context, idx domain.Indexer) ind
 	}
 }
 
-func (s *Server) indexerHTTPClient(timeout time.Duration) *http.Client {
+func (s *Server) indexerHTTPClient(timeout time.Duration, useFlareSolverr bool) *http.Client {
 	proxyURL := ""
 	if s.pluginMgr != nil {
 		proxyURL = s.pluginMgr.ActiveProxyURL()
@@ -260,7 +268,7 @@ func (s *Server) indexerHTTPClient(timeout time.Duration) *http.Client {
 	}
 	transport := baseTransport
 	flareHost := strings.TrimSpace(s.activeFlareSolverrHost())
-	if flareHost != "" && s.flareClient != nil {
+	if useFlareSolverr && flareHost != "" && s.flareClient != nil {
 		transport = &flaresolverr.SolvingTransport{
 			Base:     baseTransport,
 			Client:   s.flareClient,

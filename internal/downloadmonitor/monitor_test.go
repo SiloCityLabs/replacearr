@@ -10,6 +10,7 @@ import (
 )
 
 type fakeRemover struct {
+	err   error
 	calls []struct {
 		id          string
 		deleteFiles bool
@@ -21,7 +22,7 @@ func (f *fakeRemover) Remove(_ context.Context, id string, deleteFiles bool) err
 		id          string
 		deleteFiles bool
 	}{id: id, deleteFiles: deleteFiles})
-	return nil
+	return f.err
 }
 
 func TestMaybeRemoveFromClient(t *testing.T) {
@@ -29,15 +30,19 @@ func TestMaybeRemoveFromClient(t *testing.T) {
 
 	t.Run("waits for seeding when configured", func(t *testing.T) {
 		rm := &fakeRemover{}
-		maybeRemoveFromClient(ctx, trackedDownload{
+		if maybeRemoveFromClient(ctx, trackedDownload{
 			ID: "abc", Client: rm, SeedingComplete: false, RemoveDone: true,
-		}, true, true)
+		}, true, true) {
+			t.Fatal("expected no remove while seeding")
+		}
 		if len(rm.calls) != 0 {
 			t.Fatalf("expected no remove while seeding, got %#v", rm.calls)
 		}
-		maybeRemoveFromClient(ctx, trackedDownload{
+		if !maybeRemoveFromClient(ctx, trackedDownload{
 			ID: "abc", Client: rm, SeedingComplete: true,
-		}, true, true)
+		}, true, true) {
+			t.Fatal("expected remove after seeding")
+		}
 		if len(rm.calls) != 1 || !rm.calls[0].deleteFiles {
 			t.Fatalf("expected delete-with-data after seeding, got %#v", rm.calls)
 		}
@@ -45,9 +50,11 @@ func TestMaybeRemoveFromClient(t *testing.T) {
 
 	t.Run("deletes data immediately when not waiting", func(t *testing.T) {
 		rm := &fakeRemover{}
-		maybeRemoveFromClient(ctx, trackedDownload{
+		if !maybeRemoveFromClient(ctx, trackedDownload{
 			ID: "abc", Client: rm, SeedingComplete: false,
-		}, true, false)
+		}, true, false) {
+			t.Fatal("expected remove")
+		}
 		if len(rm.calls) != 1 || !rm.calls[0].deleteFiles {
 			t.Fatalf("got %#v", rm.calls)
 		}
@@ -55,10 +62,24 @@ func TestMaybeRemoveFromClient(t *testing.T) {
 
 	t.Run("per-client remove keeps data", func(t *testing.T) {
 		rm := &fakeRemover{}
-		maybeRemoveFromClient(ctx, trackedDownload{
+		if !maybeRemoveFromClient(ctx, trackedDownload{
 			ID: "abc", Client: rm, RemoveDone: true,
-		}, false, false)
+		}, false, false) {
+			t.Fatal("expected remove")
+		}
 		if len(rm.calls) != 1 || rm.calls[0].deleteFiles {
+			t.Fatalf("got %#v", rm.calls)
+		}
+	})
+
+	t.Run("client error keeps queue tracking", func(t *testing.T) {
+		rm := &fakeRemover{err: context.DeadlineExceeded}
+		if maybeRemoveFromClient(ctx, trackedDownload{
+			ID: "abc", Client: rm, SeedingComplete: true,
+		}, true, true) {
+			t.Fatal("expected false when remove fails")
+		}
+		if len(rm.calls) != 1 {
 			t.Fatalf("got %#v", rm.calls)
 		}
 	})

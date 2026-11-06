@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"os"
 	"regexp"
@@ -16,7 +15,12 @@ import (
 	"time"
 
 	"github.com/replacearr/replacearr/internal/domain"
+	"github.com/replacearr/replacearr/internal/downloadclient/deluge"
 	"github.com/replacearr/replacearr/internal/downloadclient/discover"
+	"github.com/replacearr/replacearr/internal/downloadclient/nzbget"
+	"github.com/replacearr/replacearr/internal/downloadclient/qbittorrent"
+	"github.com/replacearr/replacearr/internal/downloadclient/sabnzbd"
+	"github.com/replacearr/replacearr/internal/downloadclient/transmission"
 	"github.com/replacearr/replacearr/internal/mediafile"
 )
 
@@ -378,7 +382,11 @@ func (s *Server) handleUpdateDownloadClient(w http.ResponseWriter, r *http.Reque
 
 func (s *Server) handleTestDownloadClient(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		BaseURL string `json:"baseUrl"`
+		ID             int64  `json:"id"`
+		Implementation string `json:"implementation"`
+		BaseURL        string `json:"baseUrl"`
+		Username       string `json:"username"`
+		Password       string `json:"password"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, http.StatusBadRequest, err)
@@ -389,24 +397,65 @@ func (s *Server) handleTestDownloadClient(w http.ResponseWriter, r *http.Request
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
-	host, port, _ := domain.SplitDownloadClientBaseURL(baseURL)
+	dc := domain.DownloadClient{
+		Implementation: strings.TrimSpace(req.Implementation),
+		BaseURL:        baseURL,
+		Username:       req.Username,
+		Password:       req.Password,
+	}
+	// Empty password on an existing client means "keep stored secret" (same as save).
+	if dc.Password == "" && req.ID > 0 {
+		existing, getErr := s.store.GetDownloadClientByID(req.ID)
+		if getErr == nil && existing != nil {
+			dc.Password = existing.Password
+			if dc.Username == "" {
+				dc.Username = existing.Username
+			}
+			if dc.Implementation == "" {
+				dc.Implementation = existing.Implementation
+			}
+		}
+	}
+	if dc.Implementation == "" {
+		writeErr(w, http.StatusBadRequest, errors.New("implementation is required"))
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
 	start := time.Now()
-	conn, err := net.DialTimeout("tcp", net.JoinHostPort(host, strconv.Itoa(port)), 3*time.Second)
+	testErr := testDownloadClientAuth(ctx, dc)
 	latency := time.Since(start).Milliseconds()
-	if err != nil {
+	if testErr != nil {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"ok":        false,
-			"message":   err.Error(),
+			"message":   testErr.Error(),
 			"latencyMs": latency,
 		})
 		return
 	}
-	_ = conn.Close()
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":        true,
-		"message":   "connected to " + baseURL,
+		"message":   "authenticated with " + baseURL,
 		"latencyMs": latency,
 	})
+}
+
+func testDownloadClientAuth(ctx context.Context, dc domain.DownloadClient) error {
+	switch strings.TrimSpace(dc.Implementation) {
+	case "qBittorrent":
+		return qbittorrent.NewFromDownloadClient(dc).Test(ctx)
+	case "Transmission":
+		return transmission.NewFromDownloadClient(dc).Test(ctx)
+	case "Deluge":
+		return deluge.NewFromDownloadClient(dc).Test(ctx)
+	case "SABnzbd":
+		return sabnzbd.NewFromDownloadClient(dc).Test(ctx)
+	case "NZBGet":
+		return nzbget.NewFromDownloadClient(dc).Test(ctx)
+	default:
+		return fmt.Errorf("authentication test is not supported for %s", dc.Implementation)
+	}
 }
 
 func (s *Server) handleDiscoverDownloadClients(w http.ResponseWriter, r *http.Request) {

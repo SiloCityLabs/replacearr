@@ -99,6 +99,12 @@ func TestAddListRemove(t *testing.T) {
 	})
 	cli.http = ts.Client()
 
+	empty := NewFromDownloadClient(domain.DownloadClient{BaseURL: ts.URL})
+	empty.http = ts.Client()
+	if err := empty.Test(context.Background()); err == nil {
+		t.Fatal("expected empty password to fail Test")
+	}
+
 	id, err := cli.Add(context.Background(), "Show", "magnet:?xt=urn:btih:ABCDEF0123456789ABCDEF0123456789ABCDEF01&dn=x", "torrent")
 	if err != nil {
 		t.Fatalf("Add: %v", err)

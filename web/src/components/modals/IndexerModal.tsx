@@ -35,12 +35,17 @@ export interface IndexerForm {
   enableRss: boolean;
   enableAutomaticSearch: boolean;
   enableInteractiveSearch: boolean;
+  useFlareSolverr: boolean;
   priority: number;
   baseUrl: string;
   apiKey: string;
   definitionFile: string;
   categories: string;
   pluginId: string;
+}
+
+function definitionWantsFlareSolverr(definition: CardigannDefinition | undefined): boolean {
+  return Boolean(definition?.settings?.some((setting) => setting.type === 'info_flaresolverr'));
 }
 
 export function blankIndexerForm(): IndexerForm {
@@ -54,6 +59,7 @@ export function blankIndexerForm(): IndexerForm {
     enableRss: true,
     enableAutomaticSearch: true,
     enableInteractiveSearch: true,
+    useFlareSolverr: false,
     priority: 25,
     baseUrl: '',
     apiKey: '',
@@ -74,6 +80,7 @@ export function indexerToForm(indexer: Indexer): IndexerForm {
     enableRss: indexer.enableRss,
     enableAutomaticSearch: indexer.enableAutomaticSearch,
     enableInteractiveSearch: indexer.enableInteractiveSearch,
+    useFlareSolverr: Boolean(indexer.useFlareSolverr),
     priority: indexer.priority,
     baseUrl: indexer.baseUrl,
     apiKey: indexer.apiKey ?? '',
@@ -138,6 +145,7 @@ export const IndexerModal: React.FC<IndexerModalProps> = ({
       privacy:
         def.type === 'private' ? 'private' : def.type === 'semi-private' ? 'semiPrivate' : 'public',
       baseUrl: form.baseUrl.trim() || def.links?.[0] || form.baseUrl,
+      useFlareSolverr: form.useFlareSolverr || definitionWantsFlareSolverr(def),
     });
   };
 
@@ -153,6 +161,7 @@ export const IndexerModal: React.FC<IndexerModalProps> = ({
     enableRss: form.enableRss,
     enableAutomaticSearch: form.enableAutomaticSearch,
     enableInteractiveSearch: form.enableInteractiveSearch,
+    useFlareSolverr: form.useFlareSolverr,
     priority: form.priority,
     baseUrl: form.baseUrl,
     apiKey: form.apiKey,
@@ -263,6 +272,15 @@ export const IndexerModal: React.FC<IndexerModalProps> = ({
           <Checkbox
             checked={form.enableInteractiveSearch}
             onChange={(value) => setForm({ ...form, enableInteractiveSearch: value })}
+          />
+        </FieldRow>
+        <FieldRow
+          label="Use FlareSolverr"
+          helpText="Route this indexer's HTTP through an enabled FlareSolverr proxy under Indexers → Proxies."
+        >
+          <Checkbox
+            checked={form.useFlareSolverr}
+            onChange={(value) => setForm({ ...form, useFlareSolverr: value })}
           />
         </FieldRow>
         <FieldRow label="Priority">

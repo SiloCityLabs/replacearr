@@ -220,13 +220,18 @@ func (s *Store) UpdateDownloadClient(dc domain.DownloadClient) (*domain.Download
 	return s.getDownloadClientByID(dc.ID)
 }
 
-func (s *Store) getDownloadClientByID(id int64) (*domain.DownloadClient, error) {
+// GetDownloadClientByID returns a single download client including its stored password.
+func (s *Store) GetDownloadClientByID(id int64) (*domain.DownloadClient, error) {
 	row := s.db.QueryRow(`
 		SELECT id, name, implementation, implementation_name, config_contract, protocol, enable,
 		       priority, host, port, use_ssl, base_url, username, password, category, remove_completed,
 		       remove_failed, fields_json, tags_json
 		FROM download_clients WHERE id = ?`, id)
 	return scanDownloadClient(row)
+}
+
+func (s *Store) getDownloadClientByID(id int64) (*domain.DownloadClient, error) {
+	return s.GetDownloadClientByID(id)
 }
 
 type downloadClientScanner interface {

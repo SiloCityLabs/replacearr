@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"runtime"
 	"strconv"
@@ -22,6 +23,7 @@ import (
 	"github.com/replacearr/replacearr/internal/downloadclient/qbittorrent"
 	"github.com/replacearr/replacearr/internal/downloadclient/sabnzbd"
 	"github.com/replacearr/replacearr/internal/downloadclient/transmission"
+	"github.com/replacearr/replacearr/internal/downloadmonitor"
 	"github.com/replacearr/replacearr/internal/flaresolverr"
 	"github.com/replacearr/replacearr/internal/httpclient"
 	"github.com/replacearr/replacearr/internal/indexers/cardigann"
@@ -319,28 +321,6 @@ func (s *Server) searchCardigannIndexers(ctx context.Context, query string, seas
 		return nil, nil
 	}
 
-	flareHost := strings.TrimSpace(s.activeFlareSolverrHost())
-	baseTransport := http.DefaultTransport
-	appCfg, _ := s.store.GetAppConfig()
-	httpCli := httpclient.New(httpclient.Options{
-		AppProxy:   appCfg.Proxy,
-		PluginURLs: []string{proxyURL},
-		Timeout:    60 * time.Second,
-	})
-	if httpCli != nil && httpCli.Transport != nil {
-		baseTransport = httpCli.Transport
-	}
-	transport := baseTransport
-	if flareHost != "" && s.flareClient != nil {
-		transport = &flaresolverr.SolvingTransport{
-			Base:     baseTransport,
-			Client:   s.flareClient,
-			Host:     flareHost,
-			TimeoutS: 60,
-		}
-	}
-	client := &http.Client{Timeout: 60 * time.Second, Transport: transport}
-
 	var out []domain.ReleaseResult
 	var errs []string
 	for _, idx := range indexers {
@@ -354,6 +334,7 @@ func (s *Server) searchCardigannIndexers(ctx context.Context, query string, seas
 		if defFile == "" {
 			defFile = strings.ToLower(strings.ReplaceAll(idx.Name, " ", ""))
 		}
+		client := s.indexerHTTPClient(60*time.Second, idx.UseFlareSolverr)
 		rels, err := cardigann.Search(ctx, cardigann.SearchRequest{
 			DefinitionsDir: defsDir,
 			DefinitionFile: defFile,
@@ -372,7 +353,7 @@ func (s *Server) searchCardigannIndexers(ctx context.Context, query string, seas
 		if err != nil {
 			msg := err.Error()
 			if strings.Contains(msg, "403") || strings.Contains(strings.ToLower(msg), "cloudflare") {
-				msg += " — site blocked the request; add an enabled FlareSolverr indexer proxy under Indexers"
+				msg += " — site blocked the request; enable Use FlareSolverr on this indexer and add an enabled FlareSolverr proxy under Indexers"
 			}
 			errs = append(errs, fmt.Sprintf("%s: %s", idx.Name, msg))
 			continue
@@ -1316,6 +1297,20 @@ func (s *Server) handleListQueue(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleDeleteQueue(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	removeFromClient := queryFlag(r, "removeFromClient")
+	deleteData := queryFlag(r, "deleteData")
+	item, err := s.store.GetQueueItem(id)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, fmt.Errorf("queue item %d not found", id))
+		return
+	}
+	if removeFromClient && item.DownloadID != "" {
+		if err := downloadmonitor.RemoveFromClient(r.Context(), s.store, item.DownloadClient, item.DownloadID, deleteData); err != nil {
+			log.Printf("queue delete: remove from client failed (queue %d): %v", id, err)
+			writeErr(w, http.StatusBadGateway, fmt.Errorf("removed from queue skipped: download client remove failed: %w", err))
+			return
+		}
+	}
 	if err := s.store.DeleteQueueItem(id); err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return

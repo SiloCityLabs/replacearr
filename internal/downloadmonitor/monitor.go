@@ -93,6 +93,11 @@ func (m *Monitor) SyncProgress(ctx context.Context) {
 	m.syncFromClients(ctx, false)
 }
 
+// Check polls clients and runs completed-download import / removal (System → Tasks).
+func (m *Monitor) Check(ctx context.Context) {
+	m.syncFromClients(ctx, true)
+}
+
 func (m *Monitor) tick(ctx context.Context) {
 	m.syncFromClients(ctx, true)
 }
@@ -119,8 +124,11 @@ func (m *Monitor) syncFromClients(ctx context.Context, doImport bool) {
 		if q.DownloadID == "" {
 			continue
 		}
-		if q.TrackedDownloadState == "imported" {
-			// Keep imported items only while we still need to delete after seeding.
+		switch q.TrackedDownloadState {
+		case "awaitingRemoval":
+			// Always retry client cleanup for these rows.
+		case "imported":
+			// Legacy imported rows: only keep while seed-wait delete is enabled.
 			if !waitSeed || !deleteData {
 				continue
 			}
@@ -287,10 +295,20 @@ func (m *Monitor) syncFromClients(ctx context.Context, doImport bool) {
 			continue
 		}
 
-		// Deferred cleanup: already imported, waiting for seeding complete.
-		if q.TrackedDownloadState == "imported" {
-			if doImport {
-				maybeRemoveFromClient(ctx, td, deleteData, waitSeed)
+		// Deferred cleanup: already imported, waiting for seeding complete / client remove.
+		if q.TrackedDownloadState == "imported" || q.TrackedDownloadState == "awaitingRemoval" {
+			if !doImport {
+				continue
+			}
+			removed := maybeRemoveFromClient(ctx, td, deleteData, waitSeed)
+			if removed {
+				_ = m.store.DeleteQueueItem(q.ID)
+				continue
+			}
+			if deleteData && waitSeed && !td.SeedingComplete {
+				q.TrackedDownloadState = "awaitingRemoval"
+				q.Status = "completed"
+				_ = m.store.UpdateQueueItem(q)
 			}
 			continue
 		}
@@ -339,10 +357,26 @@ func (m *Monitor) syncFromClients(ctx context.Context, doImport bool) {
 			continue
 		}
 		q.TrackedDownloadStatus = "ok"
-		q.TrackedDownloadState = "imported"
 		q.Status = "completed"
+		needsClientCleanup := deleteData || td.RemoveDone
+		if deleteData && waitSeed && !td.SeedingComplete {
+			q.TrackedDownloadState = "awaitingRemoval"
+			_ = m.store.UpdateQueueItem(q)
+			continue
+		}
+		if needsClientCleanup {
+			if maybeRemoveFromClient(ctx, td, deleteData, waitSeed) {
+				_ = m.store.DeleteQueueItem(q.ID)
+				continue
+			}
+			// Keep tracking until the client remove succeeds.
+			q.TrackedDownloadState = "awaitingRemoval"
+			_ = m.store.UpdateQueueItem(q)
+			continue
+		}
+		q.TrackedDownloadState = "imported"
 		_ = m.store.UpdateQueueItem(q)
-		maybeRemoveFromClient(ctx, td, deleteData, waitSeed)
+		_ = m.store.DeleteQueueItem(q.ID)
 	}
 }
 
@@ -365,23 +399,87 @@ type trackedDownload struct {
 
 // maybeRemoveFromClient deletes the torrent from its download client after import
 // when global delete options or per-client RemoveCompletedDownloads say so.
-func maybeRemoveFromClient(ctx context.Context, td trackedDownload, deleteData, waitSeed bool) {
+// Returns true only when the client remove succeeded (caller may drop the queue row).
+func maybeRemoveFromClient(ctx context.Context, td trackedDownload, deleteData, waitSeed bool) bool {
 	if td.Client == nil {
-		return
+		return false
 	}
 	if deleteData {
 		if waitSeed && !td.SeedingComplete {
-			return
+			return false
 		}
 		if err := td.Client.Remove(ctx, td.ID, true); err != nil {
 			log.Printf("downloadmonitor: remove with data failed (%s / %s): %v", td.ClientName, td.ID, err)
+			return false
 		}
-		return
+		log.Printf("downloadmonitor: removed with data (%s / %s)", td.ClientName, td.ID)
+		return true
 	}
 	if td.RemoveDone {
 		if err := td.Client.Remove(ctx, td.ID, false); err != nil {
 			log.Printf("downloadmonitor: remove failed (%s / %s): %v", td.ClientName, td.ID, err)
+			return false
 		}
+		log.Printf("downloadmonitor: removed from client (%s / %s)", td.ClientName, td.ID)
+		return true
+	}
+	return false
+}
+
+// RemoveFromClient looks up the download in configured clients and removes it.
+// deleteData asks torrent/usenet clients to erase payload files when supported.
+func RemoveFromClient(ctx context.Context, store *db.Store, clientName, downloadID string, deleteData bool) error {
+	downloadID = strings.TrimSpace(downloadID)
+	if downloadID == "" {
+		return nil
+	}
+	clients, err := store.ListDownloadClients()
+	if err != nil {
+		return err
+	}
+	wantName := strings.TrimSpace(clientName)
+	var lastErr error
+	for _, dc := range clients {
+		if !dc.Enable {
+			continue
+		}
+		if wantName != "" && !strings.EqualFold(dc.Name, wantName) {
+			continue
+		}
+		cli, ok := clientRemover(dc)
+		if !ok {
+			continue
+		}
+		if err := cli.Remove(ctx, downloadID, deleteData); err != nil {
+			lastErr = err
+			log.Printf("downloadmonitor: manual remove failed (%s / %s): %v", dc.Name, downloadID, err)
+			continue
+		}
+		return nil
+	}
+	if lastErr != nil {
+		return lastErr
+	}
+	if wantName != "" {
+		return fmt.Errorf("download client %q not found or does not support remove", wantName)
+	}
+	return fmt.Errorf("no download client could remove %s", downloadID)
+}
+
+func clientRemover(dc domain.DownloadClient) (downloadRemover, bool) {
+	switch {
+	case strings.EqualFold(dc.Implementation, "qBittorrent"):
+		return qbittorrent.NewFromDownloadClient(dc), true
+	case strings.EqualFold(dc.Implementation, "Transmission"):
+		return transmission.NewFromDownloadClient(dc), true
+	case strings.EqualFold(dc.Implementation, "Deluge"):
+		return deluge.NewFromDownloadClient(dc), true
+	case strings.EqualFold(dc.Implementation, "SABnzbd"):
+		return sabnzbd.NewFromDownloadClient(dc), true
+	case strings.EqualFold(dc.Implementation, "NZBGet"):
+		return nzbget.NewFromDownloadClient(dc), true
+	default:
+		return nil, false
 	}
 }
 

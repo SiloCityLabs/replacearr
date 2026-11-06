@@ -537,6 +537,7 @@ export interface Indexer {
   apiKey?: string;
   definitionFile?: string;
   pluginId?: string;
+  useFlareSolverr: boolean;
   categories: number[];
   fields: ConfigField[];
   tags: number[];

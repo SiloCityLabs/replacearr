@@ -291,14 +291,26 @@ export const MovieDetailPanel: React.FC<MovieDetailPanelProps> = ({
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2 mb-2">
               {movie.tmdbId > 0 && (
-                <span className="text-xs font-mono uppercase px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                <a
+                  href={`https://www.themoviedb.org/movie/${movie.tmdbId}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-xs font-mono uppercase px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 hover:border-emerald-400/50 hover:bg-emerald-500/25"
+                  title="Open on TMDB"
+                >
                   TMDB #{movie.tmdbId}
-                </span>
+                </a>
               )}
               {movie.imdbId && (
-                <span className="text-xs font-mono uppercase px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">
+                <a
+                  href={`https://www.imdb.com/title/${movie.imdbId}/`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-xs font-mono uppercase px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700 hover:border-slate-500 hover:text-white"
+                  title="Open on IMDb"
+                >
                   {movie.imdbId}
-                </span>
+                </a>
               )}
               {movie.monitored ? (
                 <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
@@ -349,10 +361,36 @@ export const MovieDetailPanel: React.FC<MovieDetailPanelProps> = ({
               <p className="text-sm text-slate-400 mt-1">{movie.originalTitle}</p>
             )}
             <div className="mt-2.5 flex flex-wrap items-center gap-x-5 gap-y-2">
-              <RatingChip kind="tmdb" value={movie.ratings?.tmdb?.value} votes={movie.ratings?.tmdb?.votes} />
-              <RatingChip kind="imdb" value={movie.ratings?.imdb?.value} votes={movie.ratings?.imdb?.votes} />
-              <RatingChip kind="rt" value={movie.ratings?.rottenTomatoes?.value} />
-              <RatingChip kind="metacritic" value={movie.ratings?.metacritic?.value} />
+              <RatingChip
+                kind="tmdb"
+                value={movie.ratings?.tmdb?.value}
+                votes={movie.ratings?.tmdb?.votes}
+                href={movie.tmdbId > 0 ? `https://www.themoviedb.org/movie/${movie.tmdbId}` : undefined}
+              />
+              <RatingChip
+                kind="imdb"
+                value={movie.ratings?.imdb?.value}
+                votes={movie.ratings?.imdb?.votes}
+                href={movie.imdbId ? `https://www.imdb.com/title/${movie.imdbId}/` : undefined}
+              />
+              <RatingChip
+                kind="rt"
+                value={movie.ratings?.rottenTomatoes?.value}
+                href={
+                  movie.title
+                    ? `https://www.rottentomatoes.com/search?search=${encodeURIComponent(movie.title)}`
+                    : undefined
+                }
+              />
+              <RatingChip
+                kind="metacritic"
+                value={movie.ratings?.metacritic?.value}
+                href={
+                  movie.title
+                    ? `https://www.metacritic.com/search?q=${encodeURIComponent(movie.title)}`
+                    : undefined
+                }
+              />
             </div>
             <p className="mt-3 text-sm text-slate-300 leading-relaxed">
               {movie.overview || 'No overview available.'}
@@ -703,10 +741,11 @@ const RatingIcon: React.FC<{ kind: RatingKind }> = ({ kind }) => {
   );
 };
 
-const RatingChip: React.FC<{ kind: RatingKind; value?: number; votes?: number }> = ({
+const RatingChip: React.FC<{ kind: RatingKind; value?: number; votes?: number; href?: string }> = ({
   kind,
   value,
   votes,
+  href,
 }) => {
   if (value == null) return null;
   const label =
@@ -718,11 +757,34 @@ const RatingChip: React.FC<{ kind: RatingKind; value?: number; votes?: number }>
           ? 'Rotten Tomatoes'
           : 'Metacritic';
   const tip =
-    votes != null && votes > 0 ? `${label}: ${formatRatingDisplay(kind, value)} (${votes.toLocaleString()} votes)` : label;
-  return (
-    <span className="inline-flex items-center gap-1.5 text-sm text-slate-300" title={tip}>
+    votes != null && votes > 0
+      ? `${label}: ${formatRatingDisplay(kind, value)} (${votes.toLocaleString()} votes)`
+      : label;
+  const className =
+    'inline-flex items-center gap-1.5 text-sm text-slate-300' +
+    (href ? ' hover:text-white focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-400/60 rounded-sm' : '');
+  const body = (
+    <>
       <RatingIcon kind={kind} />
       <span className="tabular-nums">{formatRatingDisplay(kind, value)}</span>
+    </>
+  );
+  if (href) {
+    return (
+      <a
+        href={href}
+        target="_blank"
+        rel="noreferrer"
+        className={className}
+        title={`${tip} — open ${label}`}
+      >
+        {body}
+      </a>
+    );
+  }
+  return (
+    <span className={className} title={tip}>
+      {body}
     </span>
   );
 };

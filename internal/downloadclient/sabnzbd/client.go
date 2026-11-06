@@ -253,6 +253,32 @@ func IsCompleted(status string, progress float64) bool {
 	return progress >= 0.999
 }
 
+// Test verifies the API key by listing the queue (same auth path as Add/List).
+func (c *Client) Test(ctx context.Context) error {
+	if strings.TrimSpace(c.apiKey) == "" {
+		return fmt.Errorf("SABnzbd: API key is required (store it in the password field)")
+	}
+	q := url.Values{}
+	q.Set("mode", "queue")
+	q.Set("output", "json")
+	q.Set("apikey", c.apiKey)
+	var out struct {
+		Status bool   `json:"status"`
+		Error  string `json:"error"`
+		Queue  any    `json:"queue"`
+	}
+	if err := c.get(ctx, q, &out); err != nil {
+		return err
+	}
+	if out.Error != "" {
+		return fmt.Errorf("SABnzbd: %s", strings.TrimSpace(out.Error))
+	}
+	if out.Status == false && out.Queue == nil {
+		return fmt.Errorf("SABnzbd: authentication failed (check API key)")
+	}
+	return nil
+}
+
 func (c *Client) get(ctx context.Context, q url.Values, out any) error {
 	endpoint := c.baseURL + "/api?" + q.Encode()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)

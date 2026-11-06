@@ -63,16 +63,22 @@ func main() {
 
 	sched := tasks.New(store, cfg.ConfigDir, cfg.DatabasePath)
 	nativeSrv.SetScheduler(sched)
-	monitorCtx, monitorCancel := context.WithCancel(context.Background())
-	defer monitorCancel()
-	go sched.Run(monitorCtx)
 
 	monitor := downloadmonitor.New(store, pluginMgr, nativeSrv)
 	if sub := nativeSrv.Subtitles(); sub != nil {
 		monitor.SetSubtitleHook(sub)
 	}
 	nativeSrv.SetQueueProgressSyncer(monitor)
-	go monitor.Run(monitorCtx)
+	// Completed Download Handling: import + optional client cleanup every 15s.
+	// Visible / manually runnable under System → Tasks.
+	sched.Register("completedDownloadHandling", "Completed Download Handling", 15*time.Second, func(ctx context.Context, _ bool) error {
+		monitor.Check(ctx)
+		return nil
+	})
+
+	monitorCtx, monitorCancel := context.WithCancel(context.Background())
+	defer monitorCancel()
+	go sched.Run(monitorCtx)
 
 	mux := http.NewServeMux()
 

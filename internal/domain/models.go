@@ -562,6 +562,7 @@ type Indexer struct {
 	APIKey                  string        `json:"apiKey,omitempty"`
 	DefinitionFile          string        `json:"definitionFile,omitempty"`
 	PluginID                string        `json:"pluginId,omitempty"`
+	UseFlareSolverr         bool          `json:"useFlareSolverr"`
 	Categories              []int         `json:"categories"`
 	Fields                  []ConfigField `json:"fields"`
 	Tags                    []int64       `json:"tags"`
@@ -702,7 +703,7 @@ type QueueItem struct {
 	Title                 string    `json:"title"`
 	Status                string    `json:"status"`                // downloading, queued, completed, paused, warning
 	TrackedDownloadStatus string    `json:"trackedDownloadStatus"` // ok, warning, error
-	TrackedDownloadState  string    `json:"trackedDownloadState"`  // downloading, importPending, imported
+	TrackedDownloadState  string    `json:"trackedDownloadState"`  // downloading, importPending, imported, awaitingRemoval, importBlocked
 	Size                  int64     `json:"size"`
 	Sizeleft              int64     `json:"sizeleft"`
 	Timeleft              string    `json:"timeleft"`

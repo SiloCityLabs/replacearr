@@ -259,7 +259,7 @@ export const DownloadClientsPage: React.FC<DownloadClientsPageProps> = ({
         </FieldRow>
         <FieldRow
           label="Delete When Seeding Complete"
-          helpText="Wait until the client reports seeding finished (stopped after ratio/idle goals), then delete torrent and data. Checking this also enables Delete Torrent and Data When Complete."
+          helpText="Wait until the client pauses/stops after seed ratio or idle goals, then delete torrent and data. Requires client seed goals (Transmission isFinished+stopped, qBittorrent stoppedUP/pausedUP). Checked every ~15s by System → Tasks → Completed Download Handling. Checking this also enables Delete Torrent and Data When Complete."
         >
           <Checkbox
             checked={draft.downloadClientOptions.deleteWhenSeedingComplete}

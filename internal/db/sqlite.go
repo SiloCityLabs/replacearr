@@ -1270,7 +1270,7 @@ func (s *Store) ListIndexers() ([]domain.Indexer, error) {
 		SELECT id, name, implementation, implementation_name, config_contract, protocol, privacy,
 		       enable, enable_rss, enable_automatic_search, enable_interactive_search,
 		       supports_rss, supports_search, priority, base_url, api_key, definition_file, plugin_id,
-		       categories_json, fields_json, tags_json, added
+		       use_flare_solverr, categories_json, fields_json, tags_json, added
 		FROM indexers ORDER BY priority ASC, id ASC`)
 	if err != nil {
 		return nil, err
@@ -1292,7 +1292,7 @@ func (s *Store) GetIndexerByID(id int64) (*domain.Indexer, error) {
 		SELECT id, name, implementation, implementation_name, config_contract, protocol, privacy,
 		       enable, enable_rss, enable_automatic_search, enable_interactive_search,
 		       supports_rss, supports_search, priority, base_url, api_key, definition_file, plugin_id,
-		       categories_json, fields_json, tags_json, added
+		       use_flare_solverr, categories_json, fields_json, tags_json, added
 		FROM indexers WHERE id = ?`, id)
 	if err != nil {
 		return nil, err
@@ -1310,13 +1310,13 @@ func (s *Store) GetIndexerByID(id int64) (*domain.Indexer, error) {
 
 func scanIndexer(rows *sql.Rows) (domain.Indexer, error) {
 	var idx domain.Indexer
-	var en, enRss, enAuto, enInter, supRss, supSearch int
+	var en, enRss, enAuto, enInter, supRss, supSearch, useFlare int
 	var catJSON, fieldsJSON, tagsJSON string
 	err := rows.Scan(
 		&idx.ID, &idx.Name, &idx.Implementation, &idx.ImplementationName, &idx.ConfigContract,
 		&idx.Protocol, &idx.Privacy, &en, &enRss, &enAuto, &enInter, &supRss, &supSearch,
 		&idx.Priority, &idx.BaseURL, &idx.APIKey, &idx.DefinitionFile, &idx.PluginID,
-		&catJSON, &fieldsJSON, &tagsJSON, &idx.Added,
+		&useFlare, &catJSON, &fieldsJSON, &tagsJSON, &idx.Added,
 	)
 	if err != nil {
 		return idx, err
@@ -1327,6 +1327,7 @@ func scanIndexer(rows *sql.Rows) (domain.Indexer, error) {
 	idx.EnableInteractiveSearch = enInter == 1
 	idx.SupportsRss = supRss == 1
 	idx.SupportsSearch = supSearch == 1
+	idx.UseFlareSolverr = useFlare == 1
 	_ = json.Unmarshal([]byte(catJSON), &idx.Categories)
 	_ = json.Unmarshal([]byte(fieldsJSON), &idx.Fields)
 	_ = json.Unmarshal([]byte(tagsJSON), &idx.Tags)
@@ -1378,12 +1379,12 @@ func (s *Store) CreateIndexer(idx domain.Indexer) (*domain.Indexer, error) {
 			name, implementation, implementation_name, config_contract, protocol, privacy,
 			enable, enable_rss, enable_automatic_search, enable_interactive_search,
 			supports_rss, supports_search, priority, base_url, api_key, definition_file, plugin_id,
-			categories_json, fields_json, tags_json
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			use_flare_solverr, categories_json, fields_json, tags_json
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		idx.Name, idx.Implementation, idx.ImplementationName, idx.ConfigContract, idx.Protocol, idx.Privacy,
 		boolToInt(idx.Enable), boolToInt(idx.EnableRss), boolToInt(idx.EnableAutomaticSearch),
 		boolToInt(idx.EnableInteractiveSearch), idx.Priority, idx.BaseURL, idx.APIKey,
-		idx.DefinitionFile, idx.PluginID, string(catB), string(fldB), string(tagB),
+		idx.DefinitionFile, idx.PluginID, boolToInt(idx.UseFlareSolverr), string(catB), string(fldB), string(tagB),
 	)
 	if err != nil {
 		return nil, err
@@ -1401,12 +1402,12 @@ func (s *Store) UpdateIndexer(idx domain.Indexer) (*domain.Indexer, error) {
 			name = ?, implementation = ?, protocol = ?, privacy = ?, enable = ?,
 			enable_rss = ?, enable_automatic_search = ?, enable_interactive_search = ?,
 			priority = ?, base_url = ?, api_key = ?, definition_file = ?, plugin_id = ?,
-			categories_json = ?, fields_json = ?, tags_json = ?
+			use_flare_solverr = ?, categories_json = ?, fields_json = ?, tags_json = ?
 		WHERE id = ?`,
 		idx.Name, idx.Implementation, idx.Protocol, idx.Privacy, boolToInt(idx.Enable),
 		boolToInt(idx.EnableRss), boolToInt(idx.EnableAutomaticSearch), boolToInt(idx.EnableInteractiveSearch),
 		idx.Priority, idx.BaseURL, idx.APIKey, idx.DefinitionFile, idx.PluginID,
-		string(catB), string(fldB), string(tagB), idx.ID,
+		boolToInt(idx.UseFlareSolverr), string(catB), string(fldB), string(tagB), idx.ID,
 	)
 	if err != nil {
 		return nil, err
@@ -1555,6 +1556,28 @@ func (s *Store) CreateQueueItem(q domain.QueueItem) (*domain.QueueItem, error) {
 	}
 	q.ID, _ = res.LastInsertId()
 	q.Added = time.Now().UTC()
+	return &q, nil
+}
+
+func (s *Store) GetQueueItem(id int64) (*domain.QueueItem, error) {
+	row := s.db.QueryRow(`
+		SELECT id, media_type, series_id, episode_id, movie_id,
+		       COALESCE(artist_id, 0), COALESCE(album_id, 0), COALESCE(author_id, 0), COALESCE(book_id, 0), COALESCE(edition_id, 0),
+		       title, status,
+		       tracked_download_status, tracked_download_state, size, sizeleft, timeleft,
+		       estimated_completion, protocol, download_client, download_id, indexer, output_path, added
+		FROM queue_items WHERE id = ?`, id)
+	var q domain.QueueItem
+	if err := row.Scan(
+		&q.ID, &q.MediaType, &q.SeriesID, &q.EpisodeID, &q.MovieID,
+		&q.ArtistID, &q.AlbumID, &q.AuthorID, &q.BookID, &q.EditionID,
+		&q.Title, &q.Status,
+		&q.TrackedDownloadStatus, &q.TrackedDownloadState, &q.Size, &q.Sizeleft, &q.Timeleft,
+		&q.EstimatedCompletion, &q.Protocol, &q.DownloadClient, &q.DownloadID, &q.Indexer,
+		&q.OutputPath, &q.Added,
+	); err != nil {
+		return nil, err
+	}
 	return &q, nil
 }
 

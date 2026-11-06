@@ -11,6 +11,80 @@ import (
 	"github.com/replacearr/replacearr/internal/domain"
 )
 
+func TestAuth(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v2/auth/login" {
+			http.NotFound(w, r)
+			return
+		}
+		_ = r.ParseForm()
+		if r.Form.Get("username") != "admin" || r.Form.Get("password") != "secret" {
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte("Unauthorized"))
+			return
+		}
+		_, _ = w.Write([]byte("Ok."))
+	}))
+	defer ts.Close()
+
+	ok := NewFromDownloadClient(domain.DownloadClient{
+		BaseURL: ts.URL, Username: "admin", Password: "secret",
+	})
+	ok.http = ts.Client()
+	ok.baseURL = ts.URL
+	if err := ok.Test(context.Background()); err != nil {
+		t.Fatalf("Test: %v", err)
+	}
+
+	bad := NewFromDownloadClient(domain.DownloadClient{
+		BaseURL: ts.URL, Username: "admin", Password: "wrong",
+	})
+	bad.http = ts.Client()
+	bad.baseURL = ts.URL
+	if err := bad.Test(context.Background()); err == nil {
+		t.Fatal("expected auth failure")
+	}
+}
+
+func TestAuthAccepts204NoContent(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v2/auth/login" {
+			http.NotFound(w, r)
+			return
+		}
+		http.SetCookie(w, &http.Cookie{Name: "SID", Value: "abc123", Path: "/"})
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer ts.Close()
+
+	cli := NewFromDownloadClient(domain.DownloadClient{
+		BaseURL: ts.URL, Username: "admin", Password: "secret",
+	})
+	cli.http = ts.Client()
+	cli.baseURL = ts.URL
+	if err := cli.Test(context.Background()); err != nil {
+		t.Fatalf("Test: %v", err)
+	}
+}
+
+func TestLoginSucceeded(t *testing.T) {
+	okBody := httptest.NewRecorder()
+	okBody.WriteHeader(http.StatusOK)
+	if !loginSucceeded(okBody.Result(), []byte("Ok.")) {
+		t.Fatal("expected Ok. body to succeed")
+	}
+	noContent := httptest.NewRecorder()
+	noContent.WriteHeader(http.StatusNoContent)
+	if !loginSucceeded(noContent.Result(), nil) {
+		t.Fatal("expected 204 to succeed")
+	}
+	unauthorized := httptest.NewRecorder()
+	unauthorized.WriteHeader(http.StatusUnauthorized)
+	if loginSucceeded(unauthorized.Result(), []byte("Unauthorized")) {
+		t.Fatal("expected 401 to fail")
+	}
+}
+
 func TestAddListRemove(t *testing.T) {
 	var torrents []map[string]any
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

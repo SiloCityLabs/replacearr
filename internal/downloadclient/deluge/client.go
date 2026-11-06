@@ -52,7 +52,7 @@ func NewFromDownloadClient(dc domain.DownloadClient) *Client {
 	jar, _ := cookiejar.New(nil)
 	return &Client{
 		jsonURL:  jsonEndpoint(baseURL),
-		password: firstNonEmpty(dc.Password, "deluge"),
+		password: dc.Password,
 		category: dc.Category,
 		http: &http.Client{
 			Timeout: 30 * time.Second,
@@ -251,12 +251,23 @@ func IsSeedingComplete(state string, progress float64) bool {
 	return strings.EqualFold(state, "paused")
 }
 
+// Test authenticates against the WebUI (same path used by Add/List).
+func (c *Client) Test(ctx context.Context) error {
+	c.mu.Lock()
+	c.logged = false
+	c.mu.Unlock()
+	return c.ensureLogin(ctx)
+}
+
 func (c *Client) ensureLogin(ctx context.Context) error {
 	c.mu.Lock()
 	logged := c.logged
 	c.mu.Unlock()
 	if logged {
 		return nil
+	}
+	if strings.TrimSpace(c.password) == "" {
+		return fmt.Errorf("deluge login failed: password is required")
 	}
 	var ok bool
 	if err := c.call(ctx, "auth.login", []any{c.password}, &ok); err != nil {

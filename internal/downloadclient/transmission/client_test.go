@@ -122,6 +122,13 @@ func TestAddListRemove(t *testing.T) {
 	if IsSeedingComplete(6, 1, 0, false) || !IsSeedingComplete(0, 1, 0, true) {
 		t.Fatalf("IsSeedingComplete logic")
 	}
+	// Infohashes must not be treated as numeric ids (fmt.Sscan used to parse "56eb…" as 56).
+	if _, err := parseInt64("56eb338c7769a11f60c0979ed1205e7900da8b54"); err == nil {
+		t.Fatal("infohash must not parse as int64")
+	}
+	if n, err := parseInt64("3"); err != nil || n != 3 {
+		t.Fatalf("numeric id parse: %v %d", err, n)
+	}
 	if err := cli.Remove(context.Background(), id, false); err != nil {
 		t.Fatalf("Remove: %v", err)
 	}

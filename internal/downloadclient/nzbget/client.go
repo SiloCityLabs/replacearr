@@ -243,6 +243,18 @@ func IsCompleted(status string, progress float64) bool {
 	return progress >= 0.999
 }
 
+// Test authenticates and fetches the daemon version (same auth path as Add/List).
+func (c *Client) Test(ctx context.Context) error {
+	var version string
+	if err := c.call(ctx, "version", []any{}, &version); err != nil {
+		return err
+	}
+	if strings.TrimSpace(version) == "" {
+		return fmt.Errorf("NZBGet: empty version response")
+	}
+	return nil
+}
+
 func (c *Client) call(ctx context.Context, method string, params []any, out any) error {
 	c.mu.Lock()
 	c.reqID++

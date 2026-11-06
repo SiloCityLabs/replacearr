@@ -383,6 +383,11 @@ export const IndexersSearchTab: React.FC<IndexersSearchTabProps> = ({
                       YAML: {idx.definitionFile}
                     </span>
                   )}
+                  {idx.useFlareSolverr ? (
+                    <span className="px-2 py-0.5 rounded bg-teal-500/10 border border-teal-500/30 text-teal-300">
+                      FlareSolverr
+                    </span>
+                  ) : null}
                 </div>
               </div>
 
