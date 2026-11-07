@@ -56,6 +56,18 @@ func TestIsPosterAspectAllowsSquare(t *testing.T) {
 	}
 }
 
+func TestIsCoverAspectMusicAllowsLandscapeThumb(t *testing.T) {
+	if !isCoverAspect(400, 300, "music") {
+		t.Fatal("mild landscape artist thumb should pass for music")
+	}
+	if isCoverAspect(758, 140, "music") {
+		t.Fatal("banner should still fail for music")
+	}
+	if isCoverAspect(400, 300, "tv") {
+		t.Fatal("landscape should fail for tv posters")
+	}
+}
+
 // Live CAA redirect + square JPEG → WebP. Skips when Cover Art Archive is unreachable.
 // Fixture: Ill Ron Hubbard (Kabuto the Python) RG 8dd3704d-201b-4e8e-8481-9681dcde9981.
 // Companion manual fixture (not used here): Polyneuroparty pt. 2 (Yakui the Maid)
@@ -172,7 +184,7 @@ func TestEnsureRejectsBannerAndCachesPoster(t *testing.T) {
 		t.Fatalf("local url %q", local)
 	}
 	dest := store.Path("tv", "imdb-tt1")
-	if !store.validPosterFile(dest) {
+	if !store.validPosterFile(dest, "tv") {
 		t.Fatal("expected valid poster on disk")
 	}
 	f, ct, err := store.Open("tv", "imdb-tt1")

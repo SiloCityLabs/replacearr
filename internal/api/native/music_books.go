@@ -1,14 +1,43 @@
 package native
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/replacearr/replacearr/internal/domain"
+	"github.com/replacearr/replacearr/internal/mediacover"
+	"github.com/replacearr/replacearr/internal/metadata"
 )
+
+// artistImageDone marks artists whose image resolve finished successfully
+// (found a URL or confirmed none). artistImageBackoff tracks transient failures
+// with exponentially increasing next-attempt times.
+var (
+	artistImageDone     sync.Map // id -> struct{}
+	artistImageBackoff  sync.Map // id -> artistImageFailState
+	artistImageInFlight sync.Map // id -> struct{}
+)
+
+type artistImageFailState struct {
+	failures int
+	nextAt   time.Time
+}
+
+func artistImageNextDelay(failures int) time.Duration {
+	// 1s, 2s, 4s, … capped at 5m between list-driven retries.
+	const max = 5 * time.Minute
+	d := time.Second << failures
+	if d > max || d <= 0 {
+		return max
+	}
+	return d
+}
 
 func (s *Server) registerMusicBooksRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/artists", s.authSvc.RequirePermission(domain.PermMusicRead, s.handleListArtists))
@@ -36,6 +65,9 @@ func (s *Server) handleListArtists(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 	for i := range items {
+		if mediacover.PosterRemoteURL(items[i].Images) == "" {
+			s.resolveArtistImageAsync(&items[i])
+		}
 		items[i].Images = s.hydrateLibraryPosters("music", items[i].ID, items[i].Images)
 	}
 	writeJSON(w, http.StatusOK, items)
@@ -53,10 +85,87 @@ func (s *Server) handleCreateArtist(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.syncArtistDiscography(r, created)
+	s.ensureArtistImage(r.Context(), created)
 	created.Images = bindLocalPosterURL("music", created.ID, created.Images)
 	_, _ = s.store.UpdateArtist(*created)
 	s.cacheCoverAsync("music", created.ID, created.Images)
 	writeJSON(w, http.StatusCreated, created)
+}
+
+func (s *Server) ensureArtistImage(ctx context.Context, artist *domain.Artist) {
+	if artist == nil || s.meta == nil {
+		return
+	}
+	if mediacover.PosterRemoteURL(artist.Images) != "" {
+		return
+	}
+	remote, err := s.meta.ResolveArtistImage(ctx, artist.ForeignArtistID, artist.Title)
+	if err != nil {
+		return
+	}
+	if remote == "" {
+		artistImageDone.Store(artist.ID, struct{}{})
+		return
+	}
+	artist.Images = []domain.MediaImage{metadata.ArtistImagePoster(remote)}
+	artistImageDone.Store(artist.ID, struct{}{})
+	artistImageBackoff.Delete(artist.ID)
+}
+
+func (s *Server) resolveArtistImageAsync(artist *domain.Artist) {
+	if artist == nil || artist.ID <= 0 || s.meta == nil {
+		return
+	}
+	id := artist.ID
+	if _, ok := artistImageDone.Load(id); ok {
+		return
+	}
+	if v, ok := artistImageBackoff.Load(id); ok {
+		st := v.(artistImageFailState)
+		if time.Now().Before(st.nextAt) {
+			return
+		}
+	}
+	if _, loaded := artistImageInFlight.LoadOrStore(id, struct{}{}); loaded {
+		return
+	}
+	mbid := artist.ForeignArtistID
+	title := artist.Title
+	go func() {
+		defer artistImageInFlight.Delete(id)
+		// Allow room for internal exponential retries (1s+2s+4s + request time).
+		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+		defer cancel()
+		remote, err := s.meta.ResolveArtistImage(ctx, mbid, title)
+		if err != nil {
+			failures := 0
+			if v, ok := artistImageBackoff.Load(id); ok {
+				failures = v.(artistImageFailState).failures
+			}
+			failures++
+			artistImageBackoff.Store(id, artistImageFailState{
+				failures: failures,
+				nextAt:   time.Now().Add(artistImageNextDelay(failures - 1)),
+			})
+			return
+		}
+		artistImageBackoff.Delete(id)
+		artistImageDone.Store(id, struct{}{})
+		if remote == "" {
+			return
+		}
+		a, err := s.store.GetArtistByID(id)
+		if err != nil || a == nil {
+			return
+		}
+		if mediacover.PosterRemoteURL(a.Images) != "" {
+			return
+		}
+		a.Images = []domain.MediaImage{metadata.ArtistImagePoster(remote)}
+		a.Images = bindLocalPosterURL("music", a.ID, a.Images)
+		_, _ = s.store.UpdateArtist(*a)
+		s.cacheCoverAsync("music", a.ID, a.Images)
+	}()
 }
 
 func (s *Server) syncArtistDiscography(r *http.Request, artist *domain.Artist) {
@@ -316,8 +425,8 @@ func (s *Server) handleCreateBook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusCreated, map[string]any{
-		"book":    createdBook,
-		"edition": createdEd,
+		"book":     createdBook,
+		"edition":  createdEd,
 		"authorId": authorID,
 	})
 }
