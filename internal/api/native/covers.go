@@ -69,11 +69,18 @@ func (s *Server) resolveCover(mediaType string, id int64) (mt, cacheKey, remote 
 			remote = mediacover.PosterRemoteURL(mv.Images)
 			return mt, cacheKey, remote, legacyID
 		}
-	case "music", "artist", "album":
+	case "music", "artist":
 		mt = "music"
 		if a, err := s.store.GetArtistByID(id); err == nil && a != nil {
 			cacheKey = mediacover.CacheKeyMusic(a.ForeignArtistID, a.ID)
 			remote = mediacover.PosterRemoteURL(a.Images)
+			return mt, cacheKey, remote, legacyID
+		}
+	case "album":
+		mt = "album"
+		if al, err := s.store.GetAlbumByID(id); err == nil && al != nil {
+			cacheKey = mediacover.CacheKeyAlbum(al.ForeignAlbumID, al.ID)
+			remote = mediacover.PosterRemoteURL(al.Images)
 			return mt, cacheKey, remote, legacyID
 		}
 	case "book", "books", "ebook", "audiobook":
@@ -100,8 +107,10 @@ func mediacoverNormalize(mediaType string) string {
 	switch strings.ToLower(strings.TrimSpace(mediaType)) {
 	case "movie", "movies", "film":
 		return "movie"
-	case "music", "artist", "album":
+	case "music", "artist":
 		return "music"
+	case "album":
+		return "album"
 	case "book", "books", "ebook", "audiobook":
 		return "book"
 	case "author":
@@ -163,6 +172,12 @@ func (s *Server) coverCacheKey(mt string, id int64) (string, bool) {
 			return "", false
 		}
 		return mediacover.CacheKeyMusic(a.ForeignArtistID, a.ID), true
+	case "album":
+		al, err := s.store.GetAlbumByID(id)
+		if err != nil || al == nil {
+			return "", false
+		}
+		return mediacover.CacheKeyAlbum(al.ForeignAlbumID, al.ID), true
 	case "book":
 		b, err := s.store.GetBookByID(id)
 		if err != nil || b == nil {
@@ -201,6 +216,13 @@ func (s *Server) persistLocalPoster(mt string, id int64, remote string) {
 		}
 		a.Images = mediacover.SetLocalPoster(a.Images, local, remote)
 		_, _ = s.store.UpdateArtist(*a)
+	case "album":
+		al, err := s.store.GetAlbumByID(id)
+		if err != nil || al == nil {
+			return
+		}
+		al.Images = mediacover.SetLocalPoster(al.Images, local, remote)
+		_, _ = s.store.UpdateAlbum(*al)
 	case "book":
 		b, err := s.store.GetBookByID(id)
 		if err != nil || b == nil {

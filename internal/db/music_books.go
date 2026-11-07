@@ -294,6 +294,34 @@ func (s *Store) CreateAlbum(al domain.Album) (*domain.Album, error) {
 	return &al, nil
 }
 
+func (s *Store) UpdateAlbum(al domain.Album) (*domain.Album, error) {
+	if al.ID <= 0 {
+		return nil, errors.New("id is required")
+	}
+	if al.AlbumType == "" {
+		al.AlbumType = "Album"
+	}
+	if al.Images == nil {
+		al.Images = []domain.MediaImage{}
+	}
+	if al.Genres == nil {
+		al.Genres = []string{}
+	}
+	imgB, _ := json.Marshal(al.Images)
+	genB, _ := json.Marshal(al.Genres)
+	_, err := s.db.Exec(`
+		UPDATE albums SET artist_id=?, title=?, foreign_album_id=?, release_date=?, album_type=?, overview=?, images_json=?,
+			monitored=?, has_file=?, path=?, year=?, genres_json=?
+		WHERE id=?`,
+		al.ArtistID, al.Title, al.ForeignAlbumID, al.ReleaseDate, al.AlbumType, al.Overview, string(imgB),
+		boolToInt(al.Monitored), boolToInt(al.HasFile), al.Path, al.Year, string(genB), al.ID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return s.GetAlbumByID(al.ID)
+}
+
 func (s *Store) ReplaceArtistDiscography(artistID int64, items []domain.AlbumWithTracks) error {
 	tx, err := s.db.Begin()
 	if err != nil {

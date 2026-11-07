@@ -53,11 +53,13 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault();
+        // Capture + stop so parent dialogs (e.g. Music artist panel) do not also close.
+        event.stopImmediatePropagation();
         onCancel();
       }
     };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
   }, [onCancel]);
 
   return (

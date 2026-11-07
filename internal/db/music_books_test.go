@@ -43,6 +43,18 @@ func TestMusicBooksCRUD(t *testing.T) {
 	if err != nil || len(albums) != 1 {
 		t.Fatalf("albums: %v %#v", err, albums)
 	}
+	albums[0].Images = []domain.MediaImage{{
+		CoverType: "poster",
+		URL:       "/api/v1/mediacover/album/1/poster.webp",
+		RemoteURL: "https://coverartarchive.org/release-group/rg-1/front-250",
+	}}
+	updated, err := store.UpdateAlbum(albums[0])
+	if err != nil {
+		t.Fatalf("update album: %v", err)
+	}
+	if len(updated.Images) != 1 || updated.Images[0].RemoteURL == "" {
+		t.Fatalf("expected album images after update: %#v", updated.Images)
+	}
 	tracks, err := store.ListTracks(albums[0].ID, 0)
 	if err != nil || len(tracks) != 1 {
 		t.Fatalf("tracks: %v %#v", err, tracks)

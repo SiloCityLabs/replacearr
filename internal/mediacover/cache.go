@@ -423,8 +423,10 @@ func normalizeMediaType(mediaType string) string {
 	switch strings.ToLower(strings.TrimSpace(mediaType)) {
 	case "movie", "movies", "film":
 		return "movie"
-	case "music", "artist", "album":
+	case "music", "artist":
 		return "music"
+	case "album":
+		return "album"
 	case "book", "books", "ebook", "audiobook":
 		return "book"
 	case "author":
@@ -437,6 +439,17 @@ func normalizeMediaType(mediaType string) string {
 // CacheKeyMusic builds a stable on-disk key for an artist (MBID or internal id).
 func CacheKeyMusic(foreignArtistID string, fallbackID int64) string {
 	if id := strings.TrimSpace(foreignArtistID); id != "" {
+		return "mbid-" + sanitizeKey(id)
+	}
+	if fallbackID > 0 {
+		return strconv.FormatInt(fallbackID, 10)
+	}
+	return ""
+}
+
+// CacheKeyAlbum builds a stable on-disk key for an album (release-group MBID or internal id).
+func CacheKeyAlbum(foreignAlbumID string, fallbackID int64) string {
+	if id := strings.TrimSpace(foreignAlbumID); id != "" {
 		return "mbid-" + sanitizeKey(id)
 	}
 	if fallbackID > 0 {
