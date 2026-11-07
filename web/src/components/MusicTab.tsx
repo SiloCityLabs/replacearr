@@ -80,20 +80,29 @@ export const MusicTab: React.FC<MusicTabProps> = ({
     let cancelled = false;
     void (async () => {
       try {
-        const all = await api.getAlbums();
-        if (cancelled) return;
-        const byArtist = new Map<number, Album[]>();
-        for (const al of all) {
-          const list = byArtist.get(al.artistId) || [];
-          list.push(al);
-          byArtist.set(al.artistId, list);
-        }
+        // Prefer artist portraits from API; fall back to a best album cover.
         const next: Record<number, string> = {};
-        for (const [artistId, list] of byArtist) {
-          const url = pickArtistCardCover(list);
-          if (url) next[artistId] = url;
+        for (const a of artists) {
+          const portrait = getPosterUrl(a);
+          if (portrait) next[a.id] = portrait;
         }
-        setArtistCoverById(next);
+        const needAlbumFallback = artists.some((a) => !next[a.id]);
+        if (needAlbumFallback) {
+          const all = await api.getAlbums();
+          if (cancelled) return;
+          const byArtist = new Map<number, Album[]>();
+          for (const al of all) {
+            const list = byArtist.get(al.artistId) || [];
+            list.push(al);
+            byArtist.set(al.artistId, list);
+          }
+          for (const [artistId, list] of byArtist) {
+            if (next[artistId]) continue;
+            const url = pickArtistCardCover(list);
+            if (url) next[artistId] = url;
+          }
+        }
+        if (!cancelled) setArtistCoverById(next);
       } catch {
         if (!cancelled) setArtistCoverById({});
       }

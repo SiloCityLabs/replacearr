@@ -141,7 +141,8 @@ func (s *Store) Path(mediaType, cacheKey string) string {
 
 // Cached reports whether a valid WebP poster exists for the cache key.
 func (s *Store) Cached(mediaType, cacheKey string) bool {
-	return s.validWebPPoster(s.Path(mediaType, cacheKey))
+	mt := normalizeMediaType(mediaType)
+	return s.validWebPPoster(s.Path(mt, cacheKey), mt)
 }
 
 // Ensure fetches remoteURL if needed and writes a WebP cache file under cacheKey.
@@ -154,12 +155,12 @@ func (s *Store) Ensure(mediaType, cacheKey string, entityID int64, remoteURL str
 		return "", fmt.Errorf("empty cover cache key")
 	}
 	dest := s.Path(mt, key)
-	if s.validWebPPoster(dest) {
+	if s.validWebPPoster(dest, mt) {
 		return LocalURL(mt, entityID), nil
 	}
 	// Re-encode legacy jpeg/png stored under poster.webp without re-fetching.
-	if s.validPosterFile(dest) {
-		if err := s.reencodeFileToWebP(dest, dest); err == nil {
+	if s.validPosterFile(dest, mt) {
+		if err := s.reencodeFileToWebP(dest, dest, mt); err == nil {
 			return LocalURL(mt, entityID), nil
 		}
 		_ = os.Remove(dest)
@@ -169,15 +170,15 @@ func (s *Store) Ensure(mediaType, cacheKey string, entityID int64, remoteURL str
 	if legacyID > 0 {
 		legacy := s.Path(mt, strconv.FormatInt(legacyID, 10))
 		if legacy != dest {
-			if s.validWebPPoster(legacy) {
+			if s.validWebPPoster(legacy, mt) {
 				if err := os.MkdirAll(filepath.Dir(dest), 0o755); err == nil {
 					if err := os.Rename(legacy, dest); err == nil {
 						_ = os.Remove(filepath.Dir(legacy))
 						return LocalURL(mt, entityID), nil
 					}
 				}
-			} else if s.validPosterFile(legacy) {
-				if err := s.reencodeFileToWebP(legacy, dest); err == nil {
+			} else if s.validPosterFile(legacy, mt) {
+				if err := s.reencodeFileToWebP(legacy, dest, mt); err == nil {
 					_ = os.Remove(legacy)
 					_ = os.Remove(filepath.Dir(legacy))
 					return LocalURL(mt, entityID), nil
@@ -217,7 +218,7 @@ func (s *Store) Ensure(mediaType, cacheKey string, entityID int64, remoteURL str
 	if err != nil {
 		return "", fmt.Errorf("decode cover: %w", err)
 	}
-	if !isPosterAspect(img.Bounds().Dx(), img.Bounds().Dy()) {
+	if !isCoverAspect(img.Bounds().Dx(), img.Bounds().Dy(), mt) {
 		return "", fmt.Errorf("remote cover is not poster aspect")
 	}
 
@@ -233,7 +234,7 @@ func (s *Store) Ensure(mediaType, cacheKey string, entityID int64, remoteURL str
 	if err := os.WriteFile(tmp, payload, 0o644); err != nil {
 		return "", err
 	}
-	if !s.validWebPPoster(tmp) {
+	if !s.validWebPPoster(tmp, mt) {
 		_ = os.Remove(tmp)
 		return "", fmt.Errorf("cached cover failed validation")
 	}
@@ -256,7 +257,8 @@ func encodeWebP(raw []byte, format string, img image.Image) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-func (s *Store) reencodeFileToWebP(src, dest string) error {
+func (s *Store) reencodeFileToWebP(src, dest, mediaType string) error {
+	mt := normalizeMediaType(mediaType)
 	raw, err := os.ReadFile(src)
 	if err != nil {
 		return err
@@ -265,7 +267,7 @@ func (s *Store) reencodeFileToWebP(src, dest string) error {
 	if err != nil {
 		return err
 	}
-	if !isPosterAspect(img.Bounds().Dx(), img.Bounds().Dy()) {
+	if !isCoverAspect(img.Bounds().Dx(), img.Bounds().Dy(), mt) {
 		return fmt.Errorf("not poster aspect")
 	}
 	payload, err := encodeWebP(raw, format, img)
@@ -279,7 +281,7 @@ func (s *Store) reencodeFileToWebP(src, dest string) error {
 	if err := os.WriteFile(tmp, payload, 0o644); err != nil {
 		return err
 	}
-	if !s.validWebPPoster(tmp) {
+	if !s.validWebPPoster(tmp, mt) {
 		_ = os.Remove(tmp)
 		return fmt.Errorf("reencoded cover failed validation")
 	}
@@ -292,11 +294,12 @@ func (s *Store) reencodeFileToWebP(src, dest string) error {
 
 // Open returns a reader and content type for a valid cached WebP poster.
 func (s *Store) Open(mediaType, cacheKey string) (*os.File, string, error) {
-	dest := s.Path(mediaType, cacheKey)
-	if !s.validWebPPoster(dest) {
+	mt := normalizeMediaType(mediaType)
+	dest := s.Path(mt, cacheKey)
+	if !s.validWebPPoster(dest, mt) {
 		// Attempt one-shot migration of legacy jpeg/png stored as poster.webp.
-		if s.validPosterFile(dest) {
-			if err := s.reencodeFileToWebP(dest, dest); err != nil {
+		if s.validPosterFile(dest, mt) {
+			if err := s.reencodeFileToWebP(dest, dest, mt); err != nil {
 				_ = os.Remove(dest)
 				return nil, "", os.ErrNotExist
 			}
@@ -345,7 +348,7 @@ func sniffImageContentType(b []byte) string {
 	}
 }
 
-func (s *Store) validWebPPoster(path string) bool {
+func (s *Store) validWebPPoster(path, mediaType string) bool {
 	st, err := os.Stat(path)
 	if err != nil || st.Size() <= 0 {
 		return false
@@ -371,10 +374,10 @@ func (s *Store) validWebPPoster(path string) bool {
 		return false
 	}
 	b := img.Bounds()
-	return isPosterAspect(b.Dx(), b.Dy())
+	return isCoverAspect(b.Dx(), b.Dy(), mediaType)
 }
 
-func (s *Store) validPosterFile(path string) bool {
+func (s *Store) validPosterFile(path, mediaType string) bool {
 	st, err := os.Stat(path)
 	if err != nil || st.Size() <= 0 {
 		return false
@@ -389,16 +392,25 @@ func (s *Store) validPosterFile(path string) bool {
 		return false
 	}
 	b := img.Bounds()
-	return isPosterAspect(b.Dx(), b.Dy())
+	return isCoverAspect(b.Dx(), b.Dy(), mediaType)
 }
 
 // isPosterAspect rejects wide banners (e.g. 758x140) that were previously cached as posters.
 func isPosterAspect(w, h int) bool {
+	return isCoverAspect(w, h, "tv")
+}
+
+// isCoverAspect validates aspect by media type. TV/movie posters stay portrait-ish;
+// music artist thumbs allow mild landscape (grid photos) but still reject banners.
+func isCoverAspect(w, h int, mediaType string) bool {
 	if w <= 0 || h <= 0 {
 		return false
 	}
-	// Posters are portrait or near-square; banners are much wider than tall.
-	return float64(w) <= float64(h)*1.2
+	maxRatio := 1.2
+	if normalizeMediaType(mediaType) == "music" {
+		maxRatio = 2.0
+	}
+	return float64(w) <= float64(h)*maxRatio
 }
 
 func sanitizeKey(key string) string {

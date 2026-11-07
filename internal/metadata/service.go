@@ -37,12 +37,14 @@ var (
 
 // Service looks up series, movies, artists, and books for Add New flows.
 type Service struct {
-	httpClient   *http.Client
-	skyHookBase  string
-	radarrBase   string
-	tmdbSiteBase string
-	mbBase       string
-	olBase       string
+	httpClient     *http.Client
+	skyHookBase    string
+	radarrBase     string
+	tmdbSiteBase   string
+	mbBase         string
+	olBase         string
+	wikidataSPARQL string
+	deezerBase     string
 }
 
 // Option configures Service.
@@ -105,12 +107,14 @@ func WithOpenLibraryBase(base string) Option {
 // New returns a Service pointed at the public SkyHook, Radarr, MusicBrainz, and OpenLibrary APIs.
 func New(opts ...Option) *Service {
 	s := &Service{
-		httpClient:   &http.Client{Timeout: defaultTimeout},
-		skyHookBase:  defaultSkyHookBase,
-		radarrBase:   defaultRadarrBase,
-		tmdbSiteBase: defaultTMDBSiteBase,
-		mbBase:       defaultMusicBrainzBase,
-		olBase:       defaultOpenLibraryBase,
+		httpClient:     &http.Client{Timeout: defaultTimeout},
+		skyHookBase:    defaultSkyHookBase,
+		radarrBase:     defaultRadarrBase,
+		tmdbSiteBase:   defaultTMDBSiteBase,
+		mbBase:         defaultMusicBrainzBase,
+		olBase:         defaultOpenLibraryBase,
+		wikidataSPARQL: defaultWikidataSPARQL,
+		deezerBase:     defaultDeezerBase,
 	}
 	for _, opt := range opts {
 		opt(s)
