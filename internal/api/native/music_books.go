@@ -15,9 +15,29 @@ import (
 	"github.com/replacearr/replacearr/internal/metadata"
 )
 
-// artistImageTried tracks artist IDs we already attempted an image resolve for
-// this process, so list hydration does not hammer Wikidata/Deezer on every poll.
-var artistImageTried sync.Map
+// artistImageDone marks artists whose image resolve finished successfully
+// (found a URL or confirmed none). artistImageBackoff tracks transient failures
+// with exponentially increasing next-attempt times.
+var (
+	artistImageDone     sync.Map // id -> struct{}
+	artistImageBackoff  sync.Map // id -> artistImageFailState
+	artistImageInFlight sync.Map // id -> struct{}
+)
+
+type artistImageFailState struct {
+	failures int
+	nextAt   time.Time
+}
+
+func artistImageNextDelay(failures int) time.Duration {
+	// 1s, 2s, 4s, … capped at 5m between list-driven retries.
+	const max = 5 * time.Minute
+	d := time.Second << failures
+	if d > max || d <= 0 {
+		return max
+	}
+	return d
+}
 
 func (s *Server) registerMusicBooksRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/artists", s.authSvc.RequirePermission(domain.PermMusicRead, s.handleListArtists))
@@ -80,28 +100,58 @@ func (s *Server) ensureArtistImage(ctx context.Context, artist *domain.Artist) {
 		return
 	}
 	remote, err := s.meta.ResolveArtistImage(ctx, artist.ForeignArtistID, artist.Title)
-	if err != nil || remote == "" {
+	if err != nil {
+		return
+	}
+	if remote == "" {
+		artistImageDone.Store(artist.ID, struct{}{})
 		return
 	}
 	artist.Images = []domain.MediaImage{metadata.ArtistImagePoster(remote)}
-	artistImageTried.Store(artist.ID, true)
+	artistImageDone.Store(artist.ID, struct{}{})
+	artistImageBackoff.Delete(artist.ID)
 }
 
 func (s *Server) resolveArtistImageAsync(artist *domain.Artist) {
 	if artist == nil || artist.ID <= 0 || s.meta == nil {
 		return
 	}
-	if _, loaded := artistImageTried.LoadOrStore(artist.ID, true); loaded {
+	id := artist.ID
+	if _, ok := artistImageDone.Load(id); ok {
 		return
 	}
-	id := artist.ID
+	if v, ok := artistImageBackoff.Load(id); ok {
+		st := v.(artistImageFailState)
+		if time.Now().Before(st.nextAt) {
+			return
+		}
+	}
+	if _, loaded := artistImageInFlight.LoadOrStore(id, struct{}{}); loaded {
+		return
+	}
 	mbid := artist.ForeignArtistID
 	title := artist.Title
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+		defer artistImageInFlight.Delete(id)
+		// Allow room for internal exponential retries (1s+2s+4s + request time).
+		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 		defer cancel()
 		remote, err := s.meta.ResolveArtistImage(ctx, mbid, title)
-		if err != nil || remote == "" {
+		if err != nil {
+			failures := 0
+			if v, ok := artistImageBackoff.Load(id); ok {
+				failures = v.(artistImageFailState).failures
+			}
+			failures++
+			artistImageBackoff.Store(id, artistImageFailState{
+				failures: failures,
+				nextAt:   time.Now().Add(artistImageNextDelay(failures - 1)),
+			})
+			return
+		}
+		artistImageBackoff.Delete(id)
+		artistImageDone.Store(id, struct{}{})
+		if remote == "" {
 			return
 		}
 		a, err := s.store.GetArtistByID(id)

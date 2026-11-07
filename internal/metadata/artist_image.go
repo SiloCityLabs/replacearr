@@ -20,6 +20,15 @@ const (
 	// Thumbnail width for Commons Special:FilePath — enough for Music grid thumbs.
 	artistThumbWidth = 250
 	artistImageUA    = "Replacearr/1.0 (https://github.com/replacearr/replacearr; music artist thumbs)"
+
+)
+
+// Tunables (vars so tests can shrink delays).
+var (
+	artistImageMaxAttempts = 4
+	artistImageBaseDelay   = time.Second
+	artistImageMaxDelay    = 30 * time.Second
+	artistImageMinInterval = time.Second // polite spacing between requests
 )
 
 // Shared polite limiter for Wikidata / Commons / Deezer (~1 req/s).
@@ -31,7 +40,7 @@ var artistImageLimiter = struct {
 func waitArtistImage(ctx context.Context) error {
 	artistImageLimiter.mu.Lock()
 	defer artistImageLimiter.mu.Unlock()
-	wait := time.Second - time.Since(artistImageLimiter.last)
+	wait := artistImageMinInterval - time.Since(artistImageLimiter.last)
 	if wait > 0 {
 		select {
 		case <-ctx.Done():
@@ -43,26 +52,112 @@ func waitArtistImage(ctx context.Context) error {
 	return nil
 }
 
+func artistImageBackoffDelay(attempt int) time.Duration {
+	if attempt < 0 {
+		attempt = 0
+	}
+	// attempt 0 → 1s, 1 → 2s, 2 → 4s, …
+	d := artistImageBaseDelay << attempt
+	if d > artistImageMaxDelay {
+		return artistImageMaxDelay
+	}
+	return d
+}
+
+func sleepArtistImage(ctx context.Context, d time.Duration) error {
+	if d <= 0 {
+		return nil
+	}
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
+	}
+}
+
+func isTransientArtistImageStatus(code int) bool {
+	return code == http.StatusTooManyRequests ||
+		code == http.StatusServiceUnavailable ||
+		code == http.StatusBadGateway ||
+		code == http.StatusGatewayTimeout
+}
+
+// artistImageDoGET performs GET with polite spacing and exponential backoff on
+// transient failures (network errors, 429, 502/503/504).
+func (s *Service) artistImageDoGET(ctx context.Context, rawURL string, accept string) ([]byte, int, error) {
+	var lastErr error
+	for attempt := 0; attempt < artistImageMaxAttempts; attempt++ {
+		if attempt > 0 {
+			if err := sleepArtistImage(ctx, artistImageBackoffDelay(attempt-1)); err != nil {
+				return nil, 0, err
+			}
+		}
+		if err := waitArtistImage(ctx); err != nil {
+			return nil, 0, err
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+		if err != nil {
+			return nil, 0, err
+		}
+		req.Header.Set("User-Agent", artistImageUA)
+		if accept != "" {
+			req.Header.Set("Accept", accept)
+		}
+		res, err := s.httpClient.Do(req)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		body, _ := io.ReadAll(io.LimitReader(res.Body, 1<<20))
+		_ = res.Body.Close()
+		if isTransientArtistImageStatus(res.StatusCode) {
+			lastErr = fmt.Errorf("status %d", res.StatusCode)
+			continue
+		}
+		return body, res.StatusCode, nil
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("artist image request failed")
+	}
+	return nil, 0, lastErr
+}
+
 // ResolveArtistImage returns a remote thumbnail URL for an artist.
 // Prefer Wikidata P18 via MusicBrainz ID (P434) → Commons width=250;
 // fall back to Deezer picture_medium matched by artist name.
-// Returns ("", nil) when no image is found. Rate-limit / 429 errors are soft-failed
-// (empty URL) so Add Artist stays responsive.
+// Returns ("", nil) when no image is found. Transient upstream errors are
+// retried with exponential backoff; if retries are exhausted, the last error
+// is returned so callers can back off before trying again.
 //
 // TheAudioDB is intentionally not used: free-tier ToS restricts publishing apps
 // without a paid subscription.
 func (s *Service) ResolveArtistImage(ctx context.Context, mbid, name string) (string, error) {
 	mbid = strings.TrimSpace(mbid)
 	name = strings.TrimSpace(name)
+	var lastErr error
 	if mbid != "" {
-		if u, err := s.wikidataArtistImage(ctx, mbid); err == nil && u != "" {
+		u, err := s.wikidataArtistImage(ctx, mbid)
+		if err == nil && u != "" {
 			return u, nil
+		}
+		if err != nil {
+			lastErr = err
 		}
 	}
 	if name != "" {
-		if u, err := s.deezerArtistImage(ctx, name); err == nil && u != "" {
+		u, err := s.deezerArtistImage(ctx, name)
+		if err == nil && u != "" {
 			return u, nil
 		}
+		if err != nil {
+			lastErr = err
+		}
+	}
+	if lastErr != nil {
+		return "", lastErr
 	}
 	return "", nil
 }
@@ -99,32 +194,18 @@ type deezerSearchResponse struct {
 }
 
 func (s *Service) wikidataArtistImage(ctx context.Context, mbid string) (string, error) {
-	if err := waitArtistImage(ctx); err != nil {
-		return "", err
-	}
 	// P434 = MusicBrainz artist ID; P18 = image.
 	query := fmt.Sprintf(`SELECT ?img WHERE {
   ?item wdt:P434 %q .
   ?item wdt:P18 ?img .
 } LIMIT 1`, mbid)
 	u := s.wikidataSPARQLBase() + "?format=json&query=" + url.QueryEscape(query)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	body, status, err := s.artistImageDoGET(ctx, u, "application/sparql-results+json")
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("User-Agent", artistImageUA)
-	req.Header.Set("Accept", "application/sparql-results+json")
-	res, err := s.httpClient.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer res.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(res.Body, 1<<20))
-	if res.StatusCode == http.StatusTooManyRequests || res.StatusCode == http.StatusServiceUnavailable {
-		return "", nil
-	}
-	if res.StatusCode >= 300 {
-		return "", fmt.Errorf("wikidata sparql status %d", res.StatusCode)
+	if status >= 300 {
+		return "", fmt.Errorf("wikidata sparql status %d", status)
 	}
 	var parsed wikidataSPARQLResponse
 	if err := json.Unmarshal(body, &parsed); err != nil {
@@ -163,26 +244,13 @@ func commonsThumbURL(fileURI string, width int) string {
 }
 
 func (s *Service) deezerArtistImage(ctx context.Context, name string) (string, error) {
-	if err := waitArtistImage(ctx); err != nil {
-		return "", err
-	}
 	u := fmt.Sprintf("%s/search/artist?q=%s&limit=5", s.deezerAPIBase(), url.QueryEscape(name))
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	body, status, err := s.artistImageDoGET(ctx, u, "")
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("User-Agent", artistImageUA)
-	res, err := s.httpClient.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer res.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(res.Body, 1<<20))
-	if res.StatusCode == http.StatusTooManyRequests || res.StatusCode == http.StatusServiceUnavailable {
-		return "", nil
-	}
-	if res.StatusCode >= 300 {
-		return "", fmt.Errorf("deezer status %d", res.StatusCode)
+	if status >= 300 {
+		return "", fmt.Errorf("deezer status %d", status)
 	}
 	var parsed deezerSearchResponse
 	if err := json.Unmarshal(body, &parsed); err != nil {
