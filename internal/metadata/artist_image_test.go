@@ -55,11 +55,11 @@ func TestArtistImageBackoffDelay(t *testing.T) {
 }
 
 func TestCommonsThumbURL(t *testing.T) {
-	got := commonsThumbURL("http://commons.wikimedia.org/wiki/Special:FilePath/Radiohead.jpg", 250)
+	got := commonsThumbURL("http://commons.wikimedia.org/wiki/Special:FilePath/Radiohead.jpg", artistThumbWidth)
 	if !strings.HasPrefix(got, "https://commons.wikimedia.org/wiki/Special:FilePath/Radiohead.jpg") {
 		t.Fatalf("got %q", got)
 	}
-	if !strings.Contains(got, "width=250") {
+	if !strings.Contains(got, "width=128") {
 		t.Fatalf("missing width: %q", got)
 	}
 }
@@ -87,7 +87,7 @@ func TestResolveArtistImagePrefersWikidata(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(u, "Special:FilePath/Test_Artist.jpg") || !strings.Contains(u, "width=250") {
+	if !strings.Contains(u, "Special:FilePath/Test_Artist.jpg") || !strings.Contains(u, "width=128") {
 		t.Fatalf("got %q", u)
 	}
 }
@@ -116,7 +116,7 @@ func TestResolveArtistImageFallsBackToDeezer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if u != "https://cdn.example/med.jpg" {
+	if u != "https://cdn.example/sm.jpg" {
 		t.Fatalf("got %q", u)
 	}
 }

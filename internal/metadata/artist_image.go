@@ -17,8 +17,9 @@ import (
 const (
 	defaultWikidataSPARQL = "https://query.wikidata.org/sparql"
 	defaultDeezerBase     = "https://api.deezer.com"
-	// Thumbnail width for Commons Special:FilePath — enough for Music grid thumbs.
-	artistThumbWidth = 250
+	// Thumbnail width for Commons Special:FilePath — Music grid renders ~54px
+	// (≈108 @2x); 128 covers that without pulling full-size portraits.
+	artistThumbWidth = 128
 	artistImageUA    = "Replacearr/1.0 (https://github.com/replacearr/replacearr; music artist thumbs)"
 
 )
@@ -126,8 +127,8 @@ func (s *Service) artistImageDoGET(ctx context.Context, rawURL string, accept st
 }
 
 // ResolveArtistImage returns a remote thumbnail URL for an artist.
-// Prefer Wikidata P18 via MusicBrainz ID (P434) → Commons width=250;
-// fall back to Deezer picture_medium matched by artist name.
+// Prefer Wikidata P18 via MusicBrainz ID (P434) → Commons width=128;
+// fall back to Deezer picture_small matched by artist name.
 // Returns ("", nil) when no image is found. Transient upstream errors are
 // retried with exponential backoff; if retries are exhausted, the last error
 // is returned so callers can back off before trying again.
@@ -266,8 +267,8 @@ func (s *Service) deezerArtistImage(ctx context.Context, name string) (string, e
 			break
 		}
 	}
-	// Prefer medium (~250px) for grid thumbs; fall back to small/default.
-	for _, candidate := range []string{pick.PictureMedium, pick.PictureSmall, pick.Picture} {
+	// Prefer small (~56px) for the ~54px grid; fall back to medium/default.
+	for _, candidate := range []string{pick.PictureSmall, pick.PictureMedium, pick.Picture} {
 		if strings.TrimSpace(candidate) != "" {
 			return strings.TrimSpace(candidate), nil
 		}
