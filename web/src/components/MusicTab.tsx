@@ -187,9 +187,13 @@ export const MusicTab: React.FC<MusicTabProps> = ({
     try {
       const list = await api.getAlbums(a.id);
       setAlbums(list);
-      const cover = pickArtistCardCover(list);
-      if (cover) {
-        setArtistCoverById((prev) => ({ ...prev, [a.id]: cover }));
+      // Only fall back to album art when we still have no artist portrait.
+      const portrait = getPosterUrl(a) || artistCoverById[a.id];
+      if (!portrait) {
+        const cover = pickArtistCardCover(list);
+        if (cover) {
+          setArtistCoverById((prev) => ({ ...prev, [a.id]: cover }));
+        }
       }
     } catch {
       setAlbums([]);
