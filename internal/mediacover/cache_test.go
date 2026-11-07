@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/replacearr/replacearr/internal/domain"
 )
@@ -31,6 +32,61 @@ func TestCacheKeyMovie(t *testing.T) {
 	}
 	if got := CacheKeyMovie("", 42, 1); got != "tmdb-42" {
 		t.Fatalf("fallback tmdb: %q", got)
+	}
+}
+
+func TestCacheKeyAlbum(t *testing.T) {
+	if got := CacheKeyAlbum("8dd3704d-201b-4e8e-8481-9681dcde9981", 1); got != "mbid-8dd3704d-201b-4e8e-8481-9681dcde9981" {
+		t.Fatalf("prefer mbid: %q", got)
+	}
+	if got := CacheKeyAlbum("", 7); got != "7" {
+		t.Fatalf("fallback id: %q", got)
+	}
+	if got := normalizeMediaType("album"); got != "album" {
+		t.Fatalf("album media type: %q", got)
+	}
+	if got := normalizeMediaType("music"); got != "music" {
+		t.Fatalf("music media type: %q", got)
+	}
+}
+
+func TestIsPosterAspectAllowsSquare(t *testing.T) {
+	if !isPosterAspect(250, 250) {
+		t.Fatal("square album cover should pass")
+	}
+}
+
+// Live CAA redirect + square JPEG → WebP. Skips when Cover Art Archive is unreachable.
+// Fixture: Ill Ron Hubbard (Kabuto the Python) RG 8dd3704d-201b-4e8e-8481-9681dcde9981.
+// Companion manual fixture (not used here): Polyneuroparty pt. 2 (Yakui the Maid)
+// release b1d42305-e61c-4607-a8d2-23a27dd17212 — license CC BY-NC-ND 3.0.
+func TestEnsureLiveCAAAlbumCover(t *testing.T) {
+	if testing.Short() {
+		t.Skip("network")
+	}
+	mbid := "8dd3704d-201b-4e8e-8481-9681dcde9981"
+	remote := "https://coverartarchive.org/release-group/" + mbid + "/front-250"
+	res, err := http.Get(remote)
+	if err != nil {
+		t.Skipf("CAA unreachable: %v", err)
+	}
+	_ = res.Body.Close()
+	if res.StatusCode >= 400 {
+		t.Skipf("CAA status %d", res.StatusCode)
+	}
+
+	root := t.TempDir()
+	store := NewStore(root, &http.Client{Timeout: 45 * time.Second})
+	key := CacheKeyAlbum(mbid, 1)
+	local, err := store.Ensure("album", key, 1, remote, 1)
+	if err != nil {
+		t.Fatalf("Ensure CAA cover: %v", err)
+	}
+	if local != "/api/v1/mediacover/album/1/poster.webp" {
+		t.Fatalf("local url %q", local)
+	}
+	if !store.Cached("album", key) {
+		t.Fatal("expected cached album cover")
 	}
 }
 

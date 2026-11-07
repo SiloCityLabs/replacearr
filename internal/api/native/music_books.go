@@ -67,7 +67,18 @@ func (s *Server) syncArtistDiscography(r *http.Request, artist *domain.Artist) {
 	if err != nil || len(items) == 0 {
 		return
 	}
-	_ = s.store.ReplaceArtistDiscography(artist.ID, items)
+	if err := s.store.ReplaceArtistDiscography(artist.ID, items); err != nil {
+		return
+	}
+	albums, err := s.store.ListAlbums(artist.ID)
+	if err != nil {
+		return
+	}
+	for i := range albums {
+		albums[i].Images = bindLocalPosterURL("album", albums[i].ID, albums[i].Images)
+		_, _ = s.store.UpdateAlbum(albums[i])
+		s.cacheCoverAsync("album", albums[i].ID, albums[i].Images)
+	}
 }
 
 func (s *Server) handleDeleteArtist(w http.ResponseWriter, r *http.Request) {
@@ -113,6 +124,9 @@ func (s *Server) handleListAlbums(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
+	}
+	for i := range items {
+		items[i].Images = s.hydrateLibraryPosters("album", items[i].ID, items[i].Images)
 	}
 	writeJSON(w, http.StatusOK, items)
 }

@@ -8,6 +8,8 @@ Replacearr ships a first-class **Music** library powered by **MusicBrainz** (WS2
 - Foreign IDs are MusicBrainz UUIDs (`foreignArtistId`, `foreignAlbumId`, `foreignTrackId`)
 - Root folder media type: `music` (default path `/data/Music`)
 - Quality profile media type: `music` (MP3 / AAC / FLAC ladder)
+- Album covers come from Cover Art Archive (`front-250` for the release-group) and are cached via mediacover at `/api/v1/mediacover/album/{id}/poster.webp` (distinct from artist `music/` keys)
+- Manual cover QA fixtures: *Ill Ron Hubbard* (Kabuto the Python, RG `8dd3704d-201b-4e8e-8481-9681dcde9981`); *Polyneuroparty pt. 2* (Yakui the Maid, release `b1d42305-e61c-4607-a8d2-23a27dd17212`, **CC BY-NC-ND 3.0**). Do not use Cat Steps / Daisuke Tanabe.
 
 ## Native API
 
